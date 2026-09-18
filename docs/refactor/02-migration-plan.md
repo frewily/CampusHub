@@ -58,6 +58,8 @@
 
 建议提交：`docs: define CampusHub domain model`
 
+状态：已完成，并通过提交后范围、证据和格式审查。
+
 #### Phase 1B 正确性修复
 
 - 修复 Feed 写入用户 key。

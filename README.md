@@ -5,11 +5,12 @@ CampusHub is a gradual refactoring of a legacy local-services teaching project i
 ## Current status
 
 - Phase 0 repository audit is complete.
-- Phase 0.5 establishes the build, test and Redis Stream startup baseline.
+- Phase 0.5 build, test and Redis Stream startup baseline is complete.
+- Phase 1A defines the target domain model; Phase 1B correctness work has not started.
 - The existing package and database names remain `hmdp` until the dedicated identity migration stage.
 - End-to-end behavior and performance have not yet been verified.
 
-See the [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md) and [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md).
+See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md) and [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md).
 
 ## Requirements
 
