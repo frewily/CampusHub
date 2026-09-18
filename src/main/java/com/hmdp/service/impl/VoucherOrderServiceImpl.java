@@ -20,7 +20,7 @@ import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -59,6 +59,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private RedissonClient redissonClient;
+
+    @Resource
+    private TransactionTemplate transactionTemplate;
 
     @Value("${campushub.order.stream-consumer-enabled:true}")
     private boolean streamConsumerEnabled;
@@ -232,15 +235,12 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         //2.尝试获取锁
         boolean isLock = lock.tryLock();
         if (!isLock) {
-            //获取锁失败，记录日志并返回
-            log.error("不允许重复下单");
-            return;
+            // 锁竞争属于可重试失败，抛出异常让 Stream 消息保留在 pending list
+            throw new IllegalStateException("订单处理锁竞争，稍后重试");
         }
         try {
-            //3.创建订单（直接调用，不使用代理）
+            //3.创建订单；持久化失败必须向上传播，外层不会 ACK
             createVoucherOrder(voucherOrder);
-        } catch (Exception e) {
-            log.error("创建订单异常", e);
         } finally {
             //4.释放锁
             lock.unlock();
@@ -303,16 +303,19 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }*/
 
     @Override
-    @Transactional
     public void createVoucherOrder(VoucherOrder voucherOrder) {
+        transactionTemplate.executeWithoutResult(status -> persistVoucherOrder(voucherOrder));
+    }
+
+    private void persistVoucherOrder(VoucherOrder voucherOrder) {
         //1.获取用户ID
         Long userId = voucherOrder.getUserId();
         //2.一人一单逻辑
         int count = query().eq("user_id", userId)
                 .eq("voucher_id", voucherOrder.getVoucherId()).count();
         if (count > 0) {
-            //用户已经购买过
-            log.error("用户已经下过单");
+            // 重复消费命中数据库幂等保护，视为订单已成功落库
+            log.info("订单已存在，跳过重复持久化，userId={}, voucherId={}", userId, voucherOrder.getVoucherId());
             return;
         }
         //3.扣减库存
@@ -323,11 +326,11 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 .gt("stock", 0)
                 .update();
         if (!success) {
-            //扣减库存失败
-            log.error("库存不足");
-            return;
+            throw new IllegalStateException("数据库库存扣减失败，订单稍后重试");
         }
         //4.创建订单
-        save(voucherOrder);
+        if (!save(voucherOrder)) {
+            throw new IllegalStateException("订单写入失败，事务将回滚");
+        }
     }
 }

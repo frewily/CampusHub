@@ -73,6 +73,8 @@
 
 建议提交：`fix: stabilize feed cache and flash sale invariants`
 
+状态：已完成实现与验证。Feed、关注、逻辑过期缓存、订单 ACK/事务及数据库唯一约束的证据见 `docs/refactor/04-phase-1b-correctness.md`。
+
 #### Phase 1C 项目标识迁移
 
 - 更新 Maven 坐标、应用名和项目描述。
@@ -182,5 +184,7 @@
 
 - Phase 0：已完成，并通过提交后范围、证据和格式审查。
 - Phase 0.5：已完成，并通过提交后范围、证据和格式审查。验证记录见 `docs/refactor/03-phase-0.5-baseline.md`。
-- Phase 1 至 Phase 6：尚未开始。
+- Phase 1A：已完成，并通过提交后范围、证据和格式审查。
+- Phase 1B：已完成实现与验证，验证记录见 `docs/refactor/04-phase-1b-correctness.md`。
+- Phase 1C 至 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。

@@ -125,8 +125,18 @@ public class CacheClient {
         String json = stringRedisTemplate.opsForValue().get(key);
         //2 判断是否存在
         if (StrUtil.isBlank(json)) {
-            //3 不存在，返回null
-            return null;
+            //2.1 命中缓存空值，避免重复回源
+            if (json != null) {
+                return null;
+            }
+            //2.2 冷缓存必须回源，并使用统一的逻辑过期结构写入
+            R loaded = dbFallback.apply(id);
+            if (loaded == null) {
+                stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+                return null;
+            }
+            this.setWithLogicalExpire(key, loaded, time, unit);
+            return loaded;
         }
         //4 命中，需要把json反序列化为对象
         RedisData redisData = JSONUtil.toBean(json, RedisData.class);
@@ -148,9 +158,14 @@ public class CacheClient {
             //6.3 成功，开启独立线程，实现缓存重建
             CACHE_REBUILD_EXECUTOR.submit(() -> {
                 try {
-                    this.set(key, dbFallback.apply(id), time, unit);
+                    R loaded = dbFallback.apply(id);
+                    if (loaded == null) {
+                        stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+                    } else {
+                        this.setWithLogicalExpire(key, loaded, time, unit);
+                    }
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    log.error("重建逻辑过期缓存失败，key={}", key, e);
                 } finally {
                     //7 释放锁
                     unLock(lockKey);

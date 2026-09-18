@@ -6,11 +6,11 @@ CampusHub is a gradual refactoring of a legacy local-services teaching project i
 
 - Phase 0 repository audit is complete.
 - Phase 0.5 build, test and Redis Stream startup baseline is complete.
-- Phase 1A defines the target domain model; Phase 1B correctness work has not started.
+- Phase 1A defines the target domain model; Phase 1B repairs the confirmed Feed, follow, logical-expiry cache and asynchronous-order correctness defects.
 - The existing package and database names remain `hmdp` until the dedicated identity migration stage.
 - End-to-end behavior and performance have not yet been verified.
 
-See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md) and [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md).
+See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md) and [Phase 1B verification record](docs/refactor/04-phase-1b-correctness.md).
 
 ## Requirements
 
@@ -38,6 +38,12 @@ Initialize the existing legacy schema before starting the application:
 mysql -u "$DB_USERNAME" -p hmdp < src/main/resources/db/hmdp.sql
 ```
 
+Apply the versioned Phase 1B constraints after the legacy schema. The migration is safe to run again after it succeeds, but it deliberately fails if duplicate follow or voucher-order rows already violate the new business rules:
+
+```bash
+mysql -u "$DB_USERNAME" -p hmdp < src/main/resources/db/migration/V001__add_business_unique_constraints.sql
+```
+
 The application creates the Redis Stream `stream.orders` and consumer group `g1` when the order consumer is enabled.
 
 ## Build and test
@@ -58,4 +64,4 @@ RUN_MANUAL_INTEGRATION_TESTS=true ./mvnw -Dtest=HmDianPingApplicationTests test
 ./mvnw spring-boot:run
 ```
 
-The service listens on port `8081` by default. Authentication, authorization, Feed correctness, order reliability and deployment support are still scheduled work; consult the migration plan before treating these capabilities as complete.
+The service listens on port `8081` by default. Authentication, authorization, full end-to-end behavior, reliable-consumer recovery, performance and deployment support are still scheduled work; consult the migration plan before treating these capabilities as complete.
