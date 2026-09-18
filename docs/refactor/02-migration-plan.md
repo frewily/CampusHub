@@ -85,6 +85,8 @@
 
 建议提交：`refactor: adopt CampusHub project identity`
 
+状态：已完成实现与验证。Maven、Spring 和 Java 根包身份及兼容边界见 `docs/refactor/05-phase-1c-identity.md`。
+
 ### Phase 2 后端基础工程
 
 建议拆成四个可独立审查的提交：
@@ -186,5 +188,6 @@
 - Phase 0.5：已完成，并通过提交后范围、证据和格式审查。验证记录见 `docs/refactor/03-phase-0.5-baseline.md`。
 - Phase 1A：已完成，并通过提交后范围、证据和格式审查。
 - Phase 1B：已完成实现与验证，验证记录见 `docs/refactor/04-phase-1b-correctness.md`。
-- Phase 1C 至 Phase 6：尚未开始。
+- Phase 1C：已完成实现与验证，验证记录见 `docs/refactor/05-phase-1c-identity.md`。
+- Phase 2 至 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。

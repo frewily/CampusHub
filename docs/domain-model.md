@@ -153,7 +153,7 @@ Notification 只定义为未来独立模块。只有在订单状态、活动结�
 
 ### 6.1 保留兼容
 
-- Phase 1B 修复正确性时继续使用 `com.hmdp`、旧 Entity 和旧表名，避免业务修复与大规模重命名互相干扰。
+- Phase 1B 修复正确性时继续使用 `com.hmdp`；Phase 1C 已将 Java 根包迁移为 `io.github.frewily.campushub`，旧 Entity 和旧表名继续兼容，避免身份迁移与领域重建互相干扰。
 - `tb_shop` 暂时承载 Store，`tb_blog` 暂时承载 Post，`tb_voucher` 暂时承载 Promotion。
 - Redis key 和接口路径在替代实现完成验证前保持兼容；迁移时要有读写过渡或明确版本边界。
 - 新增数据库约束和字段必须使用可重复执行、可审查的版本化迁移脚本，不能继续只编辑全量 `hmdp.sql`。

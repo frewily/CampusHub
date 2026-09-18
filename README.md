@@ -1,16 +1,17 @@
 # CampusHub
 
-CampusHub is a gradual refactoring of a legacy local-services teaching project into a campus life and merchant services platform. The repository is currently establishing a reproducible baseline before changing the domain model or adding infrastructure.
+CampusHub is a gradual refactoring of a legacy local-services teaching project into a campus life and merchant services platform.
 
 ## Current status
 
 - Phase 0 repository audit is complete.
 - Phase 0.5 build, test and Redis Stream startup baseline is complete.
 - Phase 1A defines the target domain model; Phase 1B repairs the confirmed Feed, follow, logical-expiry cache and asynchronous-order correctness defects.
-- The existing package and database names remain `hmdp` until the dedicated identity migration stage.
+- Phase 1C adopts the `io.github.frewily.campushub` root package and CampusHub application identity.
+- The legacy `hmdp` database schema, table names, HTTP routes and Redis keys remain compatible until their dedicated migration stages.
 - End-to-end behavior and performance have not yet been verified.
 
-See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md) and [Phase 1B verification record](docs/refactor/04-phase-1b-correctness.md).
+See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md), [Phase 1B verification record](docs/refactor/04-phase-1b-correctness.md), [Phase 1C verification record](docs/refactor/05-phase-1c-identity.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md).
 
 ## Requirements
 
@@ -55,7 +56,7 @@ The application creates the Redis Stream `stream.orders` and consumer group `g1`
 The default test suite contains only tests that do not require MySQL or Redis. The legacy data-loading and Redis experiments are retained as manual integration helpers. Run them only against an isolated local environment:
 
 ```bash
-RUN_MANUAL_INTEGRATION_TESTS=true ./mvnw -Dtest=HmDianPingApplicationTests test
+RUN_MANUAL_INTEGRATION_TESTS=true ./mvnw -Dtest=CampusHubApplicationTests test
 ```
 
 ## Run
