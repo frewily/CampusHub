@@ -1,0 +1,3 @@
+campushub:
+  order:
+    stream-consumer-enabled: false

@@ -25,3 +25,6 @@ mybatis-plus:
 logging:
   level:
     com.hmdp: debug
+campushub:
+  order:
+    stream-consumer-enabled: ${ORDER_STREAM_CONSUMER_ENABLED:true}

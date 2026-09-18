@@ -5,10 +5,12 @@ import com.hmdp.service.impl.ShopServiceImpl;
 import com.hmdp.utils.CacheClient;
 import com.hmdp.utils.RedisIdWorker;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.test.context.ActiveProfiles;
 
 import javax.annotation.Resource;
 
@@ -24,6 +26,8 @@ import java.util.stream.Collectors;
 import static com.hmdp.utils.RedisConstants.CACHE_SHOP_KEY;
 
 @SpringBootTest
+@ActiveProfiles("test")
+@EnabledIfEnvironmentVariable(named = "RUN_MANUAL_INTEGRATION_TESTS", matches = "true")
 class HmDianPingApplicationTests {
 
     @Resource
