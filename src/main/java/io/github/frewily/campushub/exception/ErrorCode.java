@@ -8,6 +8,7 @@ public enum ErrorCode {
 
     VALIDATION_FAILED("VALIDATION_FAILED", "请求参数校验失败", HttpStatus.BAD_REQUEST),
     AUTHENTICATION_FAILED("AUTHENTICATION_FAILED", "认证失败", HttpStatus.UNAUTHORIZED),
+    RATE_LIMITED("RATE_LIMITED", "请求过于频繁", HttpStatus.TOO_MANY_REQUESTS),
     NOT_FOUND("NOT_FOUND", "请求的资源不存在", HttpStatus.NOT_FOUND),
     CONFLICT("CONFLICT", "请求与当前资源状态冲突", HttpStatus.CONFLICT),
     NOT_IMPLEMENTED("NOT_IMPLEMENTED", "功能尚未实现", HttpStatus.NOT_IMPLEMENTED),

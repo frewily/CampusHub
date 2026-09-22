@@ -9,10 +9,11 @@ CampusHub is a gradual refactoring of a legacy local-services teaching project i
 - Phase 1A defines the target domain model; Phase 1B repairs the confirmed Feed, follow, logical-expiry cache and asynchronous-order correctness defects.
 - Phase 1C adopts the `io.github.frewily.campushub` root package and CampusHub application identity.
 - Phase 2A introduces typed API errors, Bean Validation and centralized exception handling.
+- Phase 2B adds verification-code throttling, one-time code consumption, Redis Token logout and request-context cleanup.
 - The legacy `hmdp` database schema, table names, HTTP routes and Redis keys remain compatible until their dedicated migration stages.
 - End-to-end behavior and performance have not yet been verified.
 
-See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md), [Phase 1B verification record](docs/refactor/04-phase-1b-correctness.md), [Phase 1C verification record](docs/refactor/05-phase-1c-identity.md), [Phase 2A verification record](docs/refactor/06-phase-2a-api-errors-validation.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md).
+See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md), [Phase 1B verification record](docs/refactor/04-phase-1b-correctness.md), [Phase 1C verification record](docs/refactor/05-phase-1c-identity.md), [Phase 2A verification record](docs/refactor/06-phase-2a-api-errors-validation.md), [Phase 2B verification record](docs/refactor/07-phase-2b-session-lifecycle.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md).
 
 ## Requirements
 

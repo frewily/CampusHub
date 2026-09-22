@@ -3,6 +3,11 @@ package io.github.frewily.campushub.utils;
 public class RedisConstants {
     public static final String LOGIN_CODE_KEY = "login:code:";
     public static final Long LOGIN_CODE_TTL = 2L;
+    public static final String LOGIN_CODE_COOLDOWN_KEY = "login:code:cooldown:";
+    public static final Long LOGIN_CODE_COOLDOWN_TTL = 60L;
+    public static final String LOGIN_FAILURE_KEY = "login:failure:";
+    public static final Long LOGIN_FAILURE_TTL = 10L;
+    public static final long LOGIN_FAILURE_LIMIT = 5L;
     public static final String LOGIN_USER_KEY = "login:token:";
     public static final Long LOGIN_USER_TTL = 36000L;
 

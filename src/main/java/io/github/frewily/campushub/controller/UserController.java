@@ -7,8 +7,6 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.entity.UserInfo;
-import io.github.frewily.campushub.exception.BusinessException;
-import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.service.IUserInfoService;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.UserHolder;
@@ -17,7 +15,6 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
-import javax.servlet.http.HttpSession;
 import javax.validation.Valid;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.Pattern;
@@ -44,9 +41,8 @@ public class UserController {
     public Result sendCode(
             @NotBlank(message = "手机号不能为空")
             @Pattern(regexp = PHONE_REGEX, message = "手机号格式错误")
-            @RequestParam("phone") String phone,
-            HttpSession session) {
-        return userService.sendCode(phone, session);
+            @RequestParam("phone") String phone) {
+        return userService.sendCode(phone);
     }
 
     /**
@@ -56,13 +52,10 @@ public class UserController {
      *                  - code: 验证码（用于验证码登录）
      *                  - password: 密码（预留字段，当前未使用）
      *                  通过 @RequestBody 注解，Spring 会将请求体中的 JSON 数据自动转换为此对象
-     * @param session HTTP 会话对象，由 Spring MVC 自动注入，用于：
-     *                - 存储和校验验证码（之前发送验证码时保存在 session 中）
-     *                - 保存登录状态（登录成功后将用户信息存入 session）
      */
     @PostMapping("/login")
-    public Result login(@Valid @RequestBody LoginFormDTO loginForm, HttpSession session){
-        return userService.login(loginForm, session);
+    public Result login(@Valid @RequestBody LoginFormDTO loginForm) {
+        return userService.login(loginForm);
     }
 
     /**
@@ -70,9 +63,8 @@ public class UserController {
      * @return 无
      */
     @PostMapping("/logout")
-    public Result logout(){
-        // TODO 实现登出功能
-        throw new BusinessException(ErrorCode.NOT_IMPLEMENTED, "登出功能尚未实现");
+    public Result logout(@RequestHeader("authorization") String token) {
+        return userService.logout(token);
     }
 
     @GetMapping("/me")

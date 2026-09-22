@@ -15,16 +15,16 @@ import io.github.frewily.campushub.mapper.UserMapper;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.RegexUtils;
 import io.github.frewily.campushub.utils.UserHolder;
-import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
-import javax.servlet.http.HttpSession;
-
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,51 +34,108 @@ import static io.github.frewily.campushub.utils.RedisConstants.*;
 import static io.github.frewily.campushub.utils.SystemConstants.USER_NICK_NAME_PREFIX;
 
 @Service
-@Slf4j
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IUserService {
+
+    private static final DefaultRedisScript<Long> LOGIN_CODE_CONSUME_SCRIPT;
+    private static final DefaultRedisScript<Long> LOGIN_FAILURE_INCREMENT_SCRIPT;
+
+    static {
+        LOGIN_CODE_CONSUME_SCRIPT = new DefaultRedisScript<>();
+        LOGIN_CODE_CONSUME_SCRIPT.setLocation(new ClassPathResource("login-code-consume.lua"));
+        LOGIN_CODE_CONSUME_SCRIPT.setResultType(Long.class);
+
+        LOGIN_FAILURE_INCREMENT_SCRIPT = new DefaultRedisScript<>();
+        LOGIN_FAILURE_INCREMENT_SCRIPT.setLocation(new ClassPathResource("login-failure-increment.lua"));
+        LOGIN_FAILURE_INCREMENT_SCRIPT.setResultType(Long.class);
+    }
+
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
     @Override
-    public Result sendCode(String phone, HttpSession session) {
+    public Result sendCode(String phone) {
         if (RegexUtils.isPhoneInvalid(phone)) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "手机号格式错误");
         }
+        String cooldownKey = LOGIN_CODE_COOLDOWN_KEY + phone;
+        Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(
+                cooldownKey,
+                "1",
+                LOGIN_CODE_COOLDOWN_TTL,
+                TimeUnit.SECONDS
+        );
+        if (!Boolean.TRUE.equals(acquired)) {
+            throw new BusinessException(ErrorCode.RATE_LIMITED, "验证码发送过于频繁，请稍后再试");
+        }
         String code = RandomUtil.randomNumbers(6);
-        stringRedisTemplate.opsForValue().set(LOGIN_CODE_KEY + phone, code, LOGIN_CODE_TTL, TimeUnit.MINUTES);
-        log.debug("发送验证码成功，验证码：{}", code);
+        try {
+            stringRedisTemplate.opsForValue().set(
+                    LOGIN_CODE_KEY + phone,
+                    code,
+                    LOGIN_CODE_TTL,
+                    TimeUnit.MINUTES
+            );
+        } catch (RuntimeException exception) {
+            stringRedisTemplate.delete(cooldownKey);
+            throw exception;
+        }
         return Result.ok("发送验证码成功");
-
     }
 
     @Override
-    public Result login(LoginFormDTO loginForm, HttpSession session) {
+    public Result login(LoginFormDTO loginForm) {
         String phone = loginForm.getPhone();
-        if(phone == null || RegexUtils.isPhoneInvalid(phone)){
+        if (phone == null || RegexUtils.isPhoneInvalid(phone)) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "手机号格式错误");
         }
-        String code = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
+        String failureKey = LOGIN_FAILURE_KEY + phone;
+        String failureCount = stringRedisTemplate.opsForValue().get(failureKey);
+        if (failureCount != null && Long.parseLong(failureCount) >= LOGIN_FAILURE_LIMIT) {
+            throw loginRateLimited();
+        }
         String cacheCode = loginForm.getCode();
-        if (code == null || !code.equals(cacheCode)) {
-            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED, "验证码错误");
+        if (cacheCode == null) {
+            throw recordLoginFailure(failureKey);
+        }
+        Long consumed = stringRedisTemplate.execute(
+                LOGIN_CODE_CONSUME_SCRIPT,
+                Collections.singletonList(LOGIN_CODE_KEY + phone),
+                cacheCode
+        );
+        if (consumed == null) {
+            throw new IllegalStateException("验证码校验未返回结果");
+        }
+        if (consumed != 1L) {
+            throw recordLoginFailure(failureKey);
         }
         User user = query().eq("phone", phone).one();
         if (user == null) {
-                user = createUserWithPhone(phone);
+            user = createUserWithPhone(phone);
         }
         String token = UUID.randomUUID().toString(true);
         // 只将脱敏后的 UserDTO 写入会话缓存。
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
         // Redis Hash 使用字符串 Map，避免直接序列化完整用户实体。
-        Map<String, Object> usermap = BeanUtil.beanToMap(userDTO, new HashMap<>(),
+        Map<String, Object> userMap = BeanUtil.beanToMap(userDTO, new HashMap<>(),
                 CopyOptions.create()
                         .setIgnoreNullValue(true)
                         .setFieldValueEditor((fieldName, fieldValue) -> fieldValue != null ? fieldValue.toString() : "")
         );
         String tokenKey = LOGIN_USER_KEY + token;
-        stringRedisTemplate.opsForHash().putAll(tokenKey, usermap);
+        stringRedisTemplate.opsForHash().putAll(tokenKey, userMap);
         stringRedisTemplate.expire(tokenKey, LOGIN_USER_TTL, TimeUnit.MINUTES);
+        stringRedisTemplate.delete(failureKey);
         return Result.ok(token);
+    }
+
+    @Override
+    public Result logout(String token) {
+        if (token == null || token.trim().isEmpty()) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED, "认证信息缺失");
+        }
+        stringRedisTemplate.delete(LOGIN_USER_KEY + token.trim());
+        UserHolder.removeUser();
+        return Result.ok();
     }
 
     @Override
@@ -142,5 +199,24 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         user.setNickName(USER_NICK_NAME_PREFIX + RandomUtil.randomString(10));
         save(user);
         return user;
+    }
+
+    private BusinessException recordLoginFailure(String failureKey) {
+        Long failures = stringRedisTemplate.execute(
+                LOGIN_FAILURE_INCREMENT_SCRIPT,
+                Collections.singletonList(failureKey),
+                String.valueOf(TimeUnit.MINUTES.toSeconds(LOGIN_FAILURE_TTL))
+        );
+        if (failures == null) {
+            throw new IllegalStateException("登录失败计数未返回结果");
+        }
+        if (failures >= LOGIN_FAILURE_LIMIT) {
+            return loginRateLimited();
+        }
+        return new BusinessException(ErrorCode.AUTHENTICATION_FAILED, "验证码错误");
+    }
+
+    private BusinessException loginRateLimited() {
+        return new BusinessException(ErrorCode.RATE_LIMITED, "登录失败次数过多，请稍后再试");
     }
 }

@@ -96,6 +96,7 @@
    - 状态：已完成实现与验证，记录见 `docs/refactor/06-phase-2a-api-errors-validation.md`。
 2. `feat: implement session lifecycle and logout`
    - 删除验证码日志、实现登出、清理 ThreadLocal、限制验证码发送和失败次数。
+   - 状态：已完成实现与验证，记录见 `docs/refactor/07-phase-2b-session-lifecycle.md`。
 3. `feat: enforce role and resource authorization`
    - 选择并引入 Spring Security；实现 USER、MERCHANT、ADMIN 和资源归属校验。
 4. `refactor: separate api models from persistence entities`
@@ -191,5 +192,6 @@
 - Phase 1B：已完成实现与验证，验证记录见 `docs/refactor/04-phase-1b-correctness.md`。
 - Phase 1C：已完成实现与验证，验证记录见 `docs/refactor/05-phase-1c-identity.md`。
 - Phase 2A：已完成实现与验证，类型化错误、参数校验和全局异常处理记录见 `docs/refactor/06-phase-2a-api-errors-validation.md`。
-- Phase 2B 至 Phase 6：尚未开始。
+- Phase 2B：已完成实现与验证，会话生命周期、登出和验证码安全记录见 `docs/refactor/07-phase-2b-session-lifecycle.md`。
+- Phase 2C 至 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。

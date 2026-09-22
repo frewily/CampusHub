@@ -27,13 +27,15 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
      *         false: 拦截请求，不再继续执行
      */
 
-    private StringRedisTemplate stringRedisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
+
     public RefreshTokenInterceptor(StringRedisTemplate stringRedisTemplate) {
         this.stringRedisTemplate = stringRedisTemplate;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        UserHolder.removeUser();
         String token = request.getHeader("authorization");
         if (StrUtil.isBlank(token)) {
             return true;
@@ -57,6 +59,6 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, @Nullable Exception ex) throws Exception {
-        HandlerInterceptor.super.afterCompletion(request, response, handler, ex);
+        UserHolder.removeUser();
     }
 }
