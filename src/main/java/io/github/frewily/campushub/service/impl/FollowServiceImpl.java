@@ -6,6 +6,8 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.Follow;
 import io.github.frewily.campushub.entity.User;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.FollowMapper;
 import io.github.frewily.campushub.service.IFollowService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -35,7 +37,7 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
     public Result follow(Long followUserId, Boolean isFollow) {
         Long userId = UserHolder.getUser().getId();
         if (userId.equals(followUserId)) {
-            return Result.fail("不能关注自己");
+            throw new BusinessException(ErrorCode.CONFLICT, "不能关注自己");
         }
         String key = "follows:" + userId;
         if (isFollow){

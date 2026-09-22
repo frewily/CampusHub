@@ -3,11 +3,16 @@ package io.github.frewily.campushub.controller;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import io.github.frewily.campushub.dto.Result;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.utils.SystemConstants;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.validation.annotation.Validated;
 
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.NotNull;
 import java.io.File;
 import java.io.IOException;
 import java.util.UUID;
@@ -15,10 +20,11 @@ import java.util.UUID;
 @Slf4j
 @RestController
 @RequestMapping("upload")
+@Validated
 public class UploadController {
 
     @PostMapping("blog")
-    public Result uploadImage(@RequestParam("file") MultipartFile image) {
+    public Result uploadImage(@NotNull(message = "上传文件不能为空") @RequestParam("file") MultipartFile image) {
         try {
             String originalFilename = image.getOriginalFilename();
             String fileName = createNewFileName(originalFilename);
@@ -31,10 +37,10 @@ public class UploadController {
     }
 
     @GetMapping("/blog/delete")
-    public Result deleteBlogImg(@RequestParam("name") String filename) {
+    public Result deleteBlogImg(@NotBlank(message = "文件名不能为空") @RequestParam("name") String filename) {
         File file = new File(SystemConstants.IMAGE_UPLOAD_DIR, filename);
         if (file.isDirectory()) {
-            return Result.fail("错误的文件名称");
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "错误的文件名称");
         }
         FileUtil.del(file);
         return Result.ok();

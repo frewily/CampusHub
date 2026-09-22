@@ -9,6 +9,8 @@ import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.User;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.UserMapper;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.RegexUtils;
@@ -40,7 +42,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Override
     public Result sendCode(String phone, HttpSession session) {
         if (RegexUtils.isPhoneInvalid(phone)) {
-            return Result.fail("手机号格式错误");
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "手机号格式错误");
         }
         String code = RandomUtil.randomNumbers(6);
         stringRedisTemplate.opsForValue().set(LOGIN_CODE_KEY + phone, code, LOGIN_CODE_TTL, TimeUnit.MINUTES);
@@ -53,12 +55,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     public Result login(LoginFormDTO loginForm, HttpSession session) {
         String phone = loginForm.getPhone();
         if(phone == null || RegexUtils.isPhoneInvalid(phone)){
-            return Result.fail("手机号格式错误");
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "手机号格式错误");
         }
         String code = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
         String cacheCode = loginForm.getCode();
         if (code == null || !code.equals(cacheCode)) {
-            return Result.fail("验证码错误");
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED, "验证码错误");
         }
         User user = query().eq("phone", phone).one();
         if (user == null) {

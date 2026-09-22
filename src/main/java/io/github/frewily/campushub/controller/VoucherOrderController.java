@@ -3,22 +3,26 @@ package io.github.frewily.campushub.controller;
 
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.service.IVoucherOrderService;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.annotation.Resource;
+import javax.validation.constraints.Positive;
 
 @RestController
 @RequestMapping("/voucher-order")
+@Validated
 public class VoucherOrderController {
 
     @Resource
     private IVoucherOrderService voucherOrderService;
 
     @PostMapping("seckill/{id}")
-    public Result seckillVoucher(@PathVariable("id") Long voucherId) {
+    public Result seckillVoucher(
+            @Positive(message = "活动ID必须为正数") @PathVariable("id") Long voucherId) {
         return voucherOrderService.seckillVoucher(voucherId);
     }
 }

@@ -7,12 +7,20 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.entity.Shop;
 import io.github.frewily.campushub.service.IShopService;
 import io.github.frewily.campushub.utils.SystemConstants;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.validation.Valid;
+import javax.validation.constraints.DecimalMax;
+import javax.validation.constraints.DecimalMin;
+import javax.validation.constraints.Min;
+import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Positive;
 
 @RestController
 @RequestMapping("/shop")
+@Validated
 public class ShopController {
 
     @Resource
@@ -24,8 +32,8 @@ public class ShopController {
      * @return 商铺详情数据
      */
     @GetMapping("/{id}")
-    public Result queryShopById(@PathVariable("id") Long id) {
-        return Result.ok(shopService.queryById(id));
+    public Result queryShopById(@Positive(message = "门店ID必须为正数") @PathVariable("id") Long id) {
+        return shopService.queryById(id);
     }
 
     /**
@@ -34,7 +42,7 @@ public class ShopController {
      * @return 商铺id
      */
     @PostMapping
-    public Result saveShop(@RequestBody Shop shop) {
+    public Result saveShop(@Valid @NotNull @RequestBody Shop shop) {
         shopService.save(shop);
         return Result.ok(shop.getId());
     }
@@ -45,7 +53,7 @@ public class ShopController {
      * @return 无
      */
     @PutMapping
-    public Result updateShop(@RequestBody Shop shop) {
+    public Result updateShop(@Valid @NotNull @RequestBody Shop shop) {
         return shopService.updateShop(shop);
     }
 
@@ -57,10 +65,15 @@ public class ShopController {
      */
     @GetMapping("/of/type")
     public Result queryShopByType(
-            @RequestParam("typeId") Integer typeId,
+            @Positive(message = "门店类型ID必须为正数") @RequestParam("typeId") Integer typeId,
+            @Min(value = 1, message = "页码不能小于1")
             @RequestParam(value = "current", defaultValue = "1") Integer current,
-            @RequestParam(defaultValue = "x", required = false) Double x,
-            @RequestParam(defaultValue = "y", required = false) Double y
+            @DecimalMin(value = "-180", message = "经度不能小于-180")
+            @DecimalMax(value = "180", message = "经度不能大于180")
+            @RequestParam(required = false) Double x,
+            @DecimalMin(value = "-90", message = "纬度不能小于-90")
+            @DecimalMax(value = "90", message = "纬度不能大于90")
+            @RequestParam(required = false) Double y
     ) {
         return shopService.queryShopByType(typeId, current, x, y);
     }
@@ -74,6 +87,7 @@ public class ShopController {
     @GetMapping("/of/name")
     public Result queryShopByName(
             @RequestParam(value = "name", required = false) String name,
+            @Min(value = 1, message = "页码不能小于1")
             @RequestParam(value = "current", defaultValue = "1") Integer current
     ) {
         Page<Shop> page = shopService.query()

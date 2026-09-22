@@ -3,6 +3,8 @@ package io.github.frewily.campushub.service.impl;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.User;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.FollowMapper;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.UserHolder;
@@ -22,7 +24,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -95,9 +97,12 @@ class FollowServiceImplTest {
 
     @Test
     void shouldRejectFollowingTheCurrentUser() {
-        Result result = followService.follow(1L, true);
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> followService.follow(1L, true)
+        );
 
-        assertFalse(result.getSuccess());
+        assertEquals(ErrorCode.CONFLICT, exception.getErrorCode());
         verifyNoInteractions(followMapper, stringRedisTemplate);
     }
 }

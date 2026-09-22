@@ -4,12 +4,17 @@ package io.github.frewily.campushub.controller;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.entity.Voucher;
 import io.github.frewily.campushub.service.IVoucherService;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.validation.Valid;
+import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Positive;
 
 @RestController
 @RequestMapping("/voucher")
+@Validated
 public class VoucherController {
 
     @Resource
@@ -21,7 +26,7 @@ public class VoucherController {
      * @return 优惠券id
      */
     @PostMapping
-    public Result addVoucher(@RequestBody Voucher voucher) {
+    public Result addVoucher(@Valid @NotNull @RequestBody Voucher voucher) {
         voucherService.save(voucher);
         return Result.ok(voucher.getId());
     }
@@ -32,7 +37,7 @@ public class VoucherController {
      * @return 优惠券id
      */
     @PostMapping("seckill")
-    public Result addSeckillVoucher(@RequestBody Voucher voucher) {
+    public Result addSeckillVoucher(@Valid @NotNull @RequestBody Voucher voucher) {
         voucherService.addSeckillVoucher(voucher);
         return Result.ok(voucher.getId());
     }
@@ -43,7 +48,8 @@ public class VoucherController {
      * @return 优惠券列表
      */
     @GetMapping("/list/{shopId}")
-    public Result queryVoucherOfShop(@PathVariable("shopId") Long shopId) {
+    public Result queryVoucherOfShop(
+            @Positive(message = "门店ID必须为正数") @PathVariable("shopId") Long shopId) {
        return voucherService.queryVoucherOfShop(shopId);
     }
 }

@@ -10,6 +10,8 @@ import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.Blog;
 import io.github.frewily.campushub.entity.Follow;
 import io.github.frewily.campushub.entity.User;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.service.IBlogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -64,7 +66,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     public Result queryBlogById(Long id) {
         Blog blog = getById(id);
         if (blog == null) {
-            return Result.fail("笔记不存在！");
+            throw new BusinessException(ErrorCode.NOT_FOUND, "动态不存在");
         }
         queryBlogUser(blog);
         isBlogLiked(blog);
@@ -146,16 +148,16 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     @Override
     public Result saveBlog(Blog blog) {
         if (blog.getShopId() == null) {
-            return Result.fail("商铺ID不能为空");
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "门店ID不能为空");
         }
         if (blog.getTitle() == null || blog.getTitle().trim().isEmpty()) {
-            return Result.fail("标题不能为空");
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "标题不能为空");
         }
         UserDTO user = UserHolder.getUser();
         blog.setUserId(user.getId());
         boolean isSuccess = save(blog);
         if (!isSuccess) {
-            return Result.fail("发布失败");
+            throw new BusinessException(ErrorCode.OPERATION_FAILED, "动态发布失败");
         }
         List<Follow> follows = followService.query().eq("follow_user_id", user.getId()).list();
         for (Follow follow : follows) {

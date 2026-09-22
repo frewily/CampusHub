@@ -3,6 +3,8 @@ package io.github.frewily.campushub.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.entity.VoucherOrder;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.VoucherOrderMapper;
 import io.github.frewily.campushub.service.ISeckillVoucherService;
 import io.github.frewily.campushub.service.IVoucherOrderService;
@@ -211,7 +213,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         );
         int r = result.intValue();//转成int类型
         if (r != 0) {
-            return Result.fail(r == 1 ? "库存不足" : "不能重复下单");
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    r == 1 ? "库存不足" : "不能重复下单"
+            );
         }
         return Result.ok(orderId);
     }

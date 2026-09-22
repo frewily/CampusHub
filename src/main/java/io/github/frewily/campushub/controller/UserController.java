@@ -7,18 +7,28 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.entity.UserInfo;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.service.IUserInfoService;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
+import javax.validation.Valid;
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Pattern;
+import javax.validation.constraints.Positive;
+
+import static io.github.frewily.campushub.utils.RegexPatterns.PHONE_REGEX;
 
 @Slf4j
 @RestController
 @RequestMapping("/user")
+@Validated
 public class UserController {
 
     @Resource
@@ -31,7 +41,11 @@ public class UserController {
      * 发送手机验证码
      */
     @PostMapping("code")
-    public Result sendCode(@RequestParam("phone") String phone, HttpSession session) {
+    public Result sendCode(
+            @NotBlank(message = "手机号不能为空")
+            @Pattern(regexp = PHONE_REGEX, message = "手机号格式错误")
+            @RequestParam("phone") String phone,
+            HttpSession session) {
         return userService.sendCode(phone, session);
     }
 
@@ -47,7 +61,7 @@ public class UserController {
      *                - 保存登录状态（登录成功后将用户信息存入 session）
      */
     @PostMapping("/login")
-    public Result login(@RequestBody LoginFormDTO loginForm, HttpSession session){
+    public Result login(@Valid @RequestBody LoginFormDTO loginForm, HttpSession session){
         return userService.login(loginForm, session);
     }
 
@@ -58,7 +72,7 @@ public class UserController {
     @PostMapping("/logout")
     public Result logout(){
         // TODO 实现登出功能
-        return Result.fail("功能未完成");
+        throw new BusinessException(ErrorCode.NOT_IMPLEMENTED, "登出功能尚未实现");
     }
 
     @GetMapping("/me")
@@ -68,7 +82,7 @@ public class UserController {
     }
 
     @GetMapping("/info/{id}")
-    public Result info(@PathVariable("id") Long userId){
+    public Result info(@Positive(message = "用户ID必须为正数") @PathVariable("id") Long userId){
         UserInfo info = userInfoService.getById(userId);
         if (info == null) {
             return Result.ok();
@@ -78,7 +92,7 @@ public class UserController {
         return Result.ok(info);
     }
     @GetMapping("/{id}")
-    public Result queryUserById(@PathVariable("id") Long userId){
+    public Result queryUserById(@Positive(message = "用户ID必须为正数") @PathVariable("id") Long userId){
         User user = userService.getById(userId);
         if (user == null) {
             return Result.ok();

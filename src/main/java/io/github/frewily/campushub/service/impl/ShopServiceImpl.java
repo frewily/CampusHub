@@ -6,6 +6,8 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.entity.Shop;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.ShopMapper;
 import io.github.frewily.campushub.service.IShopService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -42,7 +44,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         Shop shop = cacheClient
                 .queryWithLogicalExpire(CACHE_SHOP_KEY, id , Shop.class, this::getById, 20L, TimeUnit.SECONDS);
         if (shop == null) {
-            return Result.fail("店铺不存在");
+            throw new BusinessException(ErrorCode.NOT_FOUND, "门店不存在");
         }
         return Result.ok(shop);
     }
@@ -109,7 +111,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     public Result updateShop(Shop shop) {
         Long id = shop.getId();
         if (id == null) {
-            return Result.fail("店铺id不能为空");
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "门店ID不能为空");
         }
         updateById(shop);
         stringRedisTemplate.delete(CACHE_SHOP_KEY + id);
