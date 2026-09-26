@@ -5,6 +5,7 @@ import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
@@ -26,6 +27,12 @@ public class GlobalExceptionHandler {
         ErrorCode errorCode = exception.getErrorCode();
         return ResponseEntity.status(errorCode.getHttpStatus())
                 .body(Result.fail(errorCode, exception.getMessage()));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Result> handleAccessDenied(AccessDeniedException exception) {
+        return ResponseEntity.status(ErrorCode.AUTHORIZATION_FAILED.getHttpStatus())
+                .body(Result.fail(ErrorCode.AUTHORIZATION_FAILED));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

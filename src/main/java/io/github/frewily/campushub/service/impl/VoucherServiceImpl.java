@@ -11,6 +11,7 @@ import io.github.frewily.campushub.utils.RedisConstants;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import javax.annotation.Resource;
 import java.util.List;
@@ -34,6 +35,15 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
     @Override
     @Transactional
+    @PreAuthorize("@resourceAuthorization.canManagePromotion(#voucher.shopId)")
+    public Result addVoucher(Voucher voucher) {
+        save(voucher);
+        return Result.ok(voucher.getId());
+    }
+
+    @Override
+    @Transactional
+    @PreAuthorize("@resourceAuthorization.canManagePromotion(#voucher.shopId)")
     public void addSeckillVoucher(Voucher voucher) {
         save(voucher);
         SeckillVoucher seckillVoucher = new SeckillVoucher();

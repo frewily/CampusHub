@@ -12,6 +12,7 @@ import io.github.frewily.campushub.utils.SystemConstants;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import javax.annotation.Resource;
 import javax.validation.Valid;
@@ -28,11 +29,13 @@ public class BlogController {
     @Resource
     private IBlogService blogService;
     @PostMapping
+    @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
     public Result saveBlog(@Valid @NotNull @RequestBody Blog blog) {
         return blogService.saveBlog(blog);
     }
 
     @PutMapping("/like/{id}")
+    @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
     public Result likeBlog(@Positive(message = "动态ID必须为正数") @PathVariable("id") Long id) {
         return blogService.likeBlog(id);
     }

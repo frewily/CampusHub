@@ -36,6 +36,11 @@ public class Shop implements Serializable {
     private Long typeId;
 
     /**
+     * 所属商户；历史门店在完成认领前保持为空。
+     */
+    private Long merchantId;
+
+    /**
      * 商铺图片，多个图片以','隔开
      */
     private String images;

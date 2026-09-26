@@ -99,6 +99,7 @@
    - 状态：已完成实现与验证，记录见 `docs/refactor/07-phase-2b-session-lifecycle.md`。
 3. `feat: enforce role and resource authorization`
    - 选择并引入 Spring Security；实现 USER、MERCHANT、ADMIN 和资源归属校验。
+   - 状态：已完成实现与当前环境验证，真实 MySQL 迁移仍待隔离环境补验，记录见 `docs/refactor/08-phase-2c-authorization.md`。
 4. `refactor: separate api models from persistence entities`
    - 优先处理商户写入、用户资料、动态发布和活动创建，不机械创建四套对象。
 
@@ -193,5 +194,6 @@
 - Phase 1C：已完成实现与验证，验证记录见 `docs/refactor/05-phase-1c-identity.md`。
 - Phase 2A：已完成实现与验证，类型化错误、参数校验和全局异常处理记录见 `docs/refactor/06-phase-2a-api-errors-validation.md`。
 - Phase 2B：已完成实现与验证，会话生命周期、登出和验证码安全记录见 `docs/refactor/07-phase-2b-session-lifecycle.md`。
-- Phase 2C 至 Phase 6：尚未开始。
+- Phase 2C：已完成实现与当前环境验证，账号状态、角色、商户资源归属和待补验边界见 `docs/refactor/08-phase-2c-authorization.md`。
+- Phase 2D 至 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。

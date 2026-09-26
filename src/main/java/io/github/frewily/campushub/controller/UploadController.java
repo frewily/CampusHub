@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
@@ -24,6 +25,7 @@ import java.util.UUID;
 public class UploadController {
 
     @PostMapping("blog")
+    @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
     public Result uploadImage(@NotNull(message = "上传文件不能为空") @RequestParam("file") MultipartFile image) {
         try {
             String originalFilename = image.getOriginalFilename();
@@ -37,6 +39,7 @@ public class UploadController {
     }
 
     @GetMapping("/blog/delete")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result deleteBlogImg(@NotBlank(message = "文件名不能为空") @RequestParam("name") String filename) {
         File file = new File(SystemConstants.IMAGE_UPLOAD_DIR, filename);
         if (file.isDirectory()) {

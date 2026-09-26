@@ -21,6 +21,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.domain.geo.GeoReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import javax.annotation.Resource;
 
@@ -108,11 +109,26 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     @Transactional
+    @PreAuthorize("@resourceAuthorization.canCreateShop(#shop.merchantId)")
+    public Result createShop(Shop shop) {
+        save(shop);
+        return Result.ok(shop.getId());
+    }
+
+    @Override
+    @Transactional
+    @PreAuthorize("@resourceAuthorization.canManageShop(#shop.id)")
     public Result updateShop(Shop shop) {
         Long id = shop.getId();
         if (id == null) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "门店ID不能为空");
         }
+        Shop existing = getById(id);
+        if (existing == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "门店不存在");
+        }
+        // 通用更新接口不能转移门店归属；认领或转移需要独立的管理员用例。
+        shop.setMerchantId(existing.getMerchantId());
         updateById(shop);
         stringRedisTemplate.delete(CACHE_SHOP_KEY + id);
         return Result.ok();

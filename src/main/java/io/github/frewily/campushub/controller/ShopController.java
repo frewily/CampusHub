@@ -8,6 +8,7 @@ import io.github.frewily.campushub.entity.Shop;
 import io.github.frewily.campushub.service.IShopService;
 import io.github.frewily.campushub.utils.SystemConstants;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
@@ -42,9 +43,9 @@ public class ShopController {
      * @return 商铺id
      */
     @PostMapping
+    @PreAuthorize("@resourceAuthorization.canCreateShop(#shop.merchantId)")
     public Result saveShop(@Valid @NotNull @RequestBody Shop shop) {
-        shopService.save(shop);
-        return Result.ok(shop.getId());
+        return shopService.createShop(shop);
     }
 
     /**
@@ -53,6 +54,7 @@ public class ShopController {
      * @return 无
      */
     @PutMapping
+    @PreAuthorize("@resourceAuthorization.canManageShop(#shop.id)")
     public Result updateShop(@Valid @NotNull @RequestBody Shop shop) {
         return shopService.updateShop(shop);
     }

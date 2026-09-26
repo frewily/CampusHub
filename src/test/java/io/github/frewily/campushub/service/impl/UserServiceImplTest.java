@@ -179,7 +179,7 @@ class UserServiceImplTest {
                 eq(Collections.singletonList(LOGIN_CODE_KEY + PHONE)),
                 eq("654321")
         )).thenReturn(1L);
-        User user = new User().setId(7L).setPhone(PHONE).setNickName("campus-user");
+        User user = new User().setId(7L).setPhone(PHONE).setNickName("campus-user").setStatus("ACTIVE");
         when(userMapper.selectOne(any())).thenReturn(user);
         when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
 
@@ -194,6 +194,50 @@ class UserServiceImplTest {
         assertEquals("7", userMapCaptor.getValue().get("id"));
         assertNull(userMapCaptor.getValue().get("phone"));
         verify(stringRedisTemplate).delete(LOGIN_FAILURE_KEY + PHONE);
+    }
+
+    @Test
+    void shouldRejectDisabledAccountWithoutCreatingSession() {
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(LOGIN_FAILURE_KEY + PHONE)).thenReturn(null);
+        when(stringRedisTemplate.execute(
+                any(DefaultRedisScript.class),
+                eq(Collections.singletonList(LOGIN_CODE_KEY + PHONE)),
+                eq("654321")
+        )).thenReturn(1L);
+        User user = new User().setId(7L).setPhone(PHONE).setNickName("disabled").setStatus("DISABLED");
+        when(userMapper.selectOne(any())).thenReturn(user);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> userService.login(loginForm("654321"))
+        );
+
+        assertEquals(ErrorCode.AUTHENTICATION_FAILED, exception.getErrorCode());
+        verify(stringRedisTemplate, never()).opsForHash();
+    }
+
+    @Test
+    void shouldAssignUserRoleWhenRegisteringNewAccount() {
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(LOGIN_FAILURE_KEY + PHONE)).thenReturn(null);
+        when(stringRedisTemplate.execute(
+                any(DefaultRedisScript.class),
+                eq(Collections.singletonList(LOGIN_CODE_KEY + PHONE)),
+                eq("654321")
+        )).thenReturn(1L);
+        when(userMapper.selectOne(any())).thenReturn(null);
+        when(userMapper.insert(any(User.class))).thenAnswer(invocation -> {
+            User user = invocation.getArgument(0);
+            user.setId(9L);
+            return 1;
+        });
+        when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+
+        Result result = userService.login(loginForm("654321"));
+
+        assertTrue(result.getSuccess());
+        verify(userMapper).insertDefaultUserRole(9L);
     }
 
     @Test

@@ -45,6 +45,11 @@ public class User implements Serializable {
     private String icon = "";
 
     /**
+     * 账号状态：ACTIVE 或 DISABLED
+     */
+    private String status;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createTime;

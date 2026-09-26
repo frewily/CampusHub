@@ -20,6 +20,7 @@ import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
@@ -83,6 +84,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     }
 
     @Override
+    @Transactional
     public Result login(LoginFormDTO loginForm) {
         String phone = loginForm.getPhone();
         if (phone == null || RegexUtils.isPhoneInvalid(phone)) {
@@ -111,6 +113,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         User user = query().eq("phone", phone).one();
         if (user == null) {
             user = createUserWithPhone(phone);
+        }
+        if (!"ACTIVE".equals(user.getStatus())) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED, "账号不可用");
         }
         String token = UUID.randomUUID().toString(true);
         // 只将脱敏后的 UserDTO 写入会话缓存。
@@ -197,7 +202,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         User user = new User();
         user.setPhone(phone);
         user.setNickName(USER_NICK_NAME_PREFIX + RandomUtil.randomString(10));
+        user.setStatus("ACTIVE");
         save(user);
+        getBaseMapper().insertDefaultUserRole(user.getId());
         return user;
     }
 

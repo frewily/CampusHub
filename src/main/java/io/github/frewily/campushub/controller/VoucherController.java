@@ -5,6 +5,7 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.entity.Voucher;
 import io.github.frewily.campushub.service.IVoucherService;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
@@ -26,9 +27,9 @@ public class VoucherController {
      * @return 优惠券id
      */
     @PostMapping
+    @PreAuthorize("@resourceAuthorization.canManagePromotion(#voucher.shopId)")
     public Result addVoucher(@Valid @NotNull @RequestBody Voucher voucher) {
-        voucherService.save(voucher);
-        return Result.ok(voucher.getId());
+        return voucherService.addVoucher(voucher);
     }
 
     /**
@@ -37,6 +38,7 @@ public class VoucherController {
      * @return 优惠券id
      */
     @PostMapping("seckill")
+    @PreAuthorize("@resourceAuthorization.canManagePromotion(#voucher.shopId)")
     public Result addSeckillVoucher(@Valid @NotNull @RequestBody Voucher voucher) {
         voucherService.addSeckillVoucher(voucher);
         return Result.ok(voucher.getId());
