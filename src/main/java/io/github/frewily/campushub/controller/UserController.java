@@ -4,6 +4,7 @@ package io.github.frewily.campushub.controller;
 import cn.hutool.core.bean.BeanUtil;
 import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
+import io.github.frewily.campushub.dto.ApiModelMapper;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.entity.UserInfo;
@@ -70,7 +71,7 @@ public class UserController {
 
     @GetMapping("/me")
     public Result me(){
-        UserDTO user = UserHolder.getUser();// 从 ThreadLocal 中获取当前登录的用户(在拦截器中，线程已保存登录用户信息)
+        UserDTO user = UserHolder.getUser();
         return Result.ok(user);
     }
 
@@ -80,9 +81,7 @@ public class UserController {
         if (info == null) {
             return Result.ok();
         }
-        info.setCreateTime(null);
-        info.setUpdateTime(null);
-        return Result.ok(info);
+        return Result.ok(ApiModelMapper.toUserInfoResponse(info));
     }
     @GetMapping("/{id}")
     public Result queryUserById(@Positive(message = "用户ID必须为正数") @PathVariable("id") Long userId){

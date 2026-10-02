@@ -14,7 +14,7 @@
 
 - 数据库 schema 默认名仍为 `hmdp`，初始化脚本仍为 `src/main/resources/db/hmdp.sql`。
 - `tb_*` 表名及字段名保持不变。
-- HTTP 路径、请求参数和响应结构保持不变。
+- HTTP 路径、有效业务字段名和统一响应包装保持不变。Phase 2D 为优先写入接口引入字段白名单与必填校验，冗余实体字段忽略，缺失或非法业务字段返回 400；具体变化见 [Phase 2D 接口记录](../refactor/09-phase-2d-api-models.md)。
 - Redis key、Stream 名称和消费组名称保持不变。
 - 旧业务类名如 `Shop`、`Blog`、`Voucher` 暂时保留，并按领域模型中的映射逐阶段迁移。
 

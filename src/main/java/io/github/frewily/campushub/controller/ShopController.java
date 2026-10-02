@@ -4,6 +4,9 @@ package io.github.frewily.campushub.controller;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.github.frewily.campushub.dto.Result;
+import io.github.frewily.campushub.dto.ApiModelMapper;
+import io.github.frewily.campushub.dto.request.ShopCreateRequest;
+import io.github.frewily.campushub.dto.request.ShopUpdateRequest;
 import io.github.frewily.campushub.entity.Shop;
 import io.github.frewily.campushub.service.IShopService;
 import io.github.frewily.campushub.utils.SystemConstants;
@@ -44,8 +47,8 @@ public class ShopController {
      */
     @PostMapping
     @PreAuthorize("@resourceAuthorization.canCreateShop(#shop.merchantId)")
-    public Result saveShop(@Valid @NotNull @RequestBody Shop shop) {
-        return shopService.createShop(shop);
+    public Result saveShop(@Valid @NotNull @RequestBody ShopCreateRequest shop) {
+        return shopService.createShop(ApiModelMapper.toShop(shop));
     }
 
     /**
@@ -55,8 +58,8 @@ public class ShopController {
      */
     @PutMapping
     @PreAuthorize("@resourceAuthorization.canManageShop(#shop.id)")
-    public Result updateShop(@Valid @NotNull @RequestBody Shop shop) {
-        return shopService.updateShop(shop);
+    public Result updateShop(@Valid @NotNull @RequestBody ShopUpdateRequest shop) {
+        return shopService.updateShop(ApiModelMapper.toShop(shop));
     }
 
     /**

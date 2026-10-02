@@ -102,6 +102,7 @@
    - 状态：已完成实现与当前环境验证，真实 MySQL 迁移仍待隔离环境补验，记录见 `docs/refactor/08-phase-2c-authorization.md`。
 4. `refactor: separate api models from persistence entities`
    - 优先处理商户写入、用户资料、动态发布和活动创建，不机械创建四套对象。
+   - 状态：已完成指定优先边界与自动验证，请求白名单、响应隔离、兼容行为和待补验边界见 `docs/refactor/09-phase-2d-api-models.md`。
 
 出口条件：匿名写接口关闭；越权、禁用用户、token 失效和登出均有测试；日志不含验证码、密码和完整 token。
 
@@ -195,5 +196,6 @@
 - Phase 2A：已完成实现与验证，类型化错误、参数校验和全局异常处理记录见 `docs/refactor/06-phase-2a-api-errors-validation.md`。
 - Phase 2B：已完成实现与验证，会话生命周期、登出和验证码安全记录见 `docs/refactor/07-phase-2b-session-lifecycle.md`。
 - Phase 2C：已完成实现与当前环境验证，账号状态、角色、商户资源归属和待补验边界见 `docs/refactor/08-phase-2c-authorization.md`。
-- Phase 2D 至 Phase 6：尚未开始。
+- Phase 2D：已完成指定优先边界与自动验证，记录见 `docs/refactor/09-phase-2d-api-models.md`。
+- Phase 3 至 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。

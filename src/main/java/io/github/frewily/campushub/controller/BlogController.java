@@ -3,11 +3,11 @@ package io.github.frewily.campushub.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.github.frewily.campushub.dto.Result;
+import io.github.frewily.campushub.dto.ApiModelMapper;
+import io.github.frewily.campushub.dto.request.BlogCreateRequest;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.Blog;
-import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.service.IBlogService;
-import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.SystemConstants;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.springframework.web.bind.annotation.*;
@@ -30,8 +30,8 @@ public class BlogController {
     private IBlogService blogService;
     @PostMapping
     @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
-    public Result saveBlog(@Valid @NotNull @RequestBody Blog blog) {
-        return blogService.saveBlog(blog);
+    public Result saveBlog(@Valid @NotNull @RequestBody BlogCreateRequest blog) {
+        return blogService.saveBlog(ApiModelMapper.toBlog(blog));
     }
 
     @PutMapping("/like/{id}")

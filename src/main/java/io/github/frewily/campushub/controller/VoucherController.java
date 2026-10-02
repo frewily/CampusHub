@@ -2,6 +2,9 @@ package io.github.frewily.campushub.controller;
 
 
 import io.github.frewily.campushub.dto.Result;
+import io.github.frewily.campushub.dto.ApiModelMapper;
+import io.github.frewily.campushub.dto.request.VoucherCreateRequest;
+import io.github.frewily.campushub.dto.request.FlashSaleCreateRequest;
 import io.github.frewily.campushub.entity.Voucher;
 import io.github.frewily.campushub.service.IVoucherService;
 import org.springframework.validation.annotation.Validated;
@@ -28,8 +31,8 @@ public class VoucherController {
      */
     @PostMapping
     @PreAuthorize("@resourceAuthorization.canManagePromotion(#voucher.shopId)")
-    public Result addVoucher(@Valid @NotNull @RequestBody Voucher voucher) {
-        return voucherService.addVoucher(voucher);
+    public Result addVoucher(@Valid @NotNull @RequestBody VoucherCreateRequest voucher) {
+        return voucherService.addVoucher(ApiModelMapper.toVoucher(voucher));
     }
 
     /**
@@ -39,9 +42,10 @@ public class VoucherController {
      */
     @PostMapping("seckill")
     @PreAuthorize("@resourceAuthorization.canManagePromotion(#voucher.shopId)")
-    public Result addSeckillVoucher(@Valid @NotNull @RequestBody Voucher voucher) {
-        voucherService.addSeckillVoucher(voucher);
-        return Result.ok(voucher.getId());
+    public Result addSeckillVoucher(@Valid @NotNull @RequestBody FlashSaleCreateRequest voucher) {
+        Voucher entity = ApiModelMapper.toFlashSale(voucher);
+        voucherService.addSeckillVoucher(entity);
+        return Result.ok(entity.getId());
     }
 
     /**

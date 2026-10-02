@@ -5,8 +5,10 @@ import io.github.frewily.campushub.controller.UploadController;
 import io.github.frewily.campushub.controller.UserController;
 import io.github.frewily.campushub.controller.VoucherController;
 import io.github.frewily.campushub.controller.VoucherOrderController;
-import io.github.frewily.campushub.entity.Shop;
-import io.github.frewily.campushub.entity.Voucher;
+import io.github.frewily.campushub.dto.request.ShopCreateRequest;
+import io.github.frewily.campushub.dto.request.ShopUpdateRequest;
+import io.github.frewily.campushub.dto.request.VoucherCreateRequest;
+import io.github.frewily.campushub.dto.request.FlashSaleCreateRequest;
 import io.github.frewily.campushub.exception.ErrorCode;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,13 +19,13 @@ class AuthorizationPolicyTest {
 
     @Test
     void shouldDeclareResourceAndActivityPoliciesOnWriteEndpoints() throws Exception {
-        assertPolicy(ShopController.class, "saveShop", new Class<?>[]{Shop.class},
+        assertPolicy(ShopController.class, "saveShop", new Class<?>[]{ShopCreateRequest.class},
                 "@resourceAuthorization.canCreateShop(#shop.merchantId)");
-        assertPolicy(ShopController.class, "updateShop", new Class<?>[]{Shop.class},
+        assertPolicy(ShopController.class, "updateShop", new Class<?>[]{ShopUpdateRequest.class},
                 "@resourceAuthorization.canManageShop(#shop.id)");
-        assertPolicy(VoucherController.class, "addVoucher", new Class<?>[]{Voucher.class},
+        assertPolicy(VoucherController.class, "addVoucher", new Class<?>[]{VoucherCreateRequest.class},
                 "@resourceAuthorization.canManagePromotion(#voucher.shopId)");
-        assertPolicy(VoucherController.class, "addSeckillVoucher", new Class<?>[]{Voucher.class},
+        assertPolicy(VoucherController.class, "addSeckillVoucher", new Class<?>[]{FlashSaleCreateRequest.class},
                 "@resourceAuthorization.canManagePromotion(#voucher.shopId)");
         assertPolicy(VoucherOrderController.class, "seckillVoucher", new Class<?>[]{Long.class},
                 "@resourceAuthorization.canParticipateAsUser()");

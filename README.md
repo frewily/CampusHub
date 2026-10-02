@@ -11,10 +11,13 @@ CampusHub is a gradual refactoring of a legacy local-services teaching project i
 - Phase 2A introduces typed API errors, Bean Validation and centralized exception handling.
 - Phase 2B adds verification-code throttling, one-time code consumption, Redis Token logout and request-context cleanup.
 - Phase 2C introduces stateless Spring Security authentication, account status, USER/MERCHANT/ADMIN roles and merchant resource ownership checks.
+- Phase 2D separates shop/post/promotion write requests and user-profile responses from persistence entities, with explicit field mappings and request validation.
 - The legacy `hmdp` database schema, table names, HTTP routes and Redis keys remain compatible until their dedicated migration stages.
 - End-to-end behavior and performance have not yet been verified.
 
-See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md), [Phase 1B verification record](docs/refactor/04-phase-1b-correctness.md), [Phase 1C verification record](docs/refactor/05-phase-1c-identity.md), [Phase 2A verification record](docs/refactor/06-phase-2a-api-errors-validation.md), [Phase 2B verification record](docs/refactor/07-phase-2b-session-lifecycle.md), [Phase 2C verification record](docs/refactor/08-phase-2c-authorization.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md).
+See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md), [Phase 1B verification record](docs/refactor/04-phase-1b-correctness.md), [Phase 1C verification record](docs/refactor/05-phase-1c-identity.md), [Phase 2A verification record](docs/refactor/06-phase-2a-api-errors-validation.md), [Phase 2B verification record](docs/refactor/07-phase-2b-session-lifecycle.md), [Phase 2C verification record](docs/refactor/08-phase-2c-authorization.md), [Phase 2D verification and API contract](docs/refactor/09-phase-2d-api-models.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md).
+
+Write requests now accept only documented business fields. Extra entity fields are ignored; missing or invalid required fields return HTTP 400 with `VALIDATION_FAILED`. See the Phase 2D API contract before reusing full legacy entity payloads.
 
 ## Requirements
 

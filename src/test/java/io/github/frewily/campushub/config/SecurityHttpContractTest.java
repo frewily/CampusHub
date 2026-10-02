@@ -2,6 +2,7 @@ package io.github.frewily.campushub.config;
 
 import io.github.frewily.campushub.controller.UserController;
 import io.github.frewily.campushub.controller.ShopController;
+import io.github.frewily.campushub.controller.VoucherController;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.mapper.AccountAccessMapper;
 import io.github.frewily.campushub.security.RedisTokenAuthenticationFilter;
@@ -10,6 +11,7 @@ import io.github.frewily.campushub.security.SecurityErrorResponder;
 import io.github.frewily.campushub.service.IUserInfoService;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.service.IShopService;
+import io.github.frewily.campushub.service.IVoucherService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -32,6 +34,7 @@ import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -49,6 +52,8 @@ class SecurityHttpContractTest {
     @MockBean
     private IShopService shopService;
     @MockBean
+    private IVoucherService voucherService;
+    @MockBean
     private StringRedisTemplate stringRedisTemplate;
     @MockBean
     private HashOperations<String, Object, Object> hashOperations;
@@ -60,6 +65,8 @@ class SecurityHttpContractTest {
     @Import({
             UserController.class,
             ShopController.class,
+            VoucherController.class,
+            GlobalExceptionHandler.class,
             SecurityConfig.class,
             SecurityErrorResponder.class,
             RedisTokenAuthenticationFilter.class,
@@ -104,14 +111,73 @@ class SecurityHttpContractTest {
         mockMvc.perform(post("/shop")
                         .header("authorization", "merchant-token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Campus Cafe\",\"merchantId\":3}"))
+                        .content("{\"name\":\"Campus Cafe\",\"merchantId\":3,\"typeId\":1,"
+                                + "\"images\":\"/imgs/cafe.jpg\",\"address\":\"Campus\",\"x\":118,\"y\":30}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").value(11));
 
         mockMvc.perform(post("/shop")
                         .header("authorization", "merchant-token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Foreign Store\",\"merchantId\":4}"))
+                        .content("{\"name\":\"Foreign Store\",\"merchantId\":4,\"typeId\":1,"
+                                + "\"images\":\"/imgs/cafe.jpg\",\"address\":\"Campus\",\"x\":118,\"y\":30}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("AUTHORIZATION_FAILED"));
+    }
+
+    @Test
+    void userCannotWriteMerchantResourcesWithNewRequestModels() throws Exception {
+        prepareSession("user-token", 8L, "USER");
+        mockMvc.perform(post("/shop")
+                        .header("authorization", "user-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Campus Cafe\",\"merchantId\":3,\"typeId\":1,"
+                                + "\"images\":\"/imgs/cafe.jpg\",\"address\":\"Campus\",\"x\":118,\"y\":30}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("AUTHORIZATION_FAILED"));
+        mockMvc.perform(post("/voucher")
+                        .header("authorization", "user-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"shopId\":1,\"title\":\"Coupon\",\"payValue\":100,\"actualValue\":200}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("AUTHORIZATION_FAILED"));
+    }
+
+    @Test
+    void merchantPromotionRequiresStoreOwnershipWithNewRequestModel() throws Exception {
+        prepareSession("merchant-token", 7L, "MERCHANT");
+        when(accountAccessMapper.findMerchantIdByShopId(11L)).thenReturn(3L);
+        when(accountAccessMapper.findMerchantIdByShopId(12L)).thenReturn(4L);
+        when(accountAccessMapper.countActiveMerchantMembership(7L, 3L)).thenReturn(1);
+        when(voucherService.addVoucher(any())).thenReturn(Result.ok(20L));
+        mockMvc.perform(post("/voucher")
+                        .header("authorization", "merchant-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"shopId\":11,\"title\":\"Coupon\",\"payValue\":100,\"actualValue\":200}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(20));
+        mockMvc.perform(post("/voucher")
+                        .header("authorization", "merchant-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"shopId\":12,\"title\":\"Coupon\",\"payValue\":100,\"actualValue\":200}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("AUTHORIZATION_FAILED"));
+    }
+
+    @Test
+    void merchantPartialUpdateRequiresOwnershipOfTargetId() throws Exception {
+        prepareSession("merchant-token", 7L, "MERCHANT");
+        when(accountAccessMapper.findMerchantIdByShopId(11L)).thenReturn(3L);
+        when(accountAccessMapper.findMerchantIdByShopId(12L)).thenReturn(4L);
+        when(accountAccessMapper.countActiveMerchantMembership(7L, 3L)).thenReturn(1);
+        when(shopService.updateShop(any())).thenReturn(Result.ok());
+        mockMvc.perform(put("/shop").header("authorization", "merchant-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":11,\"name\":\"Cafe\",\"merchantId\":4}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(put("/shop").header("authorization", "merchant-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":12,\"name\":\"Foreign\",\"merchantId\":3}"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("AUTHORIZATION_FAILED"));
     }
