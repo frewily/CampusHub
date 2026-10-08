@@ -28,3 +28,5 @@ logging:
 campushub:
   order:
     stream-consumer-enabled: ${ORDER_STREAM_CONSUMER_ENABLED:true}
+    claim-idle-ms: ${ORDER_CLAIM_IDLE_MS:60000}
+    max-attempts: ${ORDER_MAX_ATTEMPTS:5}

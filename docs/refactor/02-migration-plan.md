@@ -122,6 +122,8 @@
 - 完成后编写 ADR，比较继续使用 Redis Stream 与迁移 RabbitMQ/RocketMQ 的成本。
 - 只有 ADR 证明需要时才引入一个专业 MQ。
 
+状态：已完成实现与当前环境验证。pending 接管、有界重试、失败归档、原 ID 前向补偿及待补验边界见 `docs/refactor/11-phase-3b-reliable-order-consumption.md`；ADR 0001 决定当前保留 Redis Stream。真实 MySQL 端到端与生产持久化/治理验收仍待完成。
+
 #### Phase 3C 订单闭环
 
 - 增加订单状态查询、超时、取消或核销中的最小真实闭环。
@@ -200,5 +202,6 @@
 - Phase 2C：已完成实现与当前环境验证，账号状态、角色、商户资源归属和待补验边界见 `docs/refactor/08-phase-2c-authorization.md`。
 - Phase 2D：已完成指定优先边界与自动验证，记录见 `docs/refactor/09-phase-2d-api-models.md`。
 - Phase 3A：已完成实现与当前环境验证，记录见 `docs/refactor/10-phase-3a-flash-sale-admission.md`；真实 MySQL 端到端仍待补验。
-- Phase 3B、3C 及 Phase 4 至 Phase 6：尚未开始。
+- Phase 3B：已完成实现与当前环境验证，记录见 `docs/refactor/11-phase-3b-reliable-order-consumption.md`；真实 MySQL/Redis 故障端到端仍待补验。
+- Phase 3C 及 Phase 4 至 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。

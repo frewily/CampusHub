@@ -13,6 +13,7 @@ CampusHub is a gradual refactoring of a legacy local-services teaching project i
 - Phase 2C introduces stateless Spring Security authentication, account status, USER/MERCHANT/ADMIN roles and merchant resource ownership checks.
 - Phase 2D separates shop/post/promotion write requests and user-profile responses from persistence entities, with explicit field mappings and request validation.
 - Phase 3A enforces flash-sale eligibility, status, time window, inventory and retry rules in Redis/Lua. `ACCEPTED` means an event was queued in Redis, not that an order was persisted or paid.
+- Phase 3B adds UUID consumers, bounded pending recovery/retries, owner-checked failure archival and operator-only same-ID redrive. Failed reservations are retained for DB review, never automatically refunded. Redis Stream is retained by ADR 0001.
 - The legacy `hmdp` database schema, table names, HTTP routes and Redis keys remain compatible until their dedicated migration stages.
 - End-to-end behavior and performance have not yet been verified.
 
@@ -62,6 +63,8 @@ Historical shops remain platform-managed with a `NULL` merchant owner until a tr
 
 The application creates the Redis Stream `stream.orders` and consumer group `g1` when the order consumer is enabled.
 
+`ORDER_CLAIM_IDLE_MS` defaults to 60000 (minimum 1000); `ORDER_MAX_ATTEMPTS` defaults to 5 (range 1–100, including the first attempt and crash attempts). Claim idle must exceed normal transaction latency. These are unmeasured defaults, not production tuning. See the [Phase 3B recovery and redrive runbook](docs/refactor/11-phase-3b-reliable-order-consumption.md) and [message-broker ADR](docs/adr/0001-order-message-broker.md). Do not trim uncompleted source messages or erase consumers with pending entries. Retention, capacity alerts, ACLs and persistence/restore remain deployment prerequisites.
+
 ## Build and test
 
 ```bash
@@ -80,6 +83,14 @@ The Phase 3A Redis script tests start a separate, non-persistent local Redis pro
 ./mvnw -Dtest=FlashSaleRedisScriptIT test
 ```
 
+Phase 3B consumer recovery and redrive tests also own an isolated Redis process:
+
+```bash
+./mvnw -Dtest=OrderStreamRedisIT,FlashSaleRedisScriptIT test
+```
+
+Phase 3B passed 107 default tests (0 failures/errors, 4 manual cases skipped) and 26 isolated Redis tests on Redis 8.6.2 under JDK 8, with the same command-line Surefire override. Real MySQL, Redis 6 compatibility, persistence/failover and performance remain unverified. The Spring worker recovery IT uses a mock order persistence service.
+
 The recovered Phase 3A checkout passed 96 default tests (4 manual external-service cases skipped) and 10 isolated Redis script tests under JDK 8. To use the available local dependency cache for that verification, Surefire `3.1.2` was selected via a command-line property; the project POM was not changed. Real MySQL end-to-end and performance verification remain pending.
 
 ## Run
@@ -88,4 +99,4 @@ The recovered Phase 3A checkout passed 96 default tests (4 manual external-servi
 ./mvnw spring-boot:run
 ```
 
-The service listens on port `8081` by default. Redis Token authentication and role/resource authorization are implemented, but the V002 migration and database-backed authorization flow still require verification against an isolated real MySQL environment. New flash-sale activity creation also requires the existing database tables and Redis publication; an uncertain post-commit Redis failure may leave the database activity saved. Full end-to-end behavior, reliable-consumer recovery, performance and deployment support are still scheduled work; consult the migration plan before treating these capabilities as complete.
+The service listens on port `8081` by default. Redis Token authentication and role/resource authorization are implemented, but the V002 migration and database-backed authorization flow still require verification against an isolated real MySQL environment. New flash-sale activity creation also requires the existing database tables and Redis publication; an uncertain post-commit Redis failure may leave the database activity saved. Consumer recovery is verified within the isolated Redis/mock-persistence scope, not full MySQL end-to-end. Order status/fulfillment, performance and deployment support remain scheduled work; consult the migration plan before treating these capabilities as complete.

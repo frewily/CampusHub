@@ -5,7 +5,6 @@ import io.github.frewily.campushub.entity.SeckillVoucher;
 import io.github.frewily.campushub.entity.VoucherOrder;
 import io.github.frewily.campushub.mapper.VoucherOrderMapper;
 import io.github.frewily.campushub.service.ISeckillVoucherService;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -48,13 +47,6 @@ class VoucherOrderServiceImplTest {
 
     private VoucherOrderServiceImpl service;
 
-    @AfterEach
-    void tearDown() {
-        if (service != null) {
-            service.destroy();
-        }
-    }
-
     @Test
     void shouldPropagatePersistenceFailureSoStreamMessageStaysPending() {
         service = spy(new VoucherOrderServiceImpl());
@@ -85,7 +77,7 @@ class VoucherOrderServiceImplTest {
     @Test
     void shouldFailInsteadOfAcknowledgingWhenDatabaseStockCannotBeDecremented() {
         prepareTransactionalPersistence();
-        when(voucherOrderMapper.selectCount(any())).thenReturn(0);
+        when(voucherOrderMapper.selectOne(any())).thenReturn(null);
         when(seckillVoucherService.update()).thenReturn(stockUpdate);
         when(stockUpdate.setSql("stock = stock - 1")).thenReturn(stockUpdate);
         when(stockUpdate.eq("voucher_id", 9L)).thenReturn(stockUpdate);
@@ -99,7 +91,7 @@ class VoucherOrderServiceImplTest {
     @Test
     void shouldFailAndRollBackWhenOrderInsertDoesNotSucceed() {
         prepareTransactionalPersistence();
-        when(voucherOrderMapper.selectCount(any())).thenReturn(0);
+        when(voucherOrderMapper.selectOne(any())).thenReturn(null);
         when(seckillVoucherService.update()).thenReturn(stockUpdate);
         when(stockUpdate.setSql("stock = stock - 1")).thenReturn(stockUpdate);
         when(stockUpdate.eq("voucher_id", 9L)).thenReturn(stockUpdate);
@@ -114,9 +106,17 @@ class VoucherOrderServiceImplTest {
     @Test
     void shouldTreatAnExistingOrderAsIdempotentSuccess() {
         prepareTransactionalPersistence();
-        when(voucherOrderMapper.selectCount(any())).thenReturn(1);
+        when(voucherOrderMapper.selectOne(any())).thenReturn(order());
 
         assertDoesNotThrow(() -> service.createVoucherOrder(order()));
+        verify(seckillVoucherService, never()).update();
+    }
+
+    @Test
+    void shouldNotReportSuccessForSameBusinessKeyButDifferentAcceptedId() {
+        prepareTransactionalPersistence();
+        when(voucherOrderMapper.selectOne(any())).thenReturn(order().setId(101L));
+        assertThrows(IllegalStateException.class, () -> service.createVoucherOrder(order()));
         verify(seckillVoucherService, never()).update();
     }
 

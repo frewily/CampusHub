@@ -18,4 +18,7 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
      * @param voucherOrder 订单对象
      */
     void createVoucherOrder(VoucherOrder voucherOrder);
+
+    /** Consumer entry point: lock, transactional persistence, and DB idempotency before ACK. */
+    void handleVoucherOrder(VoucherOrder voucherOrder);
 }
