@@ -7,8 +7,10 @@ import io.github.frewily.campushub.mapper.VoucherMapper;
 import io.github.frewily.campushub.entity.SeckillVoucher;
 import io.github.frewily.campushub.service.ISeckillVoucherService;
 import io.github.frewily.campushub.service.IVoucherService;
-import io.github.frewily.campushub.utils.RedisConstants;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import io.github.frewily.campushub.service.FlashSaleRedisPublisher;
+import io.github.frewily.campushub.service.FlashSaleRules;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -16,7 +18,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import javax.annotation.Resource;
 import java.util.List;
 
-import static io.github.frewily.campushub.utils.RedisConstants.SECKILL_STOCK_KEY;
 
 @Service
 public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> implements IVoucherService {
@@ -25,7 +26,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     private ISeckillVoucherService seckillVoucherService;
 
     @Resource
-    private StringRedisTemplate stringRedisTemplate;
+    private FlashSaleRedisPublisher flashSaleRedisPublisher;
 
     @Override
     public Result queryVoucherOfShop(Long shopId) {
@@ -45,14 +46,21 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     @Transactional
     @PreAuthorize("@resourceAuthorization.canManagePromotion(#voucher.shopId)")
     public void addSeckillVoucher(Voucher voucher) {
-        save(voucher);
+        new FlashSaleRules(voucher);
+        // Existing TIMESTAMP columns store whole seconds; normalize both projections first.
+        voucher.setBeginTime(voucher.getBeginTime().withNano(0));
+        voucher.setEndTime(voucher.getEndTime().withNano(0));
+        if (!save(voucher)) {
+            throw new BusinessException(ErrorCode.OPERATION_FAILED, "活动写入失败");
+        }
         SeckillVoucher seckillVoucher = new SeckillVoucher();
         seckillVoucher.setVoucherId(voucher.getId());
         seckillVoucher.setStock(voucher.getStock());
         seckillVoucher.setBeginTime(voucher.getBeginTime());
         seckillVoucher.setEndTime(voucher.getEndTime());
-        seckillVoucherService.save(seckillVoucher);
-
-        stringRedisTemplate.opsForValue().set(SECKILL_STOCK_KEY + voucher.getId(), voucher.getStock().toString());
+        if (!seckillVoucherService.save(seckillVoucher)) {
+            throw new BusinessException(ErrorCode.OPERATION_FAILED, "活动库存写入失败");
+        }
+        flashSaleRedisPublisher.publishAfterCommit(voucher);
     }
 }

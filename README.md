@@ -12,10 +12,11 @@ CampusHub is a gradual refactoring of a legacy local-services teaching project i
 - Phase 2B adds verification-code throttling, one-time code consumption, Redis Token logout and request-context cleanup.
 - Phase 2C introduces stateless Spring Security authentication, account status, USER/MERCHANT/ADMIN roles and merchant resource ownership checks.
 - Phase 2D separates shop/post/promotion write requests and user-profile responses from persistence entities, with explicit field mappings and request validation.
+- Phase 3A enforces flash-sale eligibility, status, time window, inventory and retry rules in Redis/Lua. `ACCEPTED` means an event was queued in Redis, not that an order was persisted or paid.
 - The legacy `hmdp` database schema, table names, HTTP routes and Redis keys remain compatible until their dedicated migration stages.
 - End-to-end behavior and performance have not yet been verified.
 
-See the [domain model](docs/domain-model.md), [current-state audit](docs/refactor/00-current-state.md), [target architecture](docs/refactor/01-target-architecture.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 0.5 verification record](docs/refactor/03-phase-0.5-baseline.md), [Phase 1B verification record](docs/refactor/04-phase-1b-correctness.md), [Phase 1C verification record](docs/refactor/05-phase-1c-identity.md), [Phase 2A verification record](docs/refactor/06-phase-2a-api-errors-validation.md), [Phase 2B verification record](docs/refactor/07-phase-2b-session-lifecycle.md), [Phase 2C verification record](docs/refactor/08-phase-2c-authorization.md), [Phase 2D verification and API contract](docs/refactor/09-phase-2d-api-models.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md).
+See the [domain model](docs/domain-model.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 2D API contract](docs/refactor/09-phase-2d-api-models.md), [Phase 3A verification and flash-sale contract](docs/refactor/10-phase-3a-flash-sale-admission.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md). Earlier phase records remain under `docs/refactor/`.
 
 Write requests now accept only documented business fields. Extra entity fields are ignored; missing or invalid required fields return HTTP 400 with `VALIDATION_FAILED`. See the Phase 2D API contract before reusing full legacy entity payloads.
 
@@ -73,10 +74,18 @@ The default test suite contains only tests that do not require MySQL or Redis. T
 RUN_MANUAL_INTEGRATION_TESTS=true ./mvnw -Dtest=CampusHubApplicationTests test
 ```
 
+The Phase 3A Redis script tests start a separate, non-persistent local Redis process and require `redis-server` on `PATH`:
+
+```bash
+./mvnw -Dtest=FlashSaleRedisScriptIT test
+```
+
+The recovered Phase 3A checkout passed 96 default tests (4 manual external-service cases skipped) and 10 isolated Redis script tests under JDK 8. To use the available local dependency cache for that verification, Surefire `3.1.2` was selected via a command-line property; the project POM was not changed. Real MySQL end-to-end and performance verification remain pending.
+
 ## Run
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-The service listens on port `8081` by default. Redis Token authentication and role/resource authorization are implemented, but the V002 migration and database-backed authorization flow still require verification against an isolated real MySQL environment. Full end-to-end behavior, reliable-consumer recovery, performance and deployment support are still scheduled work; consult the migration plan before treating these capabilities as complete.
+The service listens on port `8081` by default. Redis Token authentication and role/resource authorization are implemented, but the V002 migration and database-backed authorization flow still require verification against an isolated real MySQL environment. New flash-sale activity creation also requires the existing database tables and Redis publication; an uncertain post-commit Redis failure may leave the database activity saved. Full end-to-end behavior, reliable-consumer recovery, performance and deployment support are still scheduled work; consult the migration plan before treating these capabilities as complete.

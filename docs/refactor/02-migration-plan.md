@@ -114,6 +114,8 @@
 - 定义重复请求响应和订单受理状态。
 - 对 Lua 返回码和 Redis 异常做完整处理。
 
+状态：已完成实现与当前环境验证。接口受理语义、Redis 规则、隔离 Redis 并发测试及真实数据库待验边界见 `docs/refactor/10-phase-3a-flash-sale-admission.md`。
+
 #### Phase 3B 可靠消费
 
 - 先完善 Redis Stream：唯一消费者名、pending claim、重试次数、失败记录、幂等和补偿。
@@ -197,5 +199,6 @@
 - Phase 2B：已完成实现与验证，会话生命周期、登出和验证码安全记录见 `docs/refactor/07-phase-2b-session-lifecycle.md`。
 - Phase 2C：已完成实现与当前环境验证，账号状态、角色、商户资源归属和待补验边界见 `docs/refactor/08-phase-2c-authorization.md`。
 - Phase 2D：已完成指定优先边界与自动验证，记录见 `docs/refactor/09-phase-2d-api-models.md`。
-- Phase 3 至 Phase 6：尚未开始。
+- Phase 3A：已完成实现与当前环境验证，记录见 `docs/refactor/10-phase-3a-flash-sale-admission.md`；真实 MySQL 端到端仍待补验。
+- Phase 3B、3C 及 Phase 4 至 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。

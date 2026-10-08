@@ -3,24 +3,19 @@ package io.github.frewily.campushub.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.entity.VoucherOrder;
-import io.github.frewily.campushub.exception.BusinessException;
-import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.VoucherOrderMapper;
 import io.github.frewily.campushub.service.ISeckillVoucherService;
 import io.github.frewily.campushub.service.IVoucherOrderService;
+import io.github.frewily.campushub.service.FlashSaleAdmissionService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import io.github.frewily.campushub.utils.RedisIdWorker;
-import io.github.frewily.campushub.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.connection.stream.*;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -28,7 +23,6 @@ import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
 import java.time.Duration;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -46,7 +40,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private ISeckillVoucherService seckillVoucherService;
 
     @Resource
-    private RedisIdWorker redisIdWorker;
+    private FlashSaleAdmissionService flashSaleAdmissionService;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -60,14 +54,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Value("${campushub.order.stream-consumer-enabled:true}")
     private boolean streamConsumerEnabled;
 
-
-    private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
-
-    static {
-        SECKILL_SCRIPT = new DefaultRedisScript<>();
-        SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
-        SECKILL_SCRIPT.setResultType(Long.class);
-    }
 
     private final ExecutorService seckillOrderExecutor = Executors.newSingleThreadExecutor();
 
@@ -203,22 +189,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Override
     public Result seckillVoucher(Long voucherId) {
-        Long userId = UserHolder.getUser().getId();
-        Long orderId = redisIdWorker.nextId("order");
-
-        Long result = stringRedisTemplate.execute(
-                SECKILL_SCRIPT,
-                Collections.emptyList(),
-                voucherId.toString(), userId.toString(), String.valueOf(orderId)//全部要转成字符串
-        );
-        int r = result.intValue();//转成int类型
-        if (r != 0) {
-            throw new BusinessException(
-                    ErrorCode.CONFLICT,
-                    r == 1 ? "库存不足" : "不能重复下单"
-            );
-        }
-        return Result.ok(orderId);
+        return flashSaleAdmissionService.admit(voucherId);
     }
     @Override
     public void createVoucherOrder(VoucherOrder voucherOrder) {

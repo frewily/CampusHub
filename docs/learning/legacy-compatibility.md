@@ -16,6 +16,8 @@
 - `tb_*` 表名及字段名保持不变。
 - HTTP 路径、有效业务字段名和统一响应包装保持不变。Phase 2D 为优先写入接口引入字段白名单与必填校验，冗余实体字段忽略，缺失或非法业务字段返回 400；具体变化见 [Phase 2D 接口记录](../refactor/09-phase-2d-api-models.md)。
 - Redis key、Stream 名称和消费组名称保持不变。
+- Phase 3A 保留旧库存/参与 key 和 `stream.orders` 事件字段，新增活动规则与原订单 ID 映射 key；旧活动若只有库存 key，不会自动补齐规则或重置库存。
+- 抢购成功仍以数字 ID 放在 `data`，增量返回 `acceptanceStatus=ACCEPTED` 和 `replayed`。这仅表示 Redis Stream 已受理。活动状态、时间、资格与库存拒绝改为明确错误码；超时/规则异常返回 503，详情见 [Phase 3A 记录](../refactor/10-phase-3a-flash-sale-admission.md)。
 - 旧业务类名如 `Shop`、`Blog`、`Voucher` 暂时保留，并按领域模型中的映射逐阶段迁移。
 
 这些名称属于现有数据和接口的兼容约束，不再代表项目产品身份。后续修改必须配套数据迁移、接口版本边界或 Redis 读写过渡，不能只做字符串替换。
