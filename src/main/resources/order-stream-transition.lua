@@ -32,10 +32,10 @@ if action == 'SUCCESS' then
 end
 if action ~= 'FAILURE' then return redis.error_reply('ORDER_INVALID_ACTION') end
 if attempts < maximum then return 0 end -- keep pending, other work may progress
+local original = redis.call('XRANGE', KEYS[1], id, id)
+if #original == 0 then return redis.error_reply('ORDER_PAYLOAD_MISSING') end
 local deadId = redis.call('HGET', KEYS[4], id)
 if not deadId then
-    local original = redis.call('XRANGE', KEYS[1], id, id)
-    if #original == 0 then return redis.error_reply('ORDER_PAYLOAD_MISSING') end
     local clock = redis.call('TIME')
     -- Append BEFORE ACK. If XADD fails (e.g. exhausted stream ID), pending stays recoverable.
     deadId = redis.call('XADD', KEYS[3], '*', 'sourceId', id, 'group', group, 'consumer', consumer,
@@ -50,6 +50,14 @@ else
         if archived[1][2][i] == 'sourceId' and archived[1][2][i + 1] == id then matching = true end
     end
     if not matching then return redis.error_reply('ORDER_ARCHIVE_INDEX_CORRUPT') end
+end
+-- Supplemental read projection; source-ID index and DLQ remain the recovery evidence.
+for i = 1, #original[1][2], 2 do
+    local value = original[1][2][i + 1]
+    if original[1][2][i] == 'id' and string.match(value, '^[1-9]%d*$')
+            and (#value < 19 or (#value == 19 and value <= '9223372036854775807')) then
+        redis.call('HSET', KEYS[4], 'order:' .. value, deadId)
+    end
 end
 redis.call('XACK', KEYS[1], group, id)
 redis.call('HDEL', KEYS[2], id)

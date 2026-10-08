@@ -14,10 +14,11 @@ CampusHub is a gradual refactoring of a legacy local-services teaching project i
 - Phase 2D separates shop/post/promotion write requests and user-profile responses from persistence entities, with explicit field mappings and request validation.
 - Phase 3A enforces flash-sale eligibility, status, time window, inventory and retry rules in Redis/Lua. `ACCEPTED` means an event was queued in Redis, not that an order was persisted or paid.
 - Phase 3B adds UUID consumers, bounded pending recovery/retries, owner-checked failure archival and operator-only same-ID redrive. Failed reservations are retained for DB review, never automatically refunded. Redis Stream is retained by ADR 0001.
+- Phase 3C adds owner-only order status queries and cancellation of persisted unpaid flash-sale orders. Database cancellation, stock return and an outbox commit together; leased recovery compensates Redis separately without removing one-user-one-order identity.
 - The legacy `hmdp` database schema, table names, HTTP routes and Redis keys remain compatible until their dedicated migration stages.
-- End-to-end behavior and performance have not yet been verified.
+- Isolated MySQL/Redis business-chain integration is verified on the local versions below; real-network deployment, target MySQL 8 compatibility and performance remain unverified.
 
-See the [domain model](docs/domain-model.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 2D API contract](docs/refactor/09-phase-2d-api-models.md), [Phase 3A verification and flash-sale contract](docs/refactor/10-phase-3a-flash-sale-admission.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md). Earlier phase records remain under `docs/refactor/`.
+See the [domain model](docs/domain-model.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 2D API contract](docs/refactor/09-phase-2d-api-models.md), [flash-sale admission contract](docs/refactor/10-phase-3a-flash-sale-admission.md), [Phase 3C order lifecycle and recovery](docs/refactor/12-phase-3c-order-lifecycle.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md). Earlier phase records remain under `docs/refactor/`.
 
 Write requests now accept only documented business fields. Extra entity fields are ignored; missing or invalid required fields return HTTP 400 with `VALIDATION_FAILED`. See the Phase 2D API contract before reusing full legacy entity payloads.
 
@@ -41,6 +42,8 @@ set +a
 
 Do not commit `.env` or real credentials.
 
+Custom `DB_URL` values must keep `serverTimezone=UTC&forceConnectionTimeZoneToSession=true` so SQL timestamps and the outbox scheduler share UTC. Client-side time decoding alone does not set the database session timezone.
+
 Initialize the existing legacy schema before starting the application:
 
 ```bash
@@ -60,6 +63,14 @@ mysql -u "$DB_USERNAME" -p hmdp < src/main/resources/db/migration/V002__add_iden
 ```
 
 Historical shops remain platform-managed with a `NULL` merchant owner until a trusted administrative process assigns them.
+
+Apply the Phase 3C cancellation outbox before enabling the new order endpoints or reconciler:
+
+```bash
+mysql -u "$DB_USERNAME" -p hmdp < src/main/resources/db/migration/V003__add_order_cancellation_outbox.sql
+```
+
+`ORDER_CANCELLATION_RECONCILER_ENABLED` defaults to true. Recovery scans every 5 seconds with a 30-second lease and 10-attempt budget. Cancellation HTTP success means the database committed, not that Redis stock is already returned. Query `GET /voucher-order/{id}?voucherId={voucherId}` for the separate compensation state; cancel with `POST /voucher-order/{id}/cancel?voucherId={voucherId}`. Keep string `orderId` from admission responses to avoid JavaScript integer precision loss; legacy numeric `data` remains. No payment, refund or auto-expiry cancellation is implemented.
 
 The application creates the Redis Stream `stream.orders` and consumer group `g1` when the order consumer is enabled.
 
@@ -91,7 +102,19 @@ Phase 3B consumer recovery and redrive tests also own an isolated Redis process:
 
 Phase 3B passed 107 default tests (0 failures/errors, 4 manual cases skipped) and 26 isolated Redis tests on Redis 8.6.2 under JDK 8, with the same command-line Surefire override. Real MySQL, Redis 6 compatibility, persistence/failover and performance remain unverified. The Spring worker recovery IT uses a mock order persistence service.
 
-The recovered Phase 3A checkout passed 96 default tests (4 manual external-service cases skipped) and 10 isolated Redis script tests under JDK 8. To use the available local dependency cache for that verification, Surefire `3.1.2` was selected via a command-line property; the project POM was not changed. Real MySQL end-to-end and performance verification remain pending.
+These Phase 3A/3B figures are historical phase evidence; Phase 3C adds an isolated database integration suite and current evidence in its [stage record](docs/refactor/12-phase-3c-order-lifecycle.md).
+
+Phase 3C explicit suites own their processes and synthetic data. They require `redis-server` and, for the database suite, `mysqld` on PATH (or `REDIS_SERVER_BINARY` / `MYSQLD_SERVER_BINARY`):
+
+```bash
+./mvnw -Dmaven-surefire-plugin.version=3.1.2 \
+  -Dtest=OrderCancellationRedisIT,OrderStreamRedisIT,FlashSaleRedisScriptIT test
+./mvnw -Dmaven-surefire-plugin.version=3.1.2 -Dtest=OrderLifecycleMySqlRedisIT test
+```
+
+The database suite was verified on MySQL 9.6.0 with a minimal synthetic schema, real MyBatis/transactions/Redisson locks, and V001/V002/V003 forward/repeated migrations. It does not migrate historical production data or confirm MySQL 8 compatibility. Its HTTP coverage uses MockMvc with the real token filter and business chain, not a deployed network server; full security-chain route tests separately use mocked dependencies. Redis ACL partial-execution recovery is tested on Redis 8.6.2. Redis 6, persistence/failover and actual load testing remain unverified.
+
+Phase 3C final verification: 143 default tests (0 failures/errors, 4 designed skips), 35 isolated Redis tests and 15 isolated MySQL/Redis integration tests (0 failures/errors/skips).
 
 ## Run
 
@@ -99,4 +122,4 @@ The recovered Phase 3A checkout passed 96 default tests (4 manual external-servi
 ./mvnw spring-boot:run
 ```
 
-The service listens on port `8081` by default. Redis Token authentication and role/resource authorization are implemented, but the V002 migration and database-backed authorization flow still require verification against an isolated real MySQL environment. New flash-sale activity creation also requires the existing database tables and Redis publication; an uncertain post-commit Redis failure may leave the database activity saved. Consumer recovery is verified within the isolated Redis/mock-persistence scope, not full MySQL end-to-end. Order status/fulfillment, performance and deployment support remain scheduled work; consult the migration plan before treating these capabilities as complete.
+The service listens on port `8081` by default. Apply all migrations first. V002 backfill is verified only on synthetic MySQL 9.6.0 data; full historical migration and deployment smoke tests remain required. New flash-sale activity creation also requires the existing tables and Redis publication; an uncertain post-commit Redis failure may leave the database activity saved. Order query/cancellation and isolated business-chain recovery are implemented, while payment/fulfillment, performance and deployment support remain scheduled work. Consult the migration plan and Phase 3C recovery boundaries before deployment.

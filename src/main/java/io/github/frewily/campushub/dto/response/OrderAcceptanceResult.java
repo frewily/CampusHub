@@ -8,9 +8,12 @@ import lombok.Getter;
 public class OrderAcceptanceResult extends Result {
     private final String acceptanceStatus = "ACCEPTED";
     private final boolean replayed;
+    /** Lossless ID for clients whose number type cannot represent Java Long values. */
+    private final String orderId;
 
     public OrderAcceptanceResult(Long orderId, boolean replayed) {
         super(true, null, null, orderId, null);
         this.replayed = replayed;
+        this.orderId = orderId.toString();
     }
 }

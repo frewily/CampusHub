@@ -42,4 +42,26 @@ class DatabaseMigrationTest {
         assertTrue(normalized.contains("INFORMATION_SCHEMA.COLUMNS"));
         assertTrue(normalized.contains("CREATE INDEX idx_shop_merchant ON tb_shop (merchant_id)"));
     }
+
+    @Test
+    void shouldDefineIdempotentOrderCancellationOutboxContract() throws IOException {
+        String migration = StreamUtils.copyToString(
+                getClass().getResourceAsStream("/db/migration/V003__add_order_cancellation_outbox.sql"),
+                StandardCharsets.UTF_8);
+        String normalized = migration.replace("`", "").replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains("CREATE TABLE IF NOT EXISTS tb_order_cancellation"));
+        assertTrue(normalized.contains("order_id BIGINT NOT NULL"));
+        assertTrue(normalized.contains("PRIMARY KEY (order_id)"));
+        assertTrue(normalized.contains("status VARCHAR(24) NOT NULL DEFAULT 'PENDING'"));
+        assertTrue(normalized.contains("PENDING, COMPLETED, REQUIRES_REVIEW"));
+        assertTrue(normalized.contains("lease_token VARCHAR(36) NULL"));
+        assertTrue(normalized.contains("lease_until DATETIME NULL"));
+        assertTrue(normalized.contains("expires_at_ms BIGINT NOT NULL"));
+        assertTrue(normalized.contains("Redis活动结束后24小时的原截止毫秒时间戳，不是本次取消时间"));
+        assertTrue(normalized.contains(
+                "INDEX idx_order_cancellation_due (status, next_attempt_at, lease_until)"));
+        assertTrue(normalized.contains("ENGINE = InnoDB CHARACTER SET = utf8mb4"));
+        assertTrue(normalized.contains("must be written in one transaction"));
+    }
 }

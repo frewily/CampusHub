@@ -40,6 +40,14 @@ class OrderAcceptanceHttpContractTest {
     }
 
     @Test
+    void acceptanceExposesLosslessIdWithoutRemovingLegacyNumericData() throws Exception {
+        when(orders.seckillVoucher(9L)).thenReturn(new OrderAcceptanceResult(Long.MAX_VALUE, false));
+        mvc.perform(post("/voucher-order/seckill/9")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(Long.MAX_VALUE))
+                .andExpect(jsonPath("$.orderId").value("9223372036854775807"));
+    }
+
+    @Test
     void uncertainRedisFailureIsStructured503() throws Exception {
         when(orders.seckillVoucher(9L)).thenThrow(new BusinessException(ErrorCode.ACTIVITY_UNAVAILABLE));
         mvc.perform(post("/voucher-order/seckill/9")).andExpect(status().isServiceUnavailable())

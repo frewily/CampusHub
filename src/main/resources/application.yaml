@@ -5,7 +5,7 @@ spring:
     name: campushub
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:}
   redis:
@@ -30,3 +30,4 @@ campushub:
     stream-consumer-enabled: ${ORDER_STREAM_CONSUMER_ENABLED:true}
     claim-idle-ms: ${ORDER_CLAIM_IDLE_MS:60000}
     max-attempts: ${ORDER_MAX_ATTEMPTS:5}
+    cancellation-reconciler-enabled: ${ORDER_CANCELLATION_RECONCILER_ENABLED:true}

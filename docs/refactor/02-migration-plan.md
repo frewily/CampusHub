@@ -131,6 +131,8 @@
 
 出口条件：并发测试确认不超卖、不重复建单；失败路径有可观察状态。尚未压测时明确写“尚未进行实际压测”。
 
+状态：已实现本人查询、已落库未支付订单取消和事务 outbox/Redis 补偿闭环；本机 MySQL 9.6.0 + Redis 8.6.2 隔离业务链覆盖并发、真实回滚与恢复，记录见 `docs/refactor/12-phase-3c-order-lifecycle.md`。这不等于目标 MySQL 8/Redis 6、历史数据迁移、真实网络部署或压测验收。
+
 ### Phase 4 缓存与搜索
 
 #### Phase 4A 缓存治理
@@ -201,7 +203,8 @@
 - Phase 2B：已完成实现与验证，会话生命周期、登出和验证码安全记录见 `docs/refactor/07-phase-2b-session-lifecycle.md`。
 - Phase 2C：已完成实现与当前环境验证，账号状态、角色、商户资源归属和待补验边界见 `docs/refactor/08-phase-2c-authorization.md`。
 - Phase 2D：已完成指定优先边界与自动验证，记录见 `docs/refactor/09-phase-2d-api-models.md`。
-- Phase 3A：已完成实现与当前环境验证，记录见 `docs/refactor/10-phase-3a-flash-sale-admission.md`；真实 MySQL 端到端仍待补验。
-- Phase 3B：已完成实现与当前环境验证，记录见 `docs/refactor/11-phase-3b-reliable-order-consumption.md`；真实 MySQL/Redis 故障端到端仍待补验。
-- Phase 3C 及 Phase 4 至 Phase 6：尚未开始。
+- Phase 3A：已完成实现与当前环境验证，记录见 `docs/refactor/10-phase-3a-flash-sale-admission.md`；Phase 3C 补充本机隔离 MySQL/Redis 业务链验证。
+- Phase 3B：已完成实现与当前环境验证，记录见 `docs/refactor/11-phase-3b-reliable-order-consumption.md`；Phase 3C 补充真实事务回滚与 worker 替换恢复测试，不包含进程强杀/failover 演练。
+- Phase 3C：已完成实现与本机隔离验证，记录见 `docs/refactor/12-phase-3c-order-lifecycle.md`；目标版本、历史数据迁移、部署及性能边界仍待验收。
+- Phase 4 至 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。
