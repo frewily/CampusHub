@@ -60,6 +60,8 @@ COMPLETED / EXPIRED 是“不再对过期运行态写入”，不声称实际回
 
 自定义 `DB_URL` 必须保留 `serverTimezone=UTC&forceConnectionTimeZoneToSession=true`；仅设置解码时区不足以统一 SQL CURRENT_TIMESTAMP/TIMESTAMP。外部手写 outbox 需使用 UTC，不能绕过取消事务直接补造记录。
 
+提交后审查复现 `.env.example` 的未引用 JDBC URL 在 zsh 加载时于 `&` 报语法错误，按 README 的 source 操作不能得到 DB_URL。示例现用单引号保留整个 URL，已在 zsh/bash 加载检查中验证 UTC 参数与补偿开关完整。这只是公开占位配置检查，不加载真实 `.env`。
+
 ## 人工核对与上线前要求
 
 先确认环境、停住相关自动处理并保留证据，按 order ID 核对 DB 状态、库存事务、outbox、Redis 原预留与 marker。PENDING marker 不能单独证明库存是否已加；不得删 marker 后盲目再试、清参与记录、覆盖整份库存或把失败状态改成 COMPLETED。需要可靠事务/运行证据才可决定修复，证据不足保留 REQUIRES_REVIEW。本阶段没有自动人工修复接口。
