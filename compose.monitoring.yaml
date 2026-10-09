@@ -1,0 +1,30 @@
+# Explicit local opt-in. Prometheus shares only the app's network namespace so it
+# can scrape the loopback-only management listener without publishing that socket.
+services:
+  app:
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PUBLISHED_PORT:-9090}:9090"
+    environment:
+      MANAGEMENT_PORT: "8082"
+  prometheus:
+    profiles: [app]
+    image: prom/prometheus:v3.5.0
+    network_mode: service:app
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --storage.tsdb.retention.size=256MB
+      - --web.listen-address=:9090
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      app:
+        condition: service_healthy
+volumes:
+  prometheus-data:

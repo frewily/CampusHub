@@ -35,8 +35,38 @@ spring:
 mybatis-plus:
   type-aliases-package: io.github.frewily.campushub.entity
 logging:
+  pattern:
+    level: "%5p [requestId=%X{requestId:-}]"
   level:
     io.github.frewily.campushub: info
+management:
+  server:
+    address: 127.0.0.1
+    port: ${MANAGEMENT_PORT:8082}
+  endpoints:
+    enabled-by-default: false
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      enabled: true
+      show-details: never
+      show-components: never
+    prometheus:
+      enabled: true
+  health:
+    defaults:
+      enabled: false
+  metrics:
+    enable:
+      # No outbound HTTP clients currently exist. Enable only after a safe URI-tag policy is designed.
+      http.client.requests: false
+    tags:
+      application: campushub
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 campushub:
   images:
     directory: ${IMAGE_STORAGE_DIR:./data/uploads}

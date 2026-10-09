@@ -175,6 +175,14 @@
 
 出口条件：指标可采集，压测可复现，所有 QPS、P95、P99 和提升比例均能追溯到原始测试记录。
 
+按可审查的小阶段推进，不把指标接入等同于压测完成：
+
+- Phase 6A：请求编号、安全请求摘要、独立本机 Actuator 管理面、Micrometer HTTP/JVM/连接池指标和可选 Prometheus 实际采集。记录见 `docs/refactor/16-phase-6a-observability.md`。
+- Phase 6B：核心业务质量缺口与业务诊断指标，明确缓存、订单消费及 outbox 的测量语义，补充必要的隔离故障测试。
+- Phase 6C：选定一种负载工具，保存参数、机器/版本、持续时间及原始结果，建立可复现的基线并生成事实限定的性能/面试材料。
+
+每个小阶段仍执行验证、提交、提交后审查；6A 不进入实际压测，也不宣称 Phase 6 全部完成。
+
 ## 3 每阶段审查清单
 
 ### 代码与行为
@@ -215,5 +223,6 @@
 - Phase 4A：已完成门店详情缓存治理与本机隔离验证，记录见 `docs/refactor/13-phase-4a-shop-cache-governance.md`。
 - Phase 4B：已完成搜索功能基线与本机隔离验证，记录见 `docs/refactor/14-phase-4b-shop-search.md`；选型见 ADR 0002，没有性能/相关性或目标版本验收结论。
 - Phase 5：已完成实现与本机隔离验收，记录见 `docs/refactor/15-phase-5-engineering.md`；提交后审查完成才进入下一阶段。
-- Phase 6：尚未开始。
+- Phase 6A：已完成可观测性基线与本机隔离验证，244 项默认测试、82 项隔离 IT、10 组部署回归和 5 组实际 Prometheus 采集检查通过；见 `docs/refactor/16-phase-6a-observability.md`。按流程提交后审查完成再进入下一小阶段。
+- Phase 6B/6C：业务质量与诊断、可复现性能验证尚未开始；Phase 6 整体尚未完成。
 - 实际性能数据：尚未进行实际压测。

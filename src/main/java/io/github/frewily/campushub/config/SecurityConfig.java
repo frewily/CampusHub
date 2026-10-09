@@ -5,6 +5,8 @@ import io.github.frewily.campushub.security.RedisTokenAuthenticationFilter;
 import io.github.frewily.campushub.security.SecurityErrorResponder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -26,6 +28,21 @@ public class SecurityConfig {
     }
 
     @Bean
+    @Order(1)
+    public SecurityFilterChain managementSecurityFilterChain(HttpSecurity http) throws Exception {
+        http.requestMatcher(EndpointRequest.toAnyEndpoint())
+                .csrf().disable()
+                .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                .and().requestCache().disable()
+                .formLogin().disable().httpBasic().disable().logout().disable()
+                .authorizeRequests()
+                .antMatchers(HttpMethod.GET, "/actuator/health", "/actuator/prometheus").permitAll()
+                .anyRequest().denyAll();
+        return http.build();
+    }
+
+    @Bean
+    @Order(2)
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf().disable()
                 .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)

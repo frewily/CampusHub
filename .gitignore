@@ -4,6 +4,7 @@ HELP.md
 !.env.example
 data/
 *.log
+__pycache__/
 target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/

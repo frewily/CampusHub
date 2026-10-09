@@ -101,7 +101,7 @@ def verify_host_and_prod():
                              stderr=subprocess.STDOUT, timeout=10)
     assert version.returncode == 0 and b'version "1.8.' in version.stdout, "host acceptance requires Java 8"
     jar = str(ROOT / "target/campushub-0.0.1-SNAPSHOT.jar")
-    host_env.update(SPRING_PROFILES_ACTIVE="dev", SERVER_PORT="0", SERVER_ADDRESS="127.0.0.1",
+    host_env.update(SPRING_PROFILES_ACTIVE="dev", SERVER_PORT="0", MANAGEMENT_PORT="0", SERVER_ADDRESS="127.0.0.1",
                     DB_URL="jdbc:mysql://" + compose("port", "mysql", "3306")
                     + "/campushub?useSSL=false&serverTimezone=UTC&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true",
                     DB_USERNAME=ENV["DB_USERNAME"], DB_PASSWORD=ENV["DB_PASSWORD"],
@@ -160,6 +160,20 @@ def multipart(content):
 def check(label):
     PASSED.append(label)
     print("PASS: " + label, flush=True)
+
+
+def cleanup():
+    try:
+        compose("--profile", "app", "logs", "--no-color", timeout=30)
+    finally:
+        compose("--profile", "app", "down", "--volumes", "--rmi", "local", "--remove-orphans", timeout=90)
+        assert compose("--profile", "app", "ps", "-aq") == "", "test containers remain after cleanup"
+        for kind in ("volume", "network"):
+            assert run(["docker", kind, "ls", "--filter", "label=com.docker.compose.project=" + PROJECT,
+                        "--format", "{{.Name}}"] ) == "", "test " + kind + " resources remain after cleanup"
+        assert run(["docker", "image", "ls", "--filter", "reference=" + PROJECT + "-app:latest",
+                    "--format", "{{.Repository}}"] ) == "", "test app image remains after cleanup"
+        print("Removed only test-owned containers, network, image and synthetic volumes: " + PROJECT, flush=True)
 
 
 def main():
@@ -240,18 +254,7 @@ def main():
         print("Verified versions: " + json.dumps(versions), flush=True)
     finally:
         if owned:
-            try:
-                compose("--profile", "app", "logs", "--no-color", timeout=30)
-            finally:
-                compose("--profile", "app", "down", "--volumes", "--rmi", "local", "--remove-orphans", timeout=90)
-                assert compose("--profile", "app", "ps", "-aq") == "", "test containers remain after cleanup"
-                assert run(["docker", "volume", "ls", "--filter", "label=com.docker.compose.project=" + PROJECT,
-                            "--format", "{{.Name}}"] ) == "", "test volumes remain after cleanup"
-                assert run(["docker", "network", "ls", "--filter", "label=com.docker.compose.project=" + PROJECT,
-                            "--format", "{{.Name}}"] ) == "", "test networks remain after cleanup"
-                assert run(["docker", "image", "ls", "--filter", "reference=" + PROJECT + "-app:latest",
-                            "--format", "{{.Repository}}"] ) == "", "test app image remains after cleanup"
-                print("Removed only test-owned containers, network, image and synthetic volumes: " + PROJECT, flush=True)
+            cleanup()
     print("Private acceptance artifacts: " + str(ARTIFACTS), flush=True)
 
 
