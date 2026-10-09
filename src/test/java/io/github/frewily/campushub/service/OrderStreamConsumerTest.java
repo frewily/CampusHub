@@ -22,10 +22,13 @@ class OrderStreamConsumerTest {
         when(queue.recoverPending()).thenReturn(Collections.singletonList(record));
         when(queue.readNew(any(Duration.class))).thenReturn(Collections.emptyList());
         when(queue.begin(record.getId())).thenReturn(1L);
+        when(queue.success(record.getId())).thenReturn(1L);
         consumer.consumeOnce();
         verify(orders).handleVoucherOrder(argThat(order -> order.getId().equals(100L)));
         verify(queue).success(record.getId());
         verify(queue).readNew(any(Duration.class));
+        assertEquals(1, consumer.diagnostics().count(OrderStreamConsumer.DiagnosticEvent.HANDLER_RETURNED));
+        assertEquals(1, consumer.diagnostics().count(OrderStreamConsumer.DiagnosticEvent.ACKNOWLEDGED));
     }
 
     @Test
@@ -35,6 +38,7 @@ class OrderStreamConsumerTest {
         when(queue.recoverPending()).thenReturn(Collections.singletonList(poison));
         when(queue.readNew(any(Duration.class))).thenReturn(Collections.singletonList(valid));
         when(queue.begin(any())).thenReturn(1L);
+        when(queue.success(valid.getId())).thenReturn(1L);
         consumer.consumeOnce();
         verify(queue).failure(poison.getId(), "IllegalArgumentException");
         verify(queue, never()).success(poison.getId());
@@ -75,6 +79,20 @@ class OrderStreamConsumerTest {
         assertThrows(IllegalStateException.class, () -> consumer.process(record));
         verify(orders).handleVoucherOrder(any());
         verify(queue, never()).failure(any(), anyString());
+        assertEquals(1, consumer.diagnostics().count(OrderStreamConsumer.DiagnosticEvent.HANDLER_RETURNED));
+        assertEquals(0, consumer.diagnostics().count(OrderStreamConsumer.DiagnosticEvent.ACKNOWLEDGED));
+        assertEquals(0, consumer.diagnostics().count(OrderStreamConsumer.DiagnosticEvent.UNCONFIRMED));
+    }
+
+    @Test
+    void nonOneAckResultIsUnconfirmedAndNeverCountedAsAcknowledged() {
+        MapRecord<String, Object, Object> record = record("100");
+        when(queue.begin(record.getId())).thenReturn(1L);
+        when(queue.success(record.getId())).thenReturn(0L);
+        consumer.process(record);
+        assertEquals(1, consumer.diagnostics().count(OrderStreamConsumer.DiagnosticEvent.HANDLER_RETURNED));
+        assertEquals(0, consumer.diagnostics().count(OrderStreamConsumer.DiagnosticEvent.ACKNOWLEDGED));
+        assertEquals(1, consumer.diagnostics().count(OrderStreamConsumer.DiagnosticEvent.UNCONFIRMED));
     }
 
     @Test
@@ -94,6 +112,7 @@ class OrderStreamConsumerTest {
         verifyNoInteractions(orders);
         verify(queue, never()).success(any());
         verify(queue, never()).failure(any(), anyString());
+        assertEquals(1, consumer.diagnostics().count(OrderStreamConsumer.DiagnosticEvent.STALE));
     }
 
     @Test

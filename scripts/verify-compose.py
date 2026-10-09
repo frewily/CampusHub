@@ -70,7 +70,8 @@ def request(base, route, expected=200, method="GET", body=None, headers=None):
     except urllib.error.HTTPError as error:
         response = error
     with response:
-        assert response.status == expected, "unexpected HTTP status for " + route.split("?")[0]
+        assert response.status == expected, "unexpected HTTP status %s (expected %s) for %s" % (
+            response.status, expected, route.split("?")[0])
         return response.read(), dict(response.headers)
 
 

@@ -4,6 +4,7 @@ import io.github.frewily.campushub.entity.ShopCacheInvalidation;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.ShopCacheInvalidationMapper;
+import io.github.frewily.campushub.observability.DiagnosticCounters;
 import io.github.frewily.campushub.utils.CacheClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,9 +17,18 @@ import java.util.UUID;
 @Slf4j
 @Service
 public class ShopCacheInvalidationService {
+    public enum DiagnosticEvent {
+        CALLBACK_INVALIDATED, CALLBACK_FAILED, COMPLETED, RETRY_RECORDED,
+        STALE, ENTRY_FAILURE, POLL_FAILURE, UNCONFIRMED
+    }
+
     private final ShopCacheInvalidationMapper entries;
     private final CacheClient cache;
     private final boolean enabled;
+    private final DiagnosticCounters<DiagnosticEvent> diagnostics =
+            new DiagnosticCounters<>(DiagnosticEvent.class);
+
+    public DiagnosticCounters<DiagnosticEvent> diagnostics() { return diagnostics; }
     public ShopCacheInvalidationService(ShopCacheInvalidationMapper entries, CacheClient cache,
             @Value("${campushub.cache.invalidation-worker-enabled:true}") boolean enabled) {
         this.entries = entries; this.cache = cache; this.enabled = enabled;
@@ -38,8 +48,12 @@ public class ShopCacheInvalidationService {
             @Override public void afterCommit() {
                 // NEVER use this callback's still-bound DB connection to mark a row complete.
                 // Redis only; scheduled recovery acknowledges via a new committed DB operation.
-                try { cache.invalidateShop(id); }
+                try {
+                    cache.invalidateShop(id);
+                    diagnostics.increment(DiagnosticEvent.CALLBACK_INVALIDATED);
+                }
                 catch (RuntimeException error) {
+                    diagnostics.increment(DiagnosticEvent.CALLBACK_FAILED);
                     log.warn("Shop cache invalidation pending, shopId={}, errorClass={}", id, error.getClass().getSimpleName());
                 }
             }
@@ -53,20 +67,30 @@ public class ShopCacheInvalidationService {
             for (ShopCacheInvalidation entry : entries.pending()) {
                 try { recover(entry); }
                 catch (RuntimeException error) {
+                    diagnostics.increment(DiagnosticEvent.ENTRY_FAILURE);
                     log.warn("Shop invalidation unavailable, shopId={}, errorClass={}", entry.getShopId(), error.getClass().getSimpleName());
                 }
             }
         } catch (RuntimeException error) {
+            diagnostics.increment(DiagnosticEvent.POLL_FAILURE);
             log.warn("Shop invalidation outbox unavailable, errorClass={}", error.getClass().getSimpleName());
         }
     }
     public void recover(ShopCacheInvalidation entry) {
         try { cache.invalidateShop(entry.getShopId()); }
         catch (RuntimeException error) {
-            entries.failed(entry.getShopId(), entry.getGeneration(), error.getClass().getSimpleName());
+            int failed = entries.failed(entry.getShopId(), entry.getGeneration(), error.getClass().getSimpleName());
+            recordCasResult(failed, DiagnosticEvent.RETRY_RECORDED);
             return;
         }
         // A newer DB write replaces generation; an old worker cannot erase that pending event.
-        entries.complete(entry.getShopId(), entry.getGeneration());
+        int completed = entries.complete(entry.getShopId(), entry.getGeneration());
+        recordCasResult(completed, DiagnosticEvent.COMPLETED);
+    }
+
+    private void recordCasResult(int rows, DiagnosticEvent confirmedEvent) {
+        if (rows == 1) diagnostics.increment(confirmedEvent);
+        else if (rows == 0) diagnostics.increment(DiagnosticEvent.STALE);
+        else diagnostics.increment(DiagnosticEvent.UNCONFIRMED);
     }
 }

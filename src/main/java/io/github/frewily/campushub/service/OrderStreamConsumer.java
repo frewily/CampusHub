@@ -2,6 +2,7 @@ package io.github.frewily.campushub.service;
 
 import io.github.frewily.campushub.entity.VoucherOrder;
 import io.github.frewily.campushub.exception.OrderProcessingException;
+import io.github.frewily.campushub.observability.DiagnosticCounters;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,12 +20,21 @@ import java.util.concurrent.*;
 @Slf4j
 @Component
 public class OrderStreamConsumer {
+    public enum DiagnosticEvent {
+        HANDLER_RETURNED, ACKNOWLEDGED, STALE, DEFERRED, ARCHIVED,
+        TRANSITION_FAILURE, POLL_FAILURE, UNCONFIRMED
+    }
+
     private final IVoucherOrderService orders;
     private final OrderStreamQueue queue;
     private final boolean enabled;
     private final String consumerName = "order-" + UUID.randomUUID();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final DiagnosticCounters<DiagnosticEvent> diagnostics =
+            new DiagnosticCounters<>(DiagnosticEvent.class);
     private volatile boolean running;
+
+    public DiagnosticCounters<DiagnosticEvent> diagnostics() { return diagnostics; }
 
     @Autowired
     public OrderStreamConsumer(IVoucherOrderService orders, StringRedisTemplate redis,
@@ -60,6 +70,7 @@ public class OrderStreamConsumer {
                 consumeOnce(); // recovery runs at startup AND every round, even when there are no new events
             } catch (RuntimeException error) {
                 if (!running) return;
+                diagnostics.increment(DiagnosticEvent.POLL_FAILURE);
                 // Never log exception messages/payloads: dependency errors may contain sensitive data.
                 log.warn("Order consumer infrastructure failure, consumer={}, errorClass={}",
                         consumerName, error.getClass().getSimpleName());
@@ -84,6 +95,7 @@ public class OrderStreamConsumer {
     private void processSafely(MapRecord<String, Object, Object> record) {
         try { process(record); }
         catch (RuntimeException infrastructureError) {
+            diagnostics.increment(DiagnosticEvent.TRANSITION_FAILURE);
             // Corrupt state/archival failures are isolated per record. Do not ACK or hide the pending entry.
             log.warn("Order transition unavailable, sourceId={}, consumer={}, errorClass={}",
                     record.getId(), consumerName, infrastructureError.getClass().getSimpleName());
@@ -92,7 +104,7 @@ public class OrderStreamConsumer {
 
     void process(MapRecord<String, Object, Object> record) {
         long attempt = queue.begin(record.getId());
-        if (attempt < 0) return;
+        if (attempt < 0) { diagnostics.increment(DiagnosticEvent.STALE); return; }
         if (attempt == 0) { archiveOrDefer(record, "RetryBudgetExhausted"); return; }
         try {
             orders.handleVoucherOrder(decode(record.getValue()));
@@ -101,14 +113,23 @@ public class OrderStreamConsumer {
                     ? ((OrderProcessingException) error).getReason().name() : error.getClass().getSimpleName());
             return;
         }
+        diagnostics.increment(DiagnosticEvent.HANDLER_RETURNED);
         // ACK errors are NOT persistence failures. A redelivery rechecks DB idempotency.
-        queue.success(record.getId());
+        long acknowledged = queue.success(record.getId());
+        if (acknowledged == 1) diagnostics.increment(DiagnosticEvent.ACKNOWLEDGED);
+        else if (acknowledged < 0) diagnostics.increment(DiagnosticEvent.STALE);
+        else diagnostics.increment(DiagnosticEvent.UNCONFIRMED);
     }
 
     private void archiveOrDefer(MapRecord<String, Object, Object> record, String classification) {
         long result = queue.failure(record.getId(), classification);
+        if (result == 1) diagnostics.increment(DiagnosticEvent.ARCHIVED);
+        else if (result == 0) diagnostics.increment(DiagnosticEvent.DEFERRED);
+        else if (result < 0) diagnostics.increment(DiagnosticEvent.STALE);
+        else diagnostics.increment(DiagnosticEvent.UNCONFIRMED);
         log.warn("Order attempt failed, sourceId={}, consumer={}, disposition={}, errorClass={}",
-                record.getId(), consumerName, result == 1 ? "REQUIRES_REVIEW" : result == 0 ? "PENDING" : "STALE",
+                record.getId(), consumerName, result == 1 ? "REQUIRES_REVIEW"
+                        : result == 0 ? "PENDING" : result < 0 ? "STALE" : "UNCONFIRMED",
                 classification);
     }
 

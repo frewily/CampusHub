@@ -224,5 +224,6 @@
 - Phase 4B：已完成搜索功能基线与本机隔离验证，记录见 `docs/refactor/14-phase-4b-shop-search.md`；选型见 ADR 0002，没有性能/相关性或目标版本验收结论。
 - Phase 5：已完成实现与本机隔离验收，记录见 `docs/refactor/15-phase-5-engineering.md`；提交后审查完成才进入下一阶段。
 - Phase 6A：已完成可观测性基线与本机隔离验证，244 项默认测试、82 项隔离 IT、10 组部署回归和 5 组实际 Prometheus 采集检查通过；见 `docs/refactor/16-phase-6a-observability.md`。按流程提交后审查完成再进入下一小阶段。
-- Phase 6B/6C：业务质量与诊断、可复现性能验证尚未开始；Phase 6 整体尚未完成。
+- Phase 6B：已完成固定标签业务诊断与核心合成 HTTP 故障补验；46 项定向、255 项默认（4 设计跳过）、82 项隔离 IT、8 组目标业务验收、10 组部署和 5 组管理面采集回归通过。范围与测量语义见 `docs/refactor/17-phase-6b-business-diagnostics.md`；按流程提交后复审。
+- Phase 6C：可复现性能验证尚未开始；Phase 6 整体尚未完成。
 - 实际性能数据：尚未进行实际压测。

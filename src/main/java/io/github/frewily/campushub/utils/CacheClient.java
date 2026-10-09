@@ -20,6 +20,7 @@ import java.util.function.Function;
 /** One cache-aside strategy: bounded TTL, token-owned rebuild, epoch-fenced publication. */
 @Component
 public class CacheClient {
+    public enum DiagnosticEvent { FIRST_HIT, FIRST_NEGATIVE_HIT, FIRST_MISS, LOAD_STARTED, PUBLISH_REJECTED, UNAVAILABLE_SIGNAL }
     public static final String DATA_PREFIX = "cache:shop:v2:";
     public static final String EPOCH_PREFIX = "cache:shop:epoch:";
     public static final String LOCK_PREFIX = "lock:shop:v2:";
@@ -102,7 +103,20 @@ public class CacheClient {
 
     public static long positiveTtlMillis() { return 60000 + ThreadLocalRandom.current().nextLong(15001); }
     public static long negativeTtlMillis() { return 10000 + ThreadLocalRandom.current().nextLong(5001); }
-    /** Process-local diagnostics, not a metrics endpoint or a measured hit ratio. */
+    /** Process-local approximate counts; UNAVAILABLE_SIGNAL also includes invalidation failures. */
+    public long diagnosticCount(DiagnosticEvent event) {
+        switch (event) {
+            case FIRST_HIT: return hits.sum();
+            case FIRST_NEGATIVE_HIT: return negativeHits.sum();
+            case FIRST_MISS: return misses.sum();
+            case LOAD_STARTED: return loads.sum();
+            case PUBLISH_REJECTED: return rejected.sum();
+            case UNAVAILABLE_SIGNAL: return failures.sum();
+            default: throw new IllegalArgumentException("Unknown cache diagnostic event");
+        }
+    }
+
+    /** Retained compatibility seam; not a transaction snapshot or a measured hit ratio. */
     public long[] statistics() {
         return new long[]{hits.sum(), negativeHits.sum(), misses.sum(), loads.sum(), rejected.sum(), failures.sum()};
     }

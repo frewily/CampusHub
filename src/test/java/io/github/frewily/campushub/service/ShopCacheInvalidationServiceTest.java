@@ -31,12 +31,15 @@ class ShopCacheInvalidationServiceTest {
         transaction(); service.enqueue(1L); clearInvocations(entries);
         TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
         verify(cache).invalidateShop(1L); verifyNoInteractions(entries);
+        assertEquals(1, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.CALLBACK_INVALIDATED));
     }
     @Test void postCommitFailureDoesNotPretendTheDbRolledBackAndKeepsOutbox() {
         transaction(); service.enqueue(1L);
         doThrow(new IllegalStateException("not persisted")).when(cache).invalidateShop(1L);
         assertDoesNotThrow(()->TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit));
         verify(entries,never()).complete(anyLong(),anyString());
+        assertEquals(1, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.CALLBACK_FAILED));
+        assertEquals(0, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.CALLBACK_INVALIDATED));
     }
     @Test void enqueueFailureIsNotSwallowedAndCanRollbackTheShopWrite() {
         transaction(); when(entries.enqueue(anyLong(),anyString())).thenReturn(0);
@@ -45,13 +48,37 @@ class ShopCacheInvalidationServiceTest {
     }
     @Test void recoveryUsesCasAcknowledgementAndSafeErrorClass() {
         ShopCacheInvalidation entry=new ShopCacheInvalidation().setShopId(1L).setGeneration("event");
+        when(entries.complete(1L,"event")).thenReturn(1);
         service.recover(entry); verify(entries).complete(1L,"event");
+        assertEquals(1, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.COMPLETED));
         clearInvocations(entries);
         doThrow(new IllegalStateException("secret must not persist")).when(cache).invalidateShop(1L);
+        when(entries.failed(1L,"event","IllegalStateException")).thenReturn(1);
         service.recover(entry); verify(entries).failed(1L,"event","IllegalStateException");
         verify(entries,never()).complete(anyLong(),anyString());
+        assertEquals(1, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.RETRY_RECORDED));
+    }
+    @Test void staleCompletionAndDbConfirmationFailureAreNotCountedAsComplete() {
+        ShopCacheInvalidation entry=new ShopCacheInvalidation().setShopId(1L).setGeneration("event");
+        when(entries.complete(1L,"event")).thenReturn(0);
+        service.recover(entry);
+        assertEquals(0, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.COMPLETED));
+        assertEquals(1, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.STALE));
+
+        when(entries.complete(1L,"event")).thenThrow(new IllegalStateException("DB confirmation unavailable"));
+        assertThrows(IllegalStateException.class, () -> service.recover(entry));
+        assertEquals(0, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.COMPLETED));
+    }
+    @Test void uncertainRedisCallbackIsOnlyCountedAsCallbackFailure() {
+        transaction(); service.enqueue(1L);
+        doThrow(new IllegalStateException("Redis result uncertain")).when(cache).invalidateShop(1L);
+        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+        assertEquals(1, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.CALLBACK_FAILED));
+        assertEquals(0, service.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.COMPLETED));
     }
     @Test void disabledRecoveryDoesNotAccessServices() {
-        new ShopCacheInvalidationService(entries,cache,false).recoverPending(); verifyNoInteractions(entries,cache);
+        ShopCacheInvalidationService disabled = new ShopCacheInvalidationService(entries,cache,false);
+        disabled.recoverPending(); verifyNoInteractions(entries,cache);
+        assertEquals(0, disabled.diagnostics().count(ShopCacheInvalidationService.DiagnosticEvent.POLL_FAILURE));
     }
 }

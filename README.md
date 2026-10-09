@@ -2,7 +2,7 @@
 
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
 
-目前完成 Phase 5 与 Phase 6A：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号和可观测性基线。Phase 6B/6C 的业务诊断、质量补验与性能测量未开始；尚未进行实际压测。
+目前完成 Phase 5、Phase 6A/6B：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断与核心 HTTP 故障补验。Phase 6C 的性能测量未开始；尚未进行实际压测。
 
 ## 架构与业务
 
@@ -119,7 +119,7 @@ ready 只代表依赖可达，不验证完整 schema、活动可购买、worker 
 
 历史图片不自动搬迁，非 UUID 或不在受控分片路径的旧资产不能直接经新读取接口访问，必须另行审查转换与引用迁移。单机目录不支持多实例共享、CDN 或对象存储；不引入付费服务。
 
-## 本地可观测性（Phase 6A）
+## 本地可观测性（Phase 6A/6B）
 
 管理监听器默认 `127.0.0.1:8082`，仅允许 GET `/actuator/health`、`/actuator/prometheus`；其他 endpoints 默认禁用。业务 8081 不提供匿名 Actuator 指标。启动守卫拒绝非 loopback 地址、相同非零业务/管理端口与不合法端口；本机可用 `MANAGEMENT_PORT` 选择另一个独立端口。管理 health 复用现有 ready，只返回 UP/DOWN。
 
@@ -143,7 +143,7 @@ docker compose -f compose.yaml -f compose.monitoring.yaml --profile app up -d --
 docker compose -f compose.yaml -f compose.monitoring.yaml --profile app down
 ```
 
-收集 HTTP server 请求计数/耗时直方图、JVM、HikariCP；路由使用模板标签，uri 上限 100，非标准 method 归 UNKNOWN。当前禁用未使用的出站 HTTP client 指标，以免字面地址/查询产生不安全标签。没有业务缓存命中率、订单 lag 或 outbox 指标平台。Prometheus 24h/256MB retention 不是整个目录硬配额或备份；没有 Grafana。
+收集 HTTP server 请求计数/耗时直方图、JVM、HikariCP；路由使用模板标签，uri 上限 100，非标准 method 归 UNKNOWN。当前禁用未使用的出站 HTTP client 指标，以免字面地址/查询产生不安全标签。6B 增加缓存、订单消费、缓存失效/取消 outbox 的 33 条固定 outcome 计数；scrape 只读内存，不查依赖。计数重启清零，不等于唯一订单、lag/backlog 或生产成功率；缓存首次命中率可以按窗口计算，但没有真实业务比例结论。Prometheus 24h/256MB retention 不是整个目录硬配额或备份；没有 Grafana。
 
 每个首次处理的业务请求返回服务端生成的 `X-Request-Id`，客户端输入不会复用；MDC 结束后清理/恢复。新 INFO 摘要只包含安全 method、模板 route、观察到的 status、dispatch 毫秒耗时与 dispatchFailed，不输出头、查询、body、token 或用户 ID。不是分布式 trace，也不自动传播异步线程；摘要 status/耗时不保证等于异常或异步请求的最终状态。
 
@@ -153,6 +153,14 @@ python3 scripts/verify-observability.py
 
 此脚本需要已构建 jar、Docker、curl 和 python3，使用全新合成环境，检查真正进入 Prometheus 的样本并验证精确清理。指标查询方法和边界见 [学习笔记](docs/learning/observability-baseline.md)；运行证据见 [阶段记录](docs/refactor/16-phase-6a-observability.md)。采集成功不等于业务健康，histogram buckets 也不是压测结果。
 
+业务质量与诊断验收（同样需要先构建 Java 8 jar）：
+
+```bash
+python3 scripts/verify-business-diagnostics.py
+```
+
+使用自己的合成验证码、会话、数据和临时项目验证真实登录/权限、Feed、缓存失效故障、订单重放/归属、DB 确认失败后的取消幂等和消费 pending 恢复，并查询实际 Prometheus。只在合成库注入 trigger/加速租约过期；优雅重启不是强杀、HA 或压测。固定结果计数的含义见 [业务诊断笔记](docs/learning/business-diagnostics.md)。
+
 ## API 与设计文档
 
 - [领域模型](docs/domain-model.md)、[迁移计划](docs/refactor/02-migration-plan.md)、[遗留兼容说明](docs/learning/legacy-compatibility.md)。
@@ -161,6 +169,7 @@ python3 scripts/verify-observability.py
 - [缓存治理](docs/refactor/13-phase-4a-shop-cache-governance.md)、[搜索契约](docs/refactor/14-phase-4b-shop-search.md)。
 - [Phase 5 验证记录](docs/refactor/15-phase-5-engineering.md)、[可重复部署学习笔记](docs/learning/reproducible-deployment.md)。
 - [Phase 6A 验证记录](docs/refactor/16-phase-6a-observability.md)、[可观测性学习笔记](docs/learning/observability-baseline.md)。
+- [Phase 6B 验证记录](docs/refactor/17-phase-6b-business-diagnostics.md)、[质量覆盖矩阵](docs/refactor/phase-6b-quality-matrix.md)、[业务诊断笔记](docs/learning/business-diagnostics.md)。
 
 `GET /shop/search` 匿名可访问，支持 `keyword,typeId,minPrice,maxPrice,minScore,x,y,radiusMeters,sort,page,size`。详细取值/单位以搜索契约为准；`data` 为 `items,total,page,size,sort,hasNext`，ID 为字符串。HTTP routes、表名和大部分 Redis key 保留；门店详情缓存已切换 `cache:shop:v2:`，不支持新旧缓存写入程序混跑的一致性保证。
 
@@ -186,6 +195,8 @@ python3 scripts/verify-compose.py
 
 这些不等于所有业务已在目标版本完整验收：部署角色/会话由合成 fixture 创建，不代表真实登录短信链路；历史迁移、进程强杀/failover、性能、全部旧业务的目标版本兼容仍未验收。**尚未进行实际压测**，没有 QPS/P95/P99/缓存命中率数字。
 
-Phase 6A 本轮回归：244 项默认测试（0 失败/错误，4 设计跳过）、82 项隔离 IT（0 失败/错误）、10 组部署回归、5 组实际 Prometheus 3.5.0 采集检查及清理断言通过。默认测试中的新双监听器 HTTP 合同使用 mock 依赖；真实 Compose 验收另用合成 DB/Redis。
+Phase 6A 阶段回归：244 项默认测试（0 失败/错误，4 设计跳过）、82 项隔离 IT（0 失败/错误）、10 组部署回归、5 组实际 Prometheus 3.5.0 采集检查及清理断言通过。默认测试中的新双监听器 HTTP 合同使用 mock 依赖；真实 Compose 验收另用合成 DB/Redis。
 
-下一小阶段按计划补充业务质量与诊断，随后才做可复现性能测量；完成当前阶段提交与审查后再单独开始。
+Phase 6B 本轮：46 项定向、255 项默认（4 设计跳过）、82 项隔离 IT、8 组目标版本真实业务/故障/诊断验收、10 组部署回归和 5 组管理面采集回归通过。目标流程使用 MySQL 8.4.11 / Redis 6.2.24 / Prometheus 3.5.0；验证码读取只发生在测试自己的 Redis，不是实际短信验收。不同证据层级不能互相替代；未验证关键窗口强杀、多副本、任意网络分区、HA、历史迁移或所有旧业务兼容。
+
+下一小阶段为 6C 可复现性能测量；完成当前阶段提交与审查后再单独开始。
