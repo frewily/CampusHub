@@ -88,4 +88,29 @@ class DatabaseMigrationTest {
         assertTrue(normalized.contains("fresh random Redis epoch for every invalidation to avoid ABA"));
         assertTrue(normalized.contains("safe exception class name"));
     }
+
+    @Test
+    void shouldDefineIdempotentCandidateShopSearchIndexes() throws IOException {
+        String migration = StreamUtils.copyToString(
+                getClass().getResourceAsStream("/db/migration/V005__add_shop_search_indexes.sql"),
+                StandardCharsets.UTF_8);
+        String normalized = migration.replace("`", "").replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains("CREATE INDEX idx_shop_search_type_price ON tb_shop (type_id, avg_price, id)"));
+        assertTrue(normalized.contains("CREATE INDEX idx_shop_search_score ON tb_shop (score, id)"));
+        assertTrue(normalized.contains("INFORMATION_SCHEMA.STATISTICS"));
+        assertTrue(normalized.contains("TABLE_SCHEMA = @campushub_schema"));
+        assertTrue(normalized.contains("TABLE_NAME = 'tb_shop'"));
+        assertTrue(normalized.contains("INDEX_NAME = 'idx_shop_search_type_price'"));
+        assertTrue(normalized.contains("INDEX_NAME = 'idx_shop_search_score'"));
+        assertTrue(normalized.contains("PREPARE shop_search_type_price_statement"));
+        assertTrue(normalized.contains("EXECUTE shop_search_type_price_statement"));
+        assertTrue(normalized.contains("DEALLOCATE PREPARE shop_search_type_price_statement"));
+        assertTrue(normalized.contains("PREPARE shop_search_score_statement"));
+        assertTrue(normalized.contains("EXECUTE shop_search_score_statement"));
+        assertTrue(normalized.contains("DEALLOCATE PREPARE shop_search_score_statement"));
+        assertTrue(normalized.contains("leading-wildcard keyword searches or Haversine distance calculations"));
+        assertTrue(normalized.contains("performance has not been measured"));
+        assertTrue(normalized.contains("is not repaired automatically"));
+    }
 }

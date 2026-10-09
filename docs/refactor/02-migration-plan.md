@@ -151,6 +151,8 @@
 
 出口条件：搜索能力与数据同步方式可实际运行；README 不把 ES 描述为当前规模的必需品。
 
+状态：已完成新入口 `GET /shop/search` 的 MySQL 基线：名称子串、类别、价格、评分、距离筛选/固定排序、白名单响应与单请求快照分页。直接读取 MySQL，不新增搜索索引同步链；ADR 0002 决定暂不引入 ES。当前环境验证与边界见 `docs/refactor/14-phase-4b-shop-search.md`。
+
 ### Phase 5 工程化
 
 - 增加 dev/test/prod 配置。
@@ -209,5 +211,6 @@
 - Phase 3B：已完成实现与当前环境验证，记录见 `docs/refactor/11-phase-3b-reliable-order-consumption.md`；Phase 3C 补充真实事务回滚与 worker 替换恢复测试，不包含进程强杀/failover 演练。
 - Phase 3C：已完成实现与本机隔离验证，记录见 `docs/refactor/12-phase-3c-order-lifecycle.md`；目标版本、历史数据迁移、部署及性能边界仍待验收。
 - Phase 4A：已完成门店详情缓存治理与本机隔离验证，记录见 `docs/refactor/13-phase-4a-shop-cache-governance.md`。
-- Phase 4B、Phase 5 与 Phase 6：尚未开始。
+- Phase 4B：已完成搜索功能基线与本机隔离验证，记录见 `docs/refactor/14-phase-4b-shop-search.md`；选型见 ADR 0002，没有性能/相关性或目标版本验收结论。
+- Phase 5 与 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。

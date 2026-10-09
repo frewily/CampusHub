@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.github.frewily.campushub.mapper.ShopSearchMapper">
+    <!-- Mean-earth spherical distance in metres. Clamp round-off near coincident/antipodal points. -->
+    <sql id="validCoordinates">s.x BETWEEN -180 AND 180 AND s.y BETWEEN -90 AND 90</sql>
+    <sql id="distance">
+        6371008.8 * 2 * ASIN(SQRT(LEAST(1.0,GREATEST(0.0,
+        POW(SIN(RADIANS(s.y - #{q.y}) / 2),2)
+        + COS(RADIANS(#{q.y})) * COS(RADIANS(s.y)) * POW(SIN(RADIANS(s.x - #{q.x}) / 2),2)))))
+    </sql>
+    <sql id="filters">
+        <where>
+            <if test="q.likeKeyword != null">AND s.name LIKE #{q.likeKeyword} ESCAPE '!'</if>
+            <if test="q.typeId != null">AND s.type_id = #{q.typeId}</if>
+            <if test="q.minPrice != null">AND s.avg_price &gt;= #{q.minPrice}</if>
+            <if test="q.maxPrice != null">AND s.avg_price &lt;= #{q.maxPrice}</if>
+            <if test="q.minScore != null">AND s.score &gt;= #{q.minScore}</if>
+            <if test="q.sort == 'distance' or q.radiusMeters != null">
+                AND <include refid="validCoordinates"/>
+            </if>
+            <if test="q.radiusMeters != null">
+                AND (<include refid="distance"/>) &lt;= #{q.radiusMeters}
+            </if>
+        </where>
+    </sql>
+    <select id="count" resultType="long" timeout="5">
+        SELECT COUNT(*) FROM tb_shop s <include refid="filters"/>
+    </select>
+    <select id="search" resultType="io.github.frewily.campushub.dto.response.ShopSearchItem" timeout="5">
+        SELECT s.id, s.type_id, s.name, s.images, s.area, s.address, s.avg_price, s.score, s.open_hours,
+        <choose>
+            <when test="q.x != null">
+                CASE WHEN <include refid="validCoordinates"/> THEN (<include refid="distance"/>) ELSE NULL END
+            </when>
+            <otherwise>NULL</otherwise>
+        </choose> AS distance_meters
+        FROM tb_shop s <include refid="filters"/>
+        ORDER BY
+        <choose>
+            <when test="q.sort == 'price_asc'">(s.avg_price IS NULL), s.avg_price ASC,</when>
+            <when test="q.sort == 'price_desc'">(s.avg_price IS NULL), s.avg_price DESC,</when>
+            <when test="q.sort == 'score_desc'">(s.score IS NULL), s.score DESC,</when>
+            <when test="q.sort == 'distance'">distance_meters ASC,</when>
+        </choose>
+        s.id ASC
+        LIMIT #{q.size} OFFSET #{q.offset}
+    </select>
+</mapper>

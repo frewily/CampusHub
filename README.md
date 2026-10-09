@@ -16,11 +16,12 @@ CampusHub is a gradual refactoring of a legacy local-services teaching project i
 - Phase 3B adds UUID consumers, bounded pending recovery/retries, owner-checked failure archival and operator-only same-ID redrive. Failed reservations are retained for DB review, never automatically refunded. Redis Stream is retained by ADR 0001.
 - Phase 3C adds owner-only order status queries and cancellation of persisted unpaid flash-sale orders. Database cancellation, stock return and an outbox commit together; leased recovery compensates Redis separately without removing one-user-one-order identity.
 - Phase 4A uses one bounded cache-aside strategy for shop detail: physical TTL jitter, negative caching, token-owned rebuild and epoch-fenced publication. Shop writes commit a durable invalidation outbox; Redis invalidation runs after commit and is retried by the scheduler.
+- Phase 4B adds a MySQL shop-search baseline for name substring, category, price, score and distance, with bounded pagination, stable sorting and a single-request read snapshot. Elasticsearch is not introduced; ADR 0002 records the evidence required to reconsider it.
 - The legacy `hmdp` database schema, table names, HTTP routes and Redis keys remain compatible until their dedicated migration stages.
 - Phase 4A intentionally versions the shop-detail cache format; other business Redis keys remain unchanged.
 - Isolated MySQL/Redis business-chain integration is verified on the local versions below; real-network deployment, target MySQL 8 compatibility and performance remain unverified.
 
-See the [domain model](docs/domain-model.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 2D API contract](docs/refactor/09-phase-2d-api-models.md), [flash-sale admission contract](docs/refactor/10-phase-3a-flash-sale-admission.md), [order lifecycle](docs/refactor/12-phase-3c-order-lifecycle.md), [Phase 4A cache governance](docs/refactor/13-phase-4a-shop-cache-governance.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md). Earlier phase records remain under `docs/refactor/`.
+See the [domain model](docs/domain-model.md), [migration plan](docs/refactor/02-migration-plan.md), [Phase 2D API contract](docs/refactor/09-phase-2d-api-models.md), [flash-sale admission contract](docs/refactor/10-phase-3a-flash-sale-admission.md), [order lifecycle](docs/refactor/12-phase-3c-order-lifecycle.md), [Phase 4A cache governance](docs/refactor/13-phase-4a-shop-cache-governance.md), [Phase 4B search contract](docs/refactor/14-phase-4b-shop-search.md) and [legacy compatibility notes](docs/learning/legacy-compatibility.md). Earlier phase records remain under `docs/refactor/`.
 
 Write requests now accept only documented business fields. Extra entity fields are ignored; missing or invalid required fields return HTTP 400 with `VALIDATION_FAILED`. See the Phase 2D API contract before reusing full legacy entity payloads.
 
@@ -84,6 +85,18 @@ mysql -u "$DB_USERNAME" -p hmdp < src/main/resources/db/migration/V004__add_shop
 
 The new `cache:shop:v2:` format ignores old `cache:shop:` values. Stop legacy warmers/writers before rollout; mixed old/new binaries are not a consistency guarantee. Epoch keys must not be independently removed/expired. No broad cleanup of old no-TTL keys is performed. See the Phase 4A runbook for durable recovery and key-retention requirements.
 
+Apply Phase 4B candidate search indexes after the preceding migrations:
+
+```bash
+mysql -u "$DB_USERNAME" -p hmdp < src/main/resources/db/migration/V005__add_shop_search_indexes.sql
+```
+
+V005 can be repeated, but an existing same-name index with a wrong definition is not automatically repaired. Check actual index columns and schedule DDL safely before rollout. Leading-wildcard name matching and distance expressions may still scan/sort; no index performance improvement is claimed.
+
+Anonymous `GET /shop/search` supports `keyword`, `typeId`, `minPrice`, `maxPrice`, `minScore`, paired longitude/latitude `x/y`, `radiusMeters`, `sort`, `page` and `size`. Sort is one of `id` (default), `price_asc`, `price_desc`, `score_desc`, `distance`; distance/radius needs coordinates. Page is 1–500 (default 1), size 1–50 (default 10), radius 1–50000 metres. Price uses the existing `avg_price` unit without conversion; score is 0–50 (five-point rating ×10). Keywords are literal name substrings, not full-text relevance or typo correction.
+
+Response `data` contains `items,total,page,size,sort,hasNext`, with string `id/typeId` and a public field whitelist. Invalid filters return typed 400; database/transaction access failure returns `SHOP_STATE_UNAVAILABLE` 503, not an empty list. Searches read MySQL directly; COUNT and items share one repeatable-read snapshot, not a snapshot shared across subsequent page requests. The old name/type/GEO routes are unchanged, and shop detail can still briefly reflect the Phase 4A cache-coherence window. See the [search contract](docs/refactor/14-phase-4b-shop-search.md) and [search-engine ADR](docs/adr/0002-shop-search-engine.md).
+
 The application creates the Redis Stream `stream.orders` and consumer group `g1` when the order consumer is enabled.
 
 `ORDER_CLAIM_IDLE_MS` defaults to 60000 (minimum 1000); `ORDER_MAX_ATTEMPTS` defaults to 5 (range 1–100, including the first attempt and crash attempts). Claim idle must exceed normal transaction latency. These are unmeasured defaults, not production tuning. See the [Phase 3B recovery and redrive runbook](docs/refactor/11-phase-3b-reliable-order-consumption.md) and [message-broker ADR](docs/adr/0001-order-message-broker.md). Do not trim uncompleted source messages or erase consumers with pending entries. Retention, capacity alerts, ACLs and persistence/restore remain deployment prerequisites.
@@ -138,6 +151,16 @@ Phase 4A adds test-owned Redis and MySQL/Redis cache suites, including real tran
 The cache MySQL IT installs real transaction interception but not method security or a network server; authorization/HTTP contracts are separately covered by default tests. The shop reader exposes process-local diagnostic counts for window-based measurement, not a measured production hit rate or metrics endpoint. No actual load test has been performed.
 
 Phase 4A final verification: 162 default tests (0 failures/errors, 4 designed skips) and 72 isolated integration tests (0 failures/errors/skips): 13 cache Redis, 35 order Redis, 9 cache MySQL/Redis and 15 order MySQL/Redis regression cases.
+
+Phase 4B adds a test-owned MySQL search suite (no Redis required):
+
+```bash
+./mvnw -Dmaven-surefire-plugin.version=3.1.2 -Dtest=ShopSearchMySqlIT test
+```
+
+It uses real XML/MyBatis and transaction interception on synthetic MySQL 9.6.0 data, including literal keyword escaping, combined filters, stable/null-last sorting, pagination, geographic boundaries, concurrent count/page snapshots, actual missing-table failure and repeated V005/index-column checks. Full-security MockMvc search contracts separately use mocked business dependencies. These are correctness tests, not historical migration, network deployment, relevance or load-test evidence. Current regression results are recorded in the Phase 4B stage record; earlier counts above remain historical checkpoints.
+
+Phase 4B final verification: 205 default tests (0 failures/errors, 4 designed skips) and 82 isolated integration tests (0 failures/errors/skips), including all 72 previous cache/order IT cases rerun plus 10 new MySQL search cases. No actual load test has been performed.
 
 ## Run
 
