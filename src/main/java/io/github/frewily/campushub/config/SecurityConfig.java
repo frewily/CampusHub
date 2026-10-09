@@ -41,6 +41,7 @@ public class SecurityConfig {
                 .and().authorizeRequests()
                 .antMatchers(HttpMethod.POST, "/user/code", "/user/login").permitAll()
                 .antMatchers(HttpMethod.GET, "/blog/hot", "/shop/**", "/shop-type/**", "/voucher/**").permitAll()
+                .antMatchers(HttpMethod.GET, "/health/live", "/health/ready", "/imgs/blogs/**").permitAll()
                 .anyRequest().authenticated()
                 .and().addFilterBefore(redisTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();

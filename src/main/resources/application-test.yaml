@@ -1,0 +1,16 @@
+# Fail closed if an offline test accidentally uses a real datasource; explicit IT owns its configuration.
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:1/campushub_test?serverTimezone=UTC&forceConnectionTimeZoneToSession=true
+    username: synthetic_test
+    password: synthetic_test_only
+  redis:
+    host: 127.0.0.1
+    port: 1
+    password: synthetic_test_only
+campushub:
+  order:
+    stream-consumer-enabled: false
+    cancellation-reconciler-enabled: false
+  cache:
+    invalidation-worker-enabled: false

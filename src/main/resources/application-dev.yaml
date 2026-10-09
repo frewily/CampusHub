@@ -1,0 +1,12 @@
+# Local defaults only. Compose creates a fresh campushub database, not the legacy hmdp data.
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3307/campushub?useSSL=false&serverTimezone=UTC&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:campushub}
+    password: ${DB_PASSWORD:change-me}
+  redis:
+    host: ${REDIS_HOST:127.0.0.1}
+    port: ${REDIS_PORT:6380}
+    password: ${REDIS_PASSWORD:change-me-redis}

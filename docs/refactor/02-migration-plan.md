@@ -163,6 +163,8 @@
 
 出口条件：在干净环境按 README 可以启动依赖、初始化数据、运行应用和完成一个 smoke test。
 
+状态：已完成 dev/test/prod、默认依赖与可选应用 Compose、fresh 合成初始化、live/ready、本地安全图片适配器和双路径 README。229 项默认测试、82 项隔离 IT、10 组全新 Compose 实际网络检查已通过；目标部署实测 MySQL 8.4.11/Redis 6.2.24。细节见 `docs/refactor/15-phase-5-engineering.md`。这不代表旧库/图片自动迁移、所有旧业务目标版本兼容、生产高可用或压测验收。
+
 ### Phase 6 质量 可观测性与性能
 
 - 核心测试：登录、权限、缓存、Feed、限量活动、订单、幂等和失败恢复。
@@ -212,5 +214,6 @@
 - Phase 3C：已完成实现与本机隔离验证，记录见 `docs/refactor/12-phase-3c-order-lifecycle.md`；目标版本、历史数据迁移、部署及性能边界仍待验收。
 - Phase 4A：已完成门店详情缓存治理与本机隔离验证，记录见 `docs/refactor/13-phase-4a-shop-cache-governance.md`。
 - Phase 4B：已完成搜索功能基线与本机隔离验证，记录见 `docs/refactor/14-phase-4b-shop-search.md`；选型见 ADR 0002，没有性能/相关性或目标版本验收结论。
-- Phase 5 与 Phase 6：尚未开始。
+- Phase 5：已完成实现与本机隔离验收，记录见 `docs/refactor/15-phase-5-engineering.md`；提交后审查完成才进入下一阶段。
+- Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。
