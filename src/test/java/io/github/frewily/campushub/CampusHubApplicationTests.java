@@ -2,7 +2,6 @@ package io.github.frewily.campushub;
 
 import io.github.frewily.campushub.entity.Shop;
 import io.github.frewily.campushub.service.impl.ShopServiceImpl;
-import io.github.frewily.campushub.utils.CacheClient;
 import io.github.frewily.campushub.utils.RedisIdWorker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -23,7 +22,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static io.github.frewily.campushub.utils.RedisConstants.CACHE_SHOP_KEY;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -32,9 +30,6 @@ class CampusHubApplicationTests {
 
     @Resource
     private ShopServiceImpl shopService;
-
-    @Resource
-    private CacheClient cacheClient;
 
     @Resource
     private RedisIdWorker redisIdWorker;
@@ -66,8 +61,8 @@ class CampusHubApplicationTests {
 
     @Test
     void testSaveShop() throws InterruptedException {
-        Shop shop = shopService.getById(1L);
-        cacheClient.setWithLogicalExpire(CACHE_SHOP_KEY + 1L, shop, 10L, TimeUnit.SECONDS);
+        // Warm through the same formal reader; no alternative no-TTL cache format.
+        shopService.queryById(1L);
     }
 
     @Test

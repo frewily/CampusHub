@@ -64,4 +64,28 @@ class DatabaseMigrationTest {
         assertTrue(normalized.contains("ENGINE = InnoDB CHARACTER SET = utf8mb4"));
         assertTrue(normalized.contains("must be written in one transaction"));
     }
+
+    @Test
+    void shouldDefineIdempotentShopCacheInvalidationOutboxContract() throws IOException {
+        String migration = StreamUtils.copyToString(
+                getClass().getResourceAsStream("/db/migration/V004__add_shop_cache_invalidation_outbox.sql"),
+                StandardCharsets.UTF_8);
+        String normalized = migration.replace("`", "").replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains("CREATE TABLE IF NOT EXISTS tb_shop_cache_invalidation"));
+        assertTrue(normalized.contains("shop_id BIGINT UNSIGNED NOT NULL"));
+        assertTrue(normalized.contains("generation VARCHAR(36) NOT NULL"));
+        assertTrue(normalized.contains("attempts INT UNSIGNED NOT NULL DEFAULT 0"));
+        assertTrue(normalized.contains("last_error VARCHAR(64) NULL"));
+        assertTrue(normalized.contains("create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"));
+        assertTrue(normalized.contains(
+                "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"));
+        assertTrue(normalized.contains("PRIMARY KEY (shop_id)"));
+        assertTrue(normalized.contains("INDEX idx_shop_cache_invalidation_pending (update_time, shop_id)"));
+        assertTrue(normalized.contains("ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci"));
+        assertTrue(normalized.contains("generation is a per-write database UUID"));
+        assertTrue(normalized.contains("not a Redis epoch"));
+        assertTrue(normalized.contains("fresh random Redis epoch for every invalidation to avoid ABA"));
+        assertTrue(normalized.contains("safe exception class name"));
+    }
 }

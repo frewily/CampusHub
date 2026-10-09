@@ -1,89 +1,98 @@
 package io.github.frewily.campushub.utils;
 
-import cn.hutool.json.JSONUtil;
+import cn.hutool.json.JSONObject;
 import io.github.frewily.campushub.entity.Shop;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentMatcher;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
-
-import java.time.LocalDateTime;
+import io.github.frewily.campushub.exception.*;
+import org.junit.jupiter.api.*;
+import org.springframework.data.redis.core.*;
+import org.springframework.data.redis.core.script.RedisScript;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
+import java.util.concurrent.atomic.AtomicReference;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.timeout;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
-@ExtendWith(MockitoExtension.class)
 class CacheClientTest {
+    private StringRedisTemplate redis;
+    private ValueOperations<String, String> values;
+    private CacheClient cache;
+    private AtomicReference<String> payload;
+    private long ttl;
 
-    @Mock
-    private StringRedisTemplate stringRedisTemplate;
-    @Mock
-    private ValueOperations<String, String> valueOperations;
-
-    private CacheClient cacheClient;
-
-    @BeforeEach
-    void setUp() {
-        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
-        cacheClient = new CacheClient(stringRedisTemplate);
+    @BeforeEach void setup() {
+        redis = mock(StringRedisTemplate.class); values = mock(ValueOperations.class);
+        cache = new CacheClient(redis); payload = new AtomicReference<>("");
+        when(redis.opsForValue()).thenReturn(values);
+        when(values.setIfAbsent(anyString(), anyString(), eq(10L), eq(TimeUnit.SECONDS))).thenReturn(true);
+        when(redis.execute(any(RedisScript.class), anyList())).thenAnswer(inv -> Arrays.asList("", payload.get()));
+        when(redis.execute(any(RedisScript.class), anyList(), anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> { payload.set(inv.getArgument(4)); ttl = Long.parseLong(inv.getArgument(5)); return 1L; });
+        when(redis.execute(any(RedisScript.class), anyList(), anyString())).thenReturn(1L);
     }
 
-    @Test
-    void shouldLoadAndWrapDataWhenLogicalExpireCacheIsCold() {
-        when(valueOperations.get("cache:shop:1")).thenReturn(null);
-        Shop databaseShop = new Shop().setId(1L).setName("Campus cafe");
+    @AfterEach void clear() { TransactionSynchronizationManager.clear(); Thread.interrupted(); }
 
-        Shop result = cacheClient.queryWithLogicalExpire(
-                "cache:shop:", 1L, Shop.class, ignored -> databaseShop, 30L, TimeUnit.MINUTES);
-
-        assertEquals(databaseShop, result);
-        verify(valueOperations).set(eq("cache:shop:1"), argThat(logicalExpireValueWithName("Campus cafe")));
+    @Test void coldThenWarmUsesOneDatabaseLoadAndBoundedPhysicalTtl() {
+        java.util.concurrent.atomic.AtomicInteger loads = new java.util.concurrent.atomic.AtomicInteger();
+        for (int i=0; i<2; i++) assertEquals("fresh", cache.queryShop(1L, Shop.class,
+                id -> { loads.incrementAndGet(); return new Shop().setId(id).setName("fresh"); }).getName());
+        assertEquals(1, loads.get()); assertTrue(ttl>=60000 && ttl<=75000);
+        assertArrayEquals(new long[]{1,0,1,1,0,0}, cache.statistics());
     }
-
-    @Test
-    void shouldKeepLogicalExpireEnvelopeWhenExpiredEntryIsRebuilt() {
-        RedisData stale = new RedisData();
-        stale.setData(new Shop().setId(1L).setName("stale"));
-        stale.setExpireTime(LocalDateTime.now().minusMinutes(1));
-        when(valueOperations.get("cache:shop:1")).thenReturn(JSONUtil.toJsonStr(stale));
-        when(valueOperations.setIfAbsent("lock:shop:1", "1", 10L, TimeUnit.SECONDS)).thenReturn(true);
-        Function<Long, Shop> fallback = ignored -> new Shop().setId(1L).setName("fresh");
-
-        Shop result = cacheClient.queryWithLogicalExpire(
-                "cache:shop:", 1L, Shop.class, fallback, 30L, TimeUnit.MINUTES);
-
-        assertEquals("stale", result.getName());
-        verify(valueOperations, timeout(1000))
-                .set(eq("cache:shop:1"), argThat(logicalExpireValueWithName("fresh")));
+    @Test void missingRowsAreNegativeCachedWithShortTtl() {
+        assertNull(cache.queryShop(404L, Shop.class, id -> null));
+        assertNull(cache.queryShop(404L, Shop.class, id -> { fail("negative hit must not read DB"); return null; }));
+        assertTrue(ttl>=10000 && ttl<=15000);
+        assertArrayEquals(new long[]{0,1,1,1,0,0}, cache.statistics());
     }
-
-    @Test
-    void shouldCacheAnEmptyValueWhenColdCacheFallbackFindsNothing() {
-        when(valueOperations.get("cache:shop:404")).thenReturn(null);
-
-        Shop result = cacheClient.queryWithLogicalExpire(
-                "cache:shop:", 404L, Shop.class, ignored -> null, 30L, TimeUnit.MINUTES);
-
-        assertNull(result);
-        verify(valueOperations).set("cache:shop:404", "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+    @Test void wrongEpochPayloadIsIgnoredAndRebuilt() {
+        payload.set(new JSONObject().set("epoch", "old").set("empty", false)
+                .set("data", new Shop().setId(1L).setName("old")).toString());
+        assertEquals("fresh", cache.queryShop(1L, Shop.class, id -> new Shop().setName("fresh")).getName());
     }
-
-    private ArgumentMatcher<String> logicalExpireValueWithName(String expectedName) {
-        return json -> {
-            RedisData redisData = JSONUtil.toBean(json, RedisData.class);
-            Shop shop = JSONUtil.toBean(JSONUtil.parseObj(redisData.getData()), Shop.class);
-            return redisData.getExpireTime() != null && expectedName.equals(shop.getName());
-        };
+    @Test void invalidEnvelopeFailsClosedInsteadOfAnInventedMissingRow() {
+        payload.set("{\"epoch\":\"\",\"empty\":\"false\"}");
+        assertUnavailable(() -> cache.queryShop(1L, Shop.class, id -> { fail("no DB fallback"); return null; }));
+    }
+    @Test void unknownRedisResultIs503NotSuccess() {
+        when(redis.execute(any(RedisScript.class), anyList(), anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+        assertUnavailable(() -> cache.queryShop(1L, Shop.class, id -> new Shop().setId(id)));
+    }
+    @Test void contentionDoesNotFanOutToDatabaseAndIsBounded() {
+        when(values.setIfAbsent(anyString(), anyString(), eq(10L), eq(TimeUnit.SECONDS))).thenReturn(false);
+        long start = System.nanoTime();
+        assertUnavailable(() -> cache.queryShop(1L, Shop.class, id -> { fail("no DB load without lock"); return null; }));
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-start)<2000);
+    }
+    @Test void interruptPreservesSignalAndFailsWithoutDirectDatabaseLoad() {
+        when(values.setIfAbsent(anyString(), anyString(), eq(10L), eq(TimeUnit.SECONDS))).thenReturn(false);
+        Thread.currentThread().interrupt();
+        assertUnavailable(() -> cache.queryShop(1L, Shop.class, id -> { fail("no DB load"); return null; }));
+        assertTrue(Thread.currentThread().isInterrupted());
+    }
+    @Test void activeTransactionCannotPopulatePublicCacheFromUncommittedOrOldSnapshot() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        clearInvocations(redis, values);
+        assertUnavailable(() -> cache.queryShop(1L, Shop.class, id -> { fail("no transaction snapshot load"); return null; }));
+        verifyNoInteractions(redis, values);
+    }
+    @Test void invalidIdentifierDoesNotTouchRedis() {
+        clearInvocations(redis, values);
+        assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(BusinessException.class,
+                () -> cache.queryShop(0L, Shop.class, id -> null)).getErrorCode());
+        verifyNoInteractions(redis, values);
+    }
+    @Test void jitterIsAlwaysInsideTheDocumentedPositiveAndNegativeBounds() {
+        Set<Long> seen = new HashSet<>();
+        for(int i=0;i<100;i++) {
+            long positive=CacheClient.positiveTtlMillis(), negative=CacheClient.negativeTtlMillis();
+            assertTrue(positive>=60000 && positive<=75000); assertTrue(negative>=10000 && negative<=15000);
+            seen.add(positive);
+        }
+        assertTrue(seen.size()>1);
+    }
+    private void assertUnavailable(Runnable action) {
+        assertEquals(ErrorCode.SHOP_STATE_UNAVAILABLE, assertThrows(BusinessException.class, action::run).getErrorCode());
     }
 }

@@ -26,6 +26,8 @@ logging:
   level:
     io.github.frewily.campushub: debug
 campushub:
+  cache:
+    invalidation-worker-enabled: ${SHOP_CACHE_INVALIDATION_WORKER_ENABLED:true}
   order:
     stream-consumer-enabled: ${ORDER_STREAM_CONSUMER_ENABLED:true}
     claim-idle-ms: ${ORDER_CLAIM_IDLE_MS:60000}

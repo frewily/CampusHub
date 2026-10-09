@@ -1,179 +1,126 @@
 package io.github.frewily.campushub.utils;
 
-
-import cn.hutool.core.util.BooleanUtil;
-import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import lombok.extern.slf4j.Slf4j;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
-
-import java.time.LocalDateTime;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 
-import static io.github.frewily.campushub.utils.RedisConstants.*;
-
-@Slf4j
+/** One cache-aside strategy: bounded TTL, token-owned rebuild, epoch-fenced publication. */
 @Component
 public class CacheClient {
+    public static final String DATA_PREFIX = "cache:shop:v2:";
+    public static final String EPOCH_PREFIX = "cache:shop:epoch:";
+    public static final String LOCK_PREFIX = "lock:shop:v2:";
+    private static final DefaultRedisScript<List> READ = script("shop-cache-read.lua", List.class);
+    private static final DefaultRedisScript<Long> PUBLISH = script("shop-cache-publish.lua", Long.class);
+    private static final DefaultRedisScript<Long> UNLOCK = script("shop-cache-unlock.lua", Long.class);
+    private static final DefaultRedisScript<Long> INVALIDATE = script("shop-cache-invalidate.lua", Long.class);
+    private final StringRedisTemplate redis;
+    private final LongAdder hits = new LongAdder(), negativeHits = new LongAdder(), misses = new LongAdder();
+    private final LongAdder loads = new LongAdder(), rejected = new LongAdder(), failures = new LongAdder();
 
-    private final StringRedisTemplate stringRedisTemplate;
+    public CacheClient(StringRedisTemplate redis) { this.redis = redis; }
 
-    public CacheClient(StringRedisTemplate stringRedisTemplate) {
-        this.stringRedisTemplate = stringRedisTemplate;
-    }
-
-    /**
-     * 将任意对象序列化后存储到Redis缓存中
-     *
-     * @param key   Redis缓存的键
-     * @param value 要缓存的对象值，会被序列化为JSON字符串
-     * @param time  缓存过期时间
-     * @param unit  时间单位
-     */
-    public void set(String key, Object value, Long time, TimeUnit  unit){
-        stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(value), time, unit);
-    }
-
-    /**
-     * 将对象存储到Redis缓存中，并设置逻辑过期时间
-     * 用于实现缓存主动更新策略，避免缓存击穿
-     *
-     * @param key   Redis缓存的键
-     * @param value 要缓存的对象值
-     * @param time  逻辑过期时间
-     * @param unit  时间单位
-     */
-    public void setWithLogicalExpire(String key, Object value, Long time, TimeUnit  unit){
-        // 逻辑过期时间保存在值中，Redis key 本身不设置 TTL。
-        RedisData redisData = new RedisData();
-        redisData.setData(value);
-        redisData.setExpireTime(LocalDateTime.now().plusSeconds(unit.toSeconds(time)));//unit.toSeconds(time): 将时间单位转换成秒
-        stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(redisData));
-    }
-
-    /**
-     * 查询缓存，采用缓存空值策略解决缓存穿透问题
-     * 如果缓存命中则直接返回，否则查询数据库并将结果写入缓存
-     *
-     * @param keyPrefix 缓存键前缀
-     * @param id        查询ID
-     * @param type      返回对象的类型
-     * @param dbFallback 数据库查询回调函数
-     * @param time      缓存过期时间
-     * @param unit      时间单位
-     * @param <R>       返回类型
-     * @param <ID>      ID类型
-     * @return 查询结果，如果缓存和数据库中都不存在则返回null
-     */
-    public <R ,ID> R queryWithPaaThrough(
-            String keyPrefix, ID id, Class<R> type, Function<ID, R> dbFallback, Long time, TimeUnit unit){
-        String key = keyPrefix + id;
-        String json = stringRedisTemplate.opsForValue().get(key);
-        if (StrUtil.isNotBlank(json)) {
-            return JSONUtil.toBean(json, type);
-        }
-        if (json != null) {//-->json为空字符串,直接返回错误信息，不再查询数据库，避免缓存穿透
-            return null;
-
-        }
-        R r = dbFallback.apply(id);
-        if (r == null) {
-            stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
-            return null;
-        }
-        this.set(key, r, time, unit);
-        return r;
-    }
-
-    private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
-
-    /**
-     * 查询缓存，采用逻辑过期策略解决缓存击穿问题
-     * 缓存命中后检查逻辑过期时间，如果已过期则通过互斥锁异步重建缓存
-     *
-     * @param keyPrefix  缓存键前缀
-     * @param id         查询ID
-     * @param type       返回对象的类型
-     * @param dbFallback 数据库查询回调函数
-     * @param time       缓存过期时间
-     * @param unit       时间单位
-     * @param <R>        返回类型
-     * @param <ID>       ID类型
-     * @return 查询结果，如果缓存不存在则返回null；如果缓存过期则返回旧数据并异步重建
-     */
-    public <R ,ID> R queryWithLogicalExpire(
-            String keyPrefix, ID id, Class<R> type, Function<ID, R> dbFallback, Long time, TimeUnit unit){
-        String key = keyPrefix + id;
-        String json = stringRedisTemplate.opsForValue().get(key);
-        if (StrUtil.isBlank(json)) {
-            if (json != null) {
-                return null;
+    public <R> R queryShop(Long id, Class<R> type, Function<Long, R> loader) {
+        if (id == null || id <= 0) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        // A caller's repeatable-read snapshot or uncommitted data must not populate public cache.
+        if (TransactionSynchronizationManager.isActualTransactionActive()) throw unavailable();
+        try {
+            Snapshot initial = read(id);
+            if (initial.present) {
+                if (initial.empty) negativeHits.increment(); else hits.increment();
+                return initial.empty ? null : JSONUtil.toBean(initial.data, type);
             }
-            R loaded = dbFallback.apply(id);
-            if (loaded == null) {
-                stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
-                return null;
-            }
-            this.setWithLogicalExpire(key, loaded, time, unit);
-            return loaded;
-        }
-        RedisData redisData = JSONUtil.toBean(json, RedisData.class);
-        JSONObject data = (JSONObject) redisData.getData();
-        R r = JSONUtil.toBean(data, type);
-        LocalDateTime expireTime = redisData.getExpireTime();
-        if (expireTime.isAfter(LocalDateTime.now())) {
-            return r;
-        }
-        String lockKey = LOCK_SHOP_KEY + id;
-        boolean islock = tryLock(lockKey);
-        if (islock) {
-            CACHE_REBUILD_EXECUTOR.submit(() -> {
-                try {
-                    R loaded = dbFallback.apply(id);
-                    if (loaded == null) {
-                        stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
-                    } else {
-                        this.setWithLogicalExpire(key, loaded, time, unit);
+            misses.increment();
+            long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(250);
+            do {
+                String token = UUID.randomUUID().toString();
+                if (Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(LOCK_PREFIX + id, token, 10, TimeUnit.SECONDS))) {
+                    try {
+                        Snapshot current = read(id); // Double check after acquiring the lock.
+                        if (current.present) return current.empty ? null : JSONUtil.toBean(current.data, type);
+                        loads.increment();
+                        R loaded = loader.apply(id);
+                        JSONObject envelope = new JSONObject();
+                        envelope.set("epoch", current.epoch).set("empty", loaded == null).set("data", loaded);
+                        long ttl = loaded == null ? negativeTtlMillis() : positiveTtlMillis();
+                        Long stored = redis.execute(PUBLISH,
+                                Arrays.asList(DATA_PREFIX + id, EPOCH_PREFIX + id, LOCK_PREFIX + id),
+                                token, current.epoch, envelope.toString(), Long.toString(ttl));
+                        if (Long.valueOf(1).equals(stored)) return loaded;
+                        if (stored == null || stored < 0 || stored > 1) throw unavailable();
+                        rejected.increment(); // A committed write or expired lease fenced this old load.
+                    } finally {
+                        try { redis.execute(UNLOCK, Arrays.asList(LOCK_PREFIX + id), token); }
+                        catch (RuntimeException ignored) { /* Never delete a successor's bounded lease. */ }
                     }
-                } catch (Exception e) {
-                    log.error("重建逻辑过期缓存失败，key={}", key, e);
-                } finally {
-                    unLock(lockKey);
                 }
-            });
+                pause();
+                Snapshot filled = read(id);
+                if (filled.present) return filled.empty ? null : JSONUtil.toBean(filled.data, type);
+            } while (System.nanoTime() < deadline);
+            throw unavailable(); // Bound contention; never fan out hot misses into direct DB fallbacks.
+        } catch (BusinessException error) { throw error; }
+        catch (RuntimeException error) { throw unavailable(); }
+    }
+
+    /** Only invoke for a DB-committed event. A new epoch on EVERY attempt avoids ABA. */
+    public void invalidateShop(Long id) {
+        Long result = redis.execute(INVALIDATE,
+                Arrays.asList(DATA_PREFIX + id, EPOCH_PREFIX + id, RedisConstants.CACHE_SHOP_KEY + id),
+                UUID.randomUUID().toString());
+        if (!Long.valueOf(1).equals(result)) throw unavailable();
+    }
+
+    private Snapshot read(Long id) {
+        List<?> result = redis.execute(READ, Arrays.asList(DATA_PREFIX + id, EPOCH_PREFIX + id));
+        if (result == null || result.size() != 2 || !(result.get(0) instanceof String)
+                || !(result.get(1) instanceof String)) throw unavailable();
+        String epoch = (String) result.get(0), raw = (String) result.get(1);
+        if (raw.isEmpty()) return new Snapshot(epoch, false, false, null);
+        JSONObject entry = JSONUtil.parseObj(raw);
+        if (!epoch.equals(entry.getStr("epoch"))) return new Snapshot(epoch, false, false, null);
+        Object empty = entry.get("empty");
+        if (!(empty instanceof Boolean)) throw unavailable();
+        if (Boolean.TRUE.equals(empty)) return new Snapshot(epoch, true, true, null);
+        JSONObject data = entry.getJSONObject("data");
+        if (data == null) throw unavailable();
+        return new Snapshot(epoch, true, false, data);
+    }
+
+    public static long positiveTtlMillis() { return 60000 + ThreadLocalRandom.current().nextLong(15001); }
+    public static long negativeTtlMillis() { return 10000 + ThreadLocalRandom.current().nextLong(5001); }
+    /** Process-local diagnostics, not a metrics endpoint or a measured hit ratio. */
+    public long[] statistics() {
+        return new long[]{hits.sum(), negativeHits.sum(), misses.sum(), loads.sum(), rejected.sum(), failures.sum()};
+    }
+    private BusinessException unavailable() {
+        failures.increment(); return new BusinessException(ErrorCode.SHOP_STATE_UNAVAILABLE);
+    }
+    private void pause() {
+        try { Thread.sleep(10); }
+        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw unavailable(); }
+    }
+    private static <T> DefaultRedisScript<T> script(String name, Class<T> type) {
+        DefaultRedisScript<T> script = new DefaultRedisScript<>();
+        script.setLocation(new ClassPathResource(name)); script.setResultType(type); return script;
+    }
+    private static class Snapshot {
+        final String epoch; final boolean present, empty; final JSONObject data;
+        Snapshot(String epoch, boolean present, boolean empty, JSONObject data) {
+            this.epoch = epoch; this.present = present; this.empty = empty; this.data = data;
         }
-        return r;
     }
-
-    /**
-     * 尝试获取Redis分布式锁
-     *
-     * @param key 锁的键
-     * @return 是否成功获取锁，true表示获取成功，false表示获取失败或异常
-     */
-    private boolean tryLock(String key) {
-        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10L, TimeUnit.SECONDS);
-        /**
-         * 返回 Boolean（包装类型），有三种可能：
-         * true：设置成功（key不存在）
-         * false：设置失败（key已存在）
-         * null：Redis连接异常或其他错误
-         */
-        return BooleanUtil.isTrue(flag);// null 时返回 false
-    }
-
-    /**
-     * 释放Redis分布式锁
-     *
-     * @param key 锁的键
-     */
-    private void unLock(String key) {
-        stringRedisTemplate.delete(key);
-    }
-
 }

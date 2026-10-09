@@ -3,6 +3,9 @@ package io.github.frewily.campushub.controller;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.entity.Shop;
 import io.github.frewily.campushub.service.IShopService;
+import io.github.frewily.campushub.config.GlobalExceptionHandler;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,7 +32,7 @@ class ShopControllerTest {
     void setUp() {
         ShopController shopController = new ShopController();
         ReflectionTestUtils.setField(shopController, "shopService", shopService);
-        mockMvc = standaloneSetup(shopController).build();
+        mockMvc = standaloneSetup(shopController).setControllerAdvice(new GlobalExceptionHandler()).build();
     }
 
     @Test
@@ -43,5 +46,13 @@ class ShopControllerTest {
                 .andExpect(jsonPath("$.data.id").value(1))
                 .andExpect(jsonPath("$.data.name").value("Campus Cafe"))
                 .andExpect(jsonPath("$.data.success").doesNotExist());
+    }
+
+    @Test
+    void unavailableCacheOrDatabaseIsTyped503NotAFake404() throws Exception {
+        when(shopService.queryById(1L)).thenThrow(new BusinessException(ErrorCode.SHOP_STATE_UNAVAILABLE));
+        mockMvc.perform(get("/shop/1")).andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errorCode").value("SHOP_STATE_UNAVAILABLE"));
     }
 }

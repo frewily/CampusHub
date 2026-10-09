@@ -1,8 +1,6 @@
 package io.github.frewily.campushub.service.impl;
 
-import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.entity.Shop;
@@ -10,9 +8,9 @@ import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.ShopMapper;
 import io.github.frewily.campushub.service.IShopService;
+import io.github.frewily.campushub.service.ShopCacheInvalidationService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import io.github.frewily.campushub.utils.CacheClient;
-import io.github.frewily.campushub.utils.RedisData;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResult;
 import org.springframework.data.geo.GeoResults;
@@ -25,9 +23,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 
 import javax.annotation.Resource;
 
-import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
 import static io.github.frewily.campushub.utils.RedisConstants.*;
 
@@ -40,78 +36,24 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Resource
     CacheClient cacheClient;
 
+    @Resource
+    ShopCacheInvalidationService shopCacheInvalidationService;
+
     @Override
     public Result queryById(Long id) {
-        Shop shop = cacheClient
-                .queryWithLogicalExpire(CACHE_SHOP_KEY, id , Shop.class, this::getById, 20L, TimeUnit.SECONDS);
+        Shop shop = cacheClient.queryShop(id, Shop.class, this::getById);
         if (shop == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "门店不存在");
         }
         return Result.ok(shop);
     }
 
-    public Shop queryWithMutex(Long id){
-        String key = CACHE_SHOP_KEY + id;
-        String shopJson = stringRedisTemplate.opsForValue().get(key);
-        if (StrUtil.isNotBlank(shopJson)) {
-            return JSONUtil.toBean(shopJson, Shop.class);
-        }
-        if (shopJson != null) {//-->shopJson为空字符串,直接返回错误信息，不再查询数据库，避免缓存穿透
-            return null;
-        }
-        String LockKey = LOCK_SHOP_KEY + id;
-        Shop shop;
-        try {
-            boolean isLock = tryLock(LockKey);
-            if(!isLock){
-                Thread.sleep(50);
-                return queryWithMutex(id);
-            }
-            shop = getById(id);
-            // 保留旧实验方法的模拟重建延时；正式查询不走此分支。
-            Thread.sleep(200);
-            if (shop == null) {
-                stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
-                return null;
-            }
-            stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally {
-            unLock(LockKey);
-        }
-        return shop;
-    }
-
-    private boolean tryLock(String key) {
-        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10L, TimeUnit.SECONDS);
-        /**
-         * 返回 Boolean（包装类型），有三种可能：
-         * true：设置成功（key不存在）
-         * false：设置失败（key已存在）
-         * null：Redis连接异常或其他错误
-         */
-        return BooleanUtil.isTrue(flag);// null 时返回 false
-    }
-
-    private void unLock(String key) {
-        stringRedisTemplate.delete(key);
-    }
-
-    public void saveShopToRedis(Long id,Long expireSeconds) throws InterruptedException {
-        Shop shop = getById(id);
-        Thread.sleep(200);//模拟重建延时
-        RedisData redisData = new RedisData();
-        redisData.setData(shop);
-        redisData.setExpireTime(LocalDateTime.now().plusSeconds(expireSeconds));
-        stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(redisData));
-    }
-
     @Override
     @Transactional
     @PreAuthorize("@resourceAuthorization.canCreateShop(#shop.merchantId)")
     public Result createShop(Shop shop) {
-        save(shop);
+        if (!save(shop)) throw new BusinessException(ErrorCode.OPERATION_FAILED);
+        shopCacheInvalidationService.enqueue(shop.getId());
         return Result.ok(shop.getId());
     }
 
@@ -129,8 +71,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         }
         // 通用更新接口不能转移门店归属；认领或转移需要独立的管理员用例。
         shop.setMerchantId(existing.getMerchantId());
-        updateById(shop);
-        stringRedisTemplate.delete(CACHE_SHOP_KEY + id);
+        if (!updateById(shop)) throw new BusinessException(ErrorCode.CONFLICT);
+        shopCacheInvalidationService.enqueue(id);
         return Result.ok();
     }
 

@@ -141,6 +141,8 @@
 - 提交后失效、空值、热点重建和 TTL 抖动有测试。
 - 记录缓存命中率的测量方式，但没有实测不得填写数字。
 
+状态：已完成门店详情单一 Cache Aside 策略、物理 TTL/抖动、负缓存、有界 token 互斥与 epoch 发布栅栏，以及创建/修改同事务 outbox、提交后失效和可靠重试。当前环境验证与限制见 `docs/refactor/13-phase-4a-shop-cache-governance.md`；没有实际业务命中率或压测数字。
+
 #### Phase 4B 搜索决策
 
 - 先实现校园商户搜索用例和 MySQL 基线。
@@ -206,5 +208,6 @@
 - Phase 3A：已完成实现与当前环境验证，记录见 `docs/refactor/10-phase-3a-flash-sale-admission.md`；Phase 3C 补充本机隔离 MySQL/Redis 业务链验证。
 - Phase 3B：已完成实现与当前环境验证，记录见 `docs/refactor/11-phase-3b-reliable-order-consumption.md`；Phase 3C 补充真实事务回滚与 worker 替换恢复测试，不包含进程强杀/failover 演练。
 - Phase 3C：已完成实现与本机隔离验证，记录见 `docs/refactor/12-phase-3c-order-lifecycle.md`；目标版本、历史数据迁移、部署及性能边界仍待验收。
-- Phase 4 至 Phase 6：尚未开始。
+- Phase 4A：已完成门店详情缓存治理与本机隔离验证，记录见 `docs/refactor/13-phase-4a-shop-cache-governance.md`。
+- Phase 4B、Phase 5 与 Phase 6：尚未开始。
 - 实际性能数据：尚未进行实际压测。
