@@ -64,6 +64,7 @@ Docker Engine 29.6.1 / Compose 5.3.0，desktop-linux 本地 Unix socket；arm64 
 - 初次 Compose 失败：只读父目录挂载之下又建立 migration 挂载点。改成独立 schema/seed 单文件挂载与 migration 目录挂载，再验证。
 - Redis 启动失败：Alpine BusyBox 不接受 `XXXXXX.conf` 形式的 mktemp 模板，容器内直接复现；改成以 XXXXXX 结尾的模板。以 redis 用户运行，配置文件只读于该用户/管理员权限面，不把密码当 redis-server 参数。
 - 应用重启验收失败：脚本保留旧的随机 published port。独立临时容器复现重启前后端口变化，重新发现应用端口后整套通过；不是靠增大等待时间掩盖。
+- 提交后清理复查发现：未启用 app profile 的 down 留下了验收 app 容器与上传卷，早期“全部清理”输出不准确。按确切合成项目清理残留，修正为启用 app profile 的 down，并加入清理后项目容器、卷、网络和应用镜像均为空的断言；重新运行完整验收。
 - 图片测试定位并修正了先创建目录再检查 symlink、损坏根目录误报 404 两个问题，最终图片存储 8 项全部通过。
 
 修复采用系统化调试：读取错误、复现、追踪边界、最小修改后复验。失败记录保留，不作为通过证据。

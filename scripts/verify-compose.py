@@ -243,7 +243,14 @@ def main():
             try:
                 compose("--profile", "app", "logs", "--no-color", timeout=30)
             finally:
-                compose("down", "--volumes", "--rmi", "local", "--remove-orphans", timeout=90)
+                compose("--profile", "app", "down", "--volumes", "--rmi", "local", "--remove-orphans", timeout=90)
+                assert compose("--profile", "app", "ps", "-aq") == "", "test containers remain after cleanup"
+                assert run(["docker", "volume", "ls", "--filter", "label=com.docker.compose.project=" + PROJECT,
+                            "--format", "{{.Name}}"] ) == "", "test volumes remain after cleanup"
+                assert run(["docker", "network", "ls", "--filter", "label=com.docker.compose.project=" + PROJECT,
+                            "--format", "{{.Name}}"] ) == "", "test networks remain after cleanup"
+                assert run(["docker", "image", "ls", "--filter", "reference=" + PROJECT + "-app:latest",
+                            "--format", "{{.Repository}}"] ) == "", "test app image remains after cleanup"
                 print("Removed only test-owned containers, network, image and synthetic volumes: " + PROJECT, flush=True)
     print("Private acceptance artifacts: " + str(ARTIFACTS), flush=True)
 
