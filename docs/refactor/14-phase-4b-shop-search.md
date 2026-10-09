@@ -29,6 +29,8 @@
 
 SQL 数据访问故障在服务内转为 `SHOP_STATE_UNAVAILABLE` 503；事务开始/结束发生在服务方法外，Controller 局部处理 transaction/data-access 异常，输出同一安全错误码。失败不伪装为无门店，不返回数据库异常文本。这不修改其他 Controller 的异常策略。
 
+提交后复审补充安全诊断：两条故障路径只记录固定事件与异常类名，不记录原异常文本/堆栈、SQL参数或连接信息。测试捕获日志，断言保留分类且不含合成私密异常文本；随后再次完整运行205项默认测试（4项设计跳过）与82项隔离IT，均无失败/错误。分类日志并不是完整根因追踪或已交付告警/指标平台；完整可观测性仍在Phase6。
+
 ## SQL、事务与数据新鲜度
 
 完整调用链：`ShopSearchController → ShopSearchService → ShopSearchMapper.xml → tb_shop`。所有用户值使用 `#{}`；LIKE 使用显式 `ESCAPE '!'`，依次转义 `!/%/_`，反斜杠作为普通文字。排序仅输出固定 `<choose>` 分支，没有 `${}`；投影列显式列举，不 SELECT *。

@@ -4,6 +4,7 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.dto.request.ShopSearchRequest;
 import io.github.frewily.campushub.service.ShopSearchService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.TransactionException;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.*;
 import javax.validation.Valid;
 
+@Slf4j
 @RestController
 @RequestMapping("/shop/search")
 public class ShopSearchController {
@@ -29,6 +31,7 @@ public class ShopSearchController {
     // Transaction begin/commit occur outside the service method's mapper exception boundary.
     @ExceptionHandler({TransactionException.class, DataAccessException.class})
     public ResponseEntity<Result> unavailable(RuntimeException error) {
+        log.warn("Shop search transaction/access failed, errorClass={}", error.getClass().getSimpleName());
         return ResponseEntity.status(ErrorCode.SHOP_STATE_UNAVAILABLE.getHttpStatus())
                 .body(Result.fail(ErrorCode.SHOP_STATE_UNAVAILABLE));
     }

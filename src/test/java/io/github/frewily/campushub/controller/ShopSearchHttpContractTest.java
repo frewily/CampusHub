@@ -22,6 +22,8 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.web.servlet.MockMvc;
@@ -33,6 +35,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -42,12 +45,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 
 @SpringBootTest(classes = ShopSearchHttpContractTest.TestApplication.class)
 @AutoConfigureMockMvc
+@ExtendWith(OutputCaptureExtension.class)
 class ShopSearchHttpContractTest {
 
     private static final String LARGE_ID = "9007199254740993";
@@ -228,7 +233,7 @@ class ShopSearchHttpContractTest {
     }
 
     @Test
-    void transactionCreationFailureReturnsSafeServiceUnavailableResponse() throws Exception {
+    void transactionCreationFailureReturnsSafeServiceUnavailableResponse(CapturedOutput output) throws Exception {
         when(shopSearchService.search(any(ShopSearchRequest.class)))
                 .thenThrow(new CannotCreateTransactionException("synthetic private credentials detail"));
 
@@ -239,6 +244,8 @@ class ShopSearchHttpContractTest {
                 .andExpect(jsonPath("$.errorMsg").value("门店状态暂时无法确认，请稍后重试"))
                 .andExpect(jsonPath("$.errorMsg").value(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("synthetic private credentials detail"))));
+        assertTrue(output.getOut().contains("Shop search transaction/access failed, errorClass=CannotCreateTransactionException"));
+        assertFalse(output.getAll().contains("synthetic private credentials detail"));
     }
 
     private static ShopSearchPage searchPage() {

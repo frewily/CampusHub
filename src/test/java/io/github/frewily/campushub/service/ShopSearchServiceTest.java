@@ -6,6 +6,9 @@ import io.github.frewily.campushub.dto.response.*;
 import io.github.frewily.campushub.exception.*;
 import io.github.frewily.campushub.mapper.ShopSearchMapper;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
 import javax.validation.*;
@@ -13,6 +16,7 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+@ExtendWith(OutputCaptureExtension.class)
 class ShopSearchServiceTest {
     private static ValidatorFactory factory;
     private ShopSearchMapper mapper;
@@ -71,11 +75,13 @@ class ShopSearchServiceTest {
         request.setX(180D); request.setY(-90D); request.setRadiusMeters(50000);
         assertEquals(0,search.search(request).getTotal());
     }
-    @Test void unavailableDatabaseIsNotAnInventedEmptyResult() {
+    @Test void unavailableDatabaseIsNotAnInventedEmptyResult(CapturedOutput output) {
         when(mapper.count(any())).thenThrow(new DataAccessResourceFailureException("private database details"));
         BusinessException error=assertThrows(BusinessException.class,()->search.search(new ShopSearchRequest()));
         assertEquals(ErrorCode.SHOP_STATE_UNAVAILABLE,error.getErrorCode());
         assertFalse(error.getMessage().contains("private")); verify(mapper,never()).search(any());
+        assertTrue(output.getOut().contains("Shop search database access failed, errorClass=DataAccessResourceFailureException"));
+        assertFalse(output.getAll().contains("private database details"));
     }
     @Test void pageFailureAfterCountIsAlsoTypedUnavailable() {
         when(mapper.count(any())).thenReturn(1L);
