@@ -1,0 +1,16 @@
+# Only for the synthetic Phase 6C baseline; does not change normal deployment limits.
+services:
+  app:
+    cpus: 2.0
+    mem_limit: 768m
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
+  mysql:
+    cpus: 1.0
+    mem_limit: 768m
+  redis:
+    cpus: 0.5
+    mem_limit: 256m
+  prometheus:
+    cpus: 0.5
+    mem_limit: 256m

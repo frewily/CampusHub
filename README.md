@@ -2,7 +2,7 @@
 
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
 
-目前完成 Phase 5、Phase 6A/6B：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断与核心 HTTP 故障补验。Phase 6C 的性能测量未开始；尚未进行实际压测。
+目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。不代表生产容量、限量活动压测或性能优化提升。
 
 ## 架构与业务
 
@@ -161,6 +161,10 @@ python3 scripts/verify-business-diagnostics.py
 
 使用自己的合成验证码、会话、数据和临时项目验证真实登录/权限、Feed、缓存失效故障、订单重放/归属、DB 确认失败后的取消幂等和消费 pending 恢复，并查询实际 Prometheus。只在合成库注入 trigger/加速租约过期；优雅重启不是强杀、HA 或压测。固定结果计数的含义见 [业务诊断笔记](docs/learning/business-diagnostics.md)。
 
+## 本机性能基线（Phase 6C）
+
+原生 macOS ARM64 k6 1.3.0 测量合成正缓存详情与 MySQL 搜索，1/10 VU、每组合三轮、独立 5s 预热与 20s 测量；保留 24 份未修改的聚合汇总及环境/参数/哈希记录。只报告逐轮 RPS/P95/P99 的中位数和范围，不拼接百分位数、不当生产容量或优化前后对照。复现入口、具体数字和计时异常的历史拒绝记录见 [性能报告](docs/performance/README.md)；事实限定的讲述见 [面试材料](docs/interview/README.md)。临时工具不全局安装、不进入 Git。
+
 ## API 与设计文档
 
 - [领域模型](docs/domain-model.md)、[迁移计划](docs/refactor/02-migration-plan.md)、[遗留兼容说明](docs/learning/legacy-compatibility.md)。
@@ -170,6 +174,7 @@ python3 scripts/verify-business-diagnostics.py
 - [Phase 5 验证记录](docs/refactor/15-phase-5-engineering.md)、[可重复部署学习笔记](docs/learning/reproducible-deployment.md)。
 - [Phase 6A 验证记录](docs/refactor/16-phase-6a-observability.md)、[可观测性学习笔记](docs/learning/observability-baseline.md)。
 - [Phase 6B 验证记录](docs/refactor/17-phase-6b-business-diagnostics.md)、[质量覆盖矩阵](docs/refactor/phase-6b-quality-matrix.md)、[业务诊断笔记](docs/learning/business-diagnostics.md)。
+- [Phase 6C 验证记录](docs/refactor/18-phase-6c-performance.md)、[性能报告与原始证据](docs/performance/README.md)、[事实限定的面试材料](docs/interview/README.md)。
 
 `GET /shop/search` 匿名可访问，支持 `keyword,typeId,minPrice,maxPrice,minScore,x,y,radiusMeters,sort,page,size`。详细取值/单位以搜索契约为准；`data` 为 `items,total,page,size,sort,hasNext`，ID 为字符串。HTTP routes、表名和大部分 Redis key 保留；门店详情缓存已切换 `cache:shop:v2:`，不支持新旧缓存写入程序混跑的一致性保证。
 
@@ -193,10 +198,10 @@ python3 scripts/verify-compose.py
 
 2026-10-09 的 Phase 5 证据：229 项默认测试（0 失败/错误，4 设计跳过），82 项显式隔离 IT（0 失败/错误），Compose 10 组实际检查，包含 HTTP、图片持久化/权限、依赖停机、fresh 初始化与重复迁移、本机 jar 路径和 prod 缺配置拒绝启动。Compose 实测 MySQL 8.4.11 / Redis 6.2.24，旧隔离 IT 为本机 MySQL 9.6.0 / Redis 8.6.2。
 
-这些不等于所有业务已在目标版本完整验收：部署角色/会话由合成 fixture 创建，不代表真实登录短信链路；历史迁移、进程强杀/failover、性能、全部旧业务的目标版本兼容仍未验收。**尚未进行实际压测**，没有 QPS/P95/P99/缓存命中率数字。
+以上是 Phase 5 当时的证据边界：部署角色/会话由合成 fixture 创建，不代表真实登录短信链路，当时尚未进行实际压测。后续 6B 补合成登录/故障验收，6C 补选定只读小基线；仍不等于历史迁移、进程关键窗口强杀/failover、生产性能或全部旧业务的目标版本兼容已验收。
 
 Phase 6A 阶段回归：244 项默认测试（0 失败/错误，4 设计跳过）、82 项隔离 IT（0 失败/错误）、10 组部署回归、5 组实际 Prometheus 3.5.0 采集检查及清理断言通过。默认测试中的新双监听器 HTTP 合同使用 mock 依赖；真实 Compose 验收另用合成 DB/Redis。
 
 Phase 6B 本轮：46 项定向、255 项默认（4 设计跳过）、82 项隔离 IT、8 组目标版本真实业务/故障/诊断验收、10 组部署回归和 5 组管理面采集回归通过。目标流程使用 MySQL 8.4.11 / Redis 6.2.24 / Prometheus 3.5.0；验证码读取只发生在测试自己的 Redis，不是实际短信验收。不同证据层级不能互相替代；未验证关键窗口强杀、多副本、任意网络分区、HA、历史迁移或所有旧业务兼容。
 
-下一小阶段为 6C 可复现性能测量；完成当前阶段提交与审查后再单独开始。
+Phase 6C 本轮：Java 8 默认回归 255 项（4 设计跳过）、23 项离线性能/原生工具校验、原生脚本解析及 9 组非法参数拒绝检查通过；12 次正式读取测量和 12 次独立预热通过，共 689737 次正式请求，HTTP/业务错误为 0。原始文件、全部计时分项、缓存窗口、统计与哈希独立复核通过，测试项目已精确清理。没有将上一阶段的 82 项隔离 IT 或 8/10/5 组验收当成本轮重跑；没有限量活动、写入竞争、生产容量、SLO 或性能提升百分比结论。
