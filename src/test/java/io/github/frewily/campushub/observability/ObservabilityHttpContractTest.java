@@ -83,6 +83,10 @@ class ObservabilityHttpContractTest {
         for (String endpoint : new String[]{"env", "configprops", "beans", "heapdump", "loggers", "shutdown", "metrics"}) {
             assertNotEquals(200, http.getForEntity(management("/actuator/" + endpoint), String.class).getStatusCodeValue());
         }
+        for (String businessRoute : new String[]{"/shop/trace-probe/123", "/shop/search", "/health/live"}) {
+            assertNotEquals(200, http.getForEntity(management(businessRoute), String.class).getStatusCodeValue(),
+                    "management must not serve business routes");
+        }
         assertNotEquals(200, http.postForEntity(management("/actuator/prometheus"), "", String.class).getStatusCodeValue());
     }
     @Test void metricsUseRouteTemplatesWithoutClientIdentifiersAndExposeHistogramBuckets() {

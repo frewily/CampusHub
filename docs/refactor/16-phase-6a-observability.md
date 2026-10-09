@@ -43,7 +43,7 @@ python3 scripts/verify-observability.py
 1. promtool 验证配置，Prometheus 查询 `up{job="campushub"} == 1` 有真实样本，Compose 未发布 8082。
 2. 业务端口匿名请求 Actuator prometheus/env/heapdump 均为 401，不提供指标或敏感端点。
 3. 响应使用服务端 UUID而非客户端 ID；成功、400、401 的 HTTP 计数和 histogram buckets 进入 Prometheus。
-4. 查询实际 JVM/Hikari 序列；采集样本与新请求摘要中不含合成查询标记、客户端 ID、请求 UUID、测试密码。检查只验证所列 fixture 与新摘要，不等于全仓库任意日志已全面脱敏。
+4. 查询实际 JVM/Hikari 序列；采集样本不含合成查询标记、客户端 ID、请求 UUID、测试密码。新摘要不输出查询标记或客户端 ID，完整日志行的 MDC 仍包含服务端 UUID，用于关联排查。检查只验证所列 fixture 与新摘要，不等于全仓库任意日志已全面脱敏。
 5. Redis 停机后业务 ready 503/DOWN、live 200；观察停机后新的 scrape timestamp 且 up 仍为 1，证明 exporter 可达不代表依赖健康。恢复 Redis 后 ready 重新 UP。
 
 所有实际部署使用唯一合成项目、随机 localhost 发布端口、全新数据卷，不读自己的 `.env`，不连接共享业务库。最终清理后按确切项目检查容器、卷、网络、应用镜像均为空；保留基础镜像。私有原始日志/结果 JSON 留在脚本输出的临时目录，不进入 Git。
@@ -55,6 +55,7 @@ python3 scripts/verify-observability.py
 - 隐私测试揭示测试 RestTemplate 产生 HTTP client 指标，包含调用者字面查询。按指标 family 定位后禁用未使用的 client 请求指标，保留服务端模板指标，原隐私断言继续通过。
 - 新 Python 脚本最初把带连字符的旧脚本名当普通模块导入，未进入部署即失败；使用明确文件路径的 importlib 加载。
 - monitoring overlay 中 collector 依赖带 profile 的 app，最初日志读取遗漏 profile 导致 invalid compose project。将 collector 同属 app profile，且验收全程显式 app profile，再运行整套采集与清理检查。
+- 提交后复审修正文档中“日志不含请求 UUID”的不准确表达：指标不含 UUID，日志 MDC 有 UUID 是设计的一部分。补充双监听器 HTTP 合同，明确管理端口不会返回普通公开业务路由的成功响应。
 
 以上按系统化调试流程定位，失败记录不当作通过结果。
 
