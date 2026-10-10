@@ -2,7 +2,7 @@
 
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
 
-目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；不代表原始业务目标全部落地、生产容量、限量活动压测或性能优化提升。
+目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；6E1/6E2 补选定的有限抢购批次实测，6F 补当前接口目录与源码漂移检查。不代表原始业务目标全部落地、生产容量或性能优化提升。
 
 ## 架构与业务
 
@@ -169,6 +169,7 @@ python3 scripts/verify-business-diagnostics.py
 
 ## API 与设计文档
 
+- [当前 API 目录](docs/api/README.md)、[37 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：另列两个管理端 GET，不含未来接口；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
 - [领域模型](docs/domain-model.md)、[迁移计划](docs/refactor/02-migration-plan.md)、[遗留兼容说明](docs/learning/legacy-compatibility.md)。
 - [请求/响应契约](docs/refactor/09-phase-2d-api-models.md)、[权限](docs/refactor/08-phase-2c-authorization.md)。
 - [活动准入](docs/refactor/10-phase-3a-flash-sale-admission.md)、[消费恢复](docs/refactor/11-phase-3b-reliable-order-consumption.md)、[订单取消](docs/refactor/12-phase-3c-order-lifecycle.md)。
@@ -178,7 +179,7 @@ python3 scripts/verify-business-diagnostics.py
 - [Phase 6B 验证记录](docs/refactor/17-phase-6b-business-diagnostics.md)、[质量覆盖矩阵](docs/refactor/phase-6b-quality-matrix.md)、[业务诊断笔记](docs/learning/business-diagnostics.md)。
 - [Phase 6C 验证记录](docs/refactor/18-phase-6c-performance.md)、[性能报告与原始证据](docs/performance/README.md)、[事实限定的面试材料](docs/interview/README.md)。
 - [项目故事](docs/interview/project-story.md)、[面试追问](docs/interview/questions.md)、[事实限定的简历要点](docs/interview/resume-points.md)。
-- [Phase 6D 交付盘点与剩余范围](docs/refactor/19-phase-6d-delivery.md)：当前仅有重点 API 契约，尚无统一穷尽的接口目录；完整商户/管理后台、评论评价、通知及业务模块分包未交付。当时缺少的选定抢购负载已由 [Phase 6E2](docs/refactor/21-phase-6e2-flash-sale-results.md) 补验，不能用 6C 读取结果替代，也不把有限批次当成容量验收。
+- [Phase 6D 交付盘点与剩余范围](docs/refactor/19-phase-6d-delivery.md)：当时仅有重点 API 契约，6F 已补当前显式路由目录；完整商户/管理后台、评论评价、通知及业务模块分包仍未交付。当时缺少的选定抢购负载已由 [Phase 6E2](docs/refactor/21-phase-6e2-flash-sale-results.md) 补验，不能用 6C 读取结果替代，也不把有限批次当成容量验收。
 
 `GET /shop/search` 匿名可访问，支持 `keyword,typeId,minPrice,maxPrice,minScore,x,y,radiusMeters,sort,page,size`。详细取值/单位以搜索契约为准；`data` 为 `items,total,page,size,sort,hasNext`，ID 为字符串。HTTP routes、表名和大部分 Redis key 保留；门店详情缓存已切换 `cache:shop:v2:`，不支持新旧缓存写入程序混跑的一致性保证。
 
@@ -211,3 +212,5 @@ Phase 6B 本轮：46 项定向、255 项默认（4 设计跳过）、82 项隔�
 Phase 6C 本轮：Java 8 默认回归 255 项（4 设计跳过）、23 项离线性能/原生工具校验、原生脚本解析及 9 组非法参数拒绝检查通过；12 次正式读取测量和 12 次独立预热通过，共 689737 次正式请求，HTTP/业务错误为 0。原始文件、全部计时分项、缓存窗口、统计与哈希独立复核通过，测试项目已精确清理。没有将上一阶段的 82 项隔离 IT 或 8/10/5 组验收当成本轮重跑；没有限量活动、写入竞争、生产容量、SLO 或性能提升百分比结论。
 
 Phase 6E2 本轮：255 项默认回归（4 设计跳过）、54 项 Python 离线门禁、29 组 Node VM stub 与原生参数检查通过；六个正式有限抢购批次、六个独立预热全部通过。正式 1320 请求与 330 个新订单分别统计，非预期错误为 0，不把正常售罄或重放算新订单；私有身份账本、12 个未修改原始汇总、哈希/统计及测试资源清理另行复核。仅修复测试驱动解析与隐私识别，没有业务代码或性能优化变化；未重跑旧阶段 IT/故障套件。
+
+Phase 6F 本轮：新增 4 项 API 目录契约检查，Java 8 默认回归与打包 259 项（0 失败/错误、4 设计跳过）通过。37 个主源码显式 MVC 映射与机器清单、逐接口表格一致；只核验映射/授权声明及文档事实，不等于 37 个完整端到端接口已验收。没有运行 Docker、真实 DB/Redis IT 或重跑历史性能；没有改业务、依赖或部署配置。
