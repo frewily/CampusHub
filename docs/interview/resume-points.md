@@ -14,6 +14,7 @@ CampusHub：从黑马点评教学工程渐进演进的校园生活与周边商�
 | --- | --- | --- |
 | 基于 Spring Security 与可撤销 Redis 会话实现角色和门店资源归属校验，为优先写接口增加请求字段白名单与统一错误语义 | opaque token、禁用/登出、有效商户成员、越权拒绝；不是 JWT/refresh token，也不是所有遗留接口均已隔离 Entity | [权限](../refactor/08-phase-2c-authorization.md)、[API 边界](../refactor/09-phase-2d-api-models.md) |
 | 以 Redis Lua 完成限量活动准入与重复受理，结合 Redis Stream pending 接管、有界重试、失败归档和数据库唯一约束处理异步建单 | ACCEPTED 不等于已落库；提交后 ACK 失败、同 ID 幂等、冲突 ID、失败库存保留与人工核对后的 redrive | [准入](../refactor/10-phase-3a-flash-sale-admission.md)、[可靠消费](../refactor/11-phase-3b-reliable-order-consumption.md)、[ADR 0001](../adr/0001-order-message-broker.md) |
+| 对限量活动建立隔离的有限合成 HTTP 批次验收，核对首次受理、原 ID 重放、售罄分类及 Redis/Stream/DB 订单和库存账本 | 20/200 合成账号各三轮、每人两次请求、半库存；正式 1320 次请求中 330 新受理、330 重放、660 售罄；独立预热另 120 次请求、30 笔订单。不是持续 QPS/TPS、同步起跑、容量或逐单落库延迟；不包含真实短信、强杀/HA 或生产 SLO 结论 | [有限批次报告](../performance/flash-sale.md)、[Phase 6E2 记录](../refactor/21-phase-6e2-flash-sale-results.md) |
 | 用 MySQL 事务 outbox 与独立 Redis 幂等 marker 支持本人未支付订单取消及补偿恢复 | DB/Redis 分别确认、租约/CAS、Redis 成功但 DB 确认失败、PENDING 转核对；未实现支付/退款 | [订单闭环](../refactor/12-phase-3c-order-lifecycle.md)、[取消笔记](../learning/order-cancellation-recovery.md) |
 | 门店详情采用 Cache Aside、负缓存、TTL 抖动、有界 token 互斥与 epoch 发布栅栏，通过事务 outbox 恢复提交后的失效 | 旧 loader 回填交错、generation 与 epoch 的区别、竞争预算、503 边界；不宣称强一致或优化提升 | [缓存治理](../refactor/13-phase-4a-shop-cache-governance.md)、[缓存笔记](../learning/shop-cache-consistency.md) |
 | 建立隔离 Compose 验收与固定标签业务诊断，覆盖合成登录/权限、Feed、缓存失效、订单重放和取消确认失败 | 默认 mock、本机 IT 与目标版本 HTTP 证据区别；计数不是唯一订单数/lag；优雅重启不是强杀或 HA | [部署](../refactor/15-phase-5-engineering.md)、[诊断验收](../refactor/17-phase-6b-business-diagnostics.md)、[测量语义](../learning/business-diagnostics.md) |
@@ -28,7 +29,7 @@ MySQL 搜索可以作为取舍补充：实现名称子串、类别/价格/评分
 
 完整环境、三轮范围、P99 与原始汇总见 [性能报告](../performance/README.md)、[manifest](../performance/results/20261009T144219Z/manifest.json)。应用容器 JDK 为 Temurin 8，宿主构建 JDK 为 Corretto 8，不要混写。数字是相同用例三轮逐轮指标的中位数，不是合并请求分布的百分位数；VU 不等于在线用户，两种接口不能比较成缓存收益。
 
-若简历版面容不下条件，优先写“建立可复现的只读基线并保存原始结果”，不孤立使用“支持 7000+ QPS”。尚未进行抢购实际压测，也没有 TPS、生产成功率、提升百分比、万人并发或 SLO 结论。
+若简历版面容不下条件，优先写“建立可复现的只读基线并保存原始结果”，不孤立使用“支持 7000+ QPS”。Phase 6E2 已完成有限合成抢购批次，但其 batch request rate 不是持续 QPS/TPS，20/200 也不是同步起跑或容量。没有生产成功率、性能提升百分比、万人并发或 SLO 结论；k6 退出到观察到订单完成的时间含 CLI/轮询开销，不是逐单落库延迟，零非预期错误也不等于所有请求都建单。
 
 ## 使用前自检
 

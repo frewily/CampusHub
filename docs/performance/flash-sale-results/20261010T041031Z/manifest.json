@@ -1,0 +1,1039 @@
+{
+  "schema_version": 1,
+  "scope": "finite synthetic flash-sale cohorts; not capacity/TPS/SLO/per-order commit latency",
+  "metadata": {
+    "application_revision": "f5d9ee8f7c9a5ef8ff7af24ae72676db0e0bc364",
+    "application_jar_sha256": "d4fba3114c3ccd631d589cf3ccf4b80d85feed9a2c471828451eb3f6659d1a24",
+    "k6_version": "k6 v1.3.0 (commit/5870e99ae8, go1.25.1, darwin/arm64)",
+    "k6_sha256": "40fa9d8cb693a9bb8034810057a6eb3b45318e3258d1a11cdaa95d72f582ccb2",
+    "harness_sha256": "d5952d1adc75744c8becd2b770e9d305480e43d7e0b9bdfb479dd167078fe51d",
+    "script_sha256": "5a04946afb69bb0ca2c96376371b9fd3e8191241d6aeab5f7221f41d8990e9de",
+    "support_sha256": {
+      "run-performance-baseline.py": "9b3e7125b6eed4653b98e15b46df0e513bb5a803bf67a22f87296c7a3a824082",
+      "verify-compose.py": "2a0e8a75ed7f9c52a196f50fdab8d80a305653b9c2710e21d8d743163b13a12c",
+      "verify-observability.py": "4450d22c3d4aa937767cdb3d99e8b3ca13bbc37dae5f7385bce58ed914be2a48",
+      "prepare-native-k6.py": "42f394a1f67c6b4cd2459188d44df215f95704685ff96ee98b41cebac560c3f7"
+    },
+    "overlay_sha256": "704852d568b4f2074a04f8eb0f65d9d1c0d23af5a4667c2ed4c4fc7a0dda02ef",
+    "host": {
+      "os": "Darwin",
+      "version": "27.0.1",
+      "architecture": "arm64",
+      "model": "Mac17,3",
+      "cpu": "Apple M5",
+      "cpus": 10,
+      "memory_bytes": 17179869184
+    },
+    "resources": {
+      "app": {
+        "nano_cpus": 2000000000,
+        "memory_bytes": 805306368
+      },
+      "mysql": {
+        "nano_cpus": 1000000000,
+        "memory_bytes": 805306368
+      },
+      "redis": {
+        "nano_cpus": 500000000,
+        "memory_bytes": 268435456
+      },
+      "prometheus": {
+        "nano_cpus": 500000000,
+        "memory_bytes": 268435456
+      }
+    },
+    "app_jvm": "Picked up JAVA_TOOL_OPTIONS: -Xms256m -Xmx512m\nopenjdk version \"1.8.0_504\"\nOpenJDK Runtime Environment (Temurin)(build 1.8.0_504-b01)\nOpenJDK 64-Bit Server VM (Temurin)(build 25.504-b01, mixed mode)",
+    "versions": {
+      "mysql": "8.4.11",
+      "redis": "6.2.24",
+      "prometheus": "prometheus, version 3.5.0 (branch: HEAD, revision: 8be3a9560fbdd18a94dedec4b747c35178177202)",
+      "compose": "5.3.0"
+    },
+    "docker": {
+      "version": "29.6.1",
+      "cpus": 10,
+      "memory_bytes": 8321515520
+    }
+  },
+  "model": {
+    "executor": "per-vu-iterations",
+    "actors": [
+      20,
+      200
+    ],
+    "iterations_per_actor": 1,
+    "requests_per_actor": 2,
+    "stock_fraction": 0.5,
+    "repeats": 3,
+    "warmup_actors": 10,
+    "max_duration_seconds": 30,
+    "graceful_stop_seconds": 5,
+    "http_timeout_seconds": 5,
+    "runner_gomaxprocs": 1,
+    "runner_gomemlimit": "256MiB",
+    "runner_limits": "Go settings only, no OS hard quota",
+    "identity_provisioning": "synthetic fixture only, not login/SMS load"
+  },
+  "runs": [
+    {
+      "repeat": 1,
+      "measured": {
+        "actors": 20,
+        "initial_stock": 10,
+        "requests": 40,
+        "iterations": 20,
+        "checks_passed": 120,
+        "outcomes": {
+          "admission_new": 10,
+          "admission_replayed": 10,
+          "admission_sold_out": 20,
+          "unexpected_outcomes": 0
+        },
+        "batch_http_requests_per_second": 997.2575417601596,
+        "client_duration_ms": {
+          "all_http": {
+            "avg": 17.397075,
+            "min": 12.532,
+            "med": 17.568,
+            "max": 21.665,
+            "p(90)": 19.455199999999998,
+            "p(95)": 19.984599999999997,
+            "p(99)": 21.503149999999998
+          },
+          "admission_new": {
+            "avg": 16.423099999999998,
+            "min": 13.467,
+            "med": 16.7,
+            "max": 19.438,
+            "p(90)": 18.5173,
+            "p(95)": 18.977649999999997,
+            "p(99)": 19.34593
+          },
+          "admission_replayed": {
+            "avg": 17.1648,
+            "min": 12.532,
+            "med": 17.8035,
+            "max": 19.284,
+            "p(90)": 18.6333,
+            "p(95)": 18.95865,
+            "p(99)": 19.21893
+          },
+          "admission_sold_out": {
+            "avg": 18.0002,
+            "min": 13.744,
+            "med": 17.912,
+            "max": 21.665,
+            "p(90)": 20.0512,
+            "p(95)": 21.27075,
+            "p(99)": 21.58615
+          }
+        },
+        "unexpected_http_error_rate": 0
+      },
+      "ledger": {
+        "new_orders": 10,
+        "unique_users": 10,
+        "unique_order_ids": 10,
+        "stream_events": 10,
+        "database_stock": 0,
+        "redis_stock": 0,
+        "pending": 0,
+        "dead_entries": 0,
+        "invariants_verified": true
+      },
+      "driver_load_wall_seconds": 0.12712933399598114,
+      "load_exit_to_all_orders_observed_seconds": 0.16224179101118352,
+      "observation_poll_seconds": 0.5,
+      "observation_timeout_seconds": 90,
+      "summary": "flash-sale-n20-r1.json",
+      "warmup_summary": "flash-sale-n20-r1-warmup.json",
+      "warmup": {
+        "repeat": 1020,
+        "measured": {
+          "actors": 10,
+          "initial_stock": 5,
+          "requests": 20,
+          "iterations": 10,
+          "checks_passed": 60,
+          "outcomes": {
+            "admission_new": 5,
+            "admission_replayed": 5,
+            "admission_sold_out": 10,
+            "unexpected_outcomes": 0
+          },
+          "batch_http_requests_per_second": 274.2618926813214,
+          "client_duration_ms": {
+            "all_http": {
+              "avg": 34.614399999999996,
+              "min": 24.196,
+              "med": 35.5415,
+              "max": 42.245,
+              "p(90)": 41.7095,
+              "p(95)": 41.8004,
+              "p(99)": 42.156079999999996
+            },
+            "admission_new": {
+              "avg": 40.142999999999994,
+              "min": 39.754,
+              "med": 40.005,
+              "max": 40.544,
+              "p(90)": 40.517199999999995,
+              "p(95)": 40.5306,
+              "p(99)": 40.54132
+            },
+            "admission_replayed": {
+              "avg": 29.803800000000003,
+              "min": 28.378,
+              "med": 30.012,
+              "max": 31.329,
+              "p(90)": 31.121000000000002,
+              "p(95)": 31.225,
+              "p(99)": 31.3082
+            },
+            "admission_sold_out": {
+              "avg": 34.255399999999995,
+              "min": 24.196,
+              "med": 35.2515,
+              "max": 42.245,
+              "p(90)": 41.8238,
+              "p(95)": 42.0344,
+              "p(99)": 42.20288
+            }
+          },
+          "unexpected_http_error_rate": 0
+        },
+        "ledger": {
+          "new_orders": 5,
+          "unique_users": 5,
+          "unique_order_ids": 5,
+          "stream_events": 5,
+          "database_stock": 0,
+          "redis_stock": 0,
+          "pending": 0,
+          "dead_entries": 0,
+          "invariants_verified": true
+        },
+        "driver_load_wall_seconds": 0.1255293339927448,
+        "load_exit_to_all_orders_observed_seconds": 0.8630203750071814,
+        "observation_poll_seconds": 0.5,
+        "observation_timeout_seconds": 90
+      }
+    },
+    {
+      "repeat": 1,
+      "measured": {
+        "actors": 200,
+        "initial_stock": 100,
+        "requests": 400,
+        "iterations": 200,
+        "checks_passed": 1200,
+        "outcomes": {
+          "admission_new": 100,
+          "admission_replayed": 100,
+          "admission_sold_out": 200,
+          "unexpected_outcomes": 0
+        },
+        "batch_http_requests_per_second": 361.9103801325678,
+        "client_duration_ms": {
+          "all_http": {
+            "avg": 349.9127125,
+            "min": 7.887,
+            "med": 297.01649999999995,
+            "max": 1085.923,
+            "p(90)": 685.3736,
+            "p(95)": 1036.0684999999999,
+            "p(99)": 1039.37051
+          },
+          "admission_new": {
+            "avg": 286.96673000000004,
+            "min": 94.899,
+            "med": 294.769,
+            "max": 689.7,
+            "p(90)": 515.2276,
+            "p(95)": 590.2716,
+            "p(99)": 600.28221
+          },
+          "admission_replayed": {
+            "avg": 310.5077099999999,
+            "min": 10.895,
+            "med": 303.087,
+            "max": 561.983,
+            "p(90)": 497.29089999999997,
+            "p(95)": 504.4494,
+            "p(99)": 560.3198
+          },
+          "admission_sold_out": {
+            "avg": 401.08820499999996,
+            "min": 7.887,
+            "med": 349.536,
+            "max": 1085.923,
+            "p(90)": 1036.078,
+            "p(95)": 1037.6746,
+            "p(99)": 1084.7364400000001
+          }
+        },
+        "unexpected_http_error_rate": 0
+      },
+      "ledger": {
+        "new_orders": 100,
+        "unique_users": 100,
+        "unique_order_ids": 100,
+        "stream_events": 100,
+        "database_stock": 0,
+        "redis_stock": 0,
+        "pending": 0,
+        "dead_entries": 0,
+        "invariants_verified": true
+      },
+      "driver_load_wall_seconds": 1.4536972499918193,
+      "load_exit_to_all_orders_observed_seconds": 0.18243833299493417,
+      "observation_poll_seconds": 0.5,
+      "observation_timeout_seconds": 90,
+      "summary": "flash-sale-n200-r1.json",
+      "warmup_summary": "flash-sale-n200-r1-warmup.json",
+      "warmup": {
+        "repeat": 1200,
+        "measured": {
+          "actors": 10,
+          "initial_stock": 5,
+          "requests": 20,
+          "iterations": 10,
+          "checks_passed": 60,
+          "outcomes": {
+            "admission_new": 5,
+            "admission_replayed": 5,
+            "admission_sold_out": 10,
+            "unexpected_outcomes": 0
+          },
+          "batch_http_requests_per_second": 885.8180529719195,
+          "client_duration_ms": {
+            "all_http": {
+              "avg": 9.42075,
+              "min": 7.076,
+              "med": 9.5415,
+              "max": 11.738,
+              "p(90)": 10.2697,
+              "p(95)": 11.55465,
+              "p(99)": 11.70133
+            },
+            "admission_new": {
+              "avg": 8.466399999999998,
+              "min": 7.076,
+              "med": 8.269,
+              "max": 9.562,
+              "p(90)": 9.4924,
+              "p(95)": 9.527199999999999,
+              "p(99)": 9.55504
+            },
+            "admission_replayed": {
+              "avg": 9.1376,
+              "min": 7.647,
+              "med": 9.151,
+              "max": 10.091,
+              "p(90)": 10.0686,
+              "p(95)": 10.079799999999999,
+              "p(99)": 10.088759999999999
+            },
+            "admission_sold_out": {
+              "avg": 10.0395,
+              "min": 8.872,
+              "med": 9.738,
+              "max": 11.738,
+              "p(90)": 11.5643,
+              "p(95)": 11.65115,
+              "p(99)": 11.72063
+            }
+          },
+          "unexpected_http_error_rate": 0
+        },
+        "ledger": {
+          "new_orders": 5,
+          "unique_users": 5,
+          "unique_order_ids": 5,
+          "stream_events": 5,
+          "database_stock": 0,
+          "redis_stock": 0,
+          "pending": 0,
+          "dead_entries": 0,
+          "invariants_verified": true
+        },
+        "driver_load_wall_seconds": 0.07113583400496282,
+        "load_exit_to_all_orders_observed_seconds": 0.16047933298978023,
+        "observation_poll_seconds": 0.5,
+        "observation_timeout_seconds": 90
+      }
+    },
+    {
+      "repeat": 2,
+      "measured": {
+        "actors": 20,
+        "initial_stock": 10,
+        "requests": 40,
+        "iterations": 20,
+        "checks_passed": 120,
+        "outcomes": {
+          "admission_new": 10,
+          "admission_replayed": 10,
+          "admission_sold_out": 20,
+          "unexpected_outcomes": 0
+        },
+        "batch_http_requests_per_second": 1894.11876124633,
+        "client_duration_ms": {
+          "all_http": {
+            "avg": 9.0577,
+            "min": 6.071,
+            "med": 8.536,
+            "max": 12.965,
+            "p(90)": 11.946200000000001,
+            "p(95)": 12.2569,
+            "p(99)": 12.72515
+          },
+          "admission_new": {
+            "avg": 9.8114,
+            "min": 8.532,
+            "med": 9.8315,
+            "max": 10.785,
+            "p(90)": 10.6527,
+            "p(95)": 10.71885,
+            "p(99)": 10.77177
+          },
+          "admission_replayed": {
+            "avg": 7.5177,
+            "min": 6.593,
+            "med": 7.636,
+            "max": 8.54,
+            "p(90)": 8.133199999999999,
+            "p(95)": 8.336599999999999,
+            "p(99)": 8.499319999999999
+          },
+          "admission_sold_out": {
+            "avg": 9.450849999999999,
+            "min": 6.071,
+            "med": 9.3195,
+            "max": 12.965,
+            "p(90)": 12.261800000000001,
+            "p(95)": 12.380749999999999,
+            "p(99)": 12.84815
+          }
+        },
+        "unexpected_http_error_rate": 0
+      },
+      "ledger": {
+        "new_orders": 10,
+        "unique_users": 10,
+        "unique_order_ids": 10,
+        "stream_events": 10,
+        "database_stock": 0,
+        "redis_stock": 0,
+        "pending": 0,
+        "dead_entries": 0,
+        "invariants_verified": true
+      },
+      "driver_load_wall_seconds": 0.07275316699815448,
+      "load_exit_to_all_orders_observed_seconds": 0.13867437500448432,
+      "observation_poll_seconds": 0.5,
+      "observation_timeout_seconds": 90,
+      "summary": "flash-sale-n20-r2.json",
+      "warmup_summary": "flash-sale-n20-r2-warmup.json",
+      "warmup": {
+        "repeat": 2020,
+        "measured": {
+          "actors": 10,
+          "initial_stock": 5,
+          "requests": 20,
+          "iterations": 10,
+          "checks_passed": 60,
+          "outcomes": {
+            "admission_new": 5,
+            "admission_replayed": 5,
+            "admission_sold_out": 10,
+            "unexpected_outcomes": 0
+          },
+          "batch_http_requests_per_second": 1482.5796886582652,
+          "client_duration_ms": {
+            "all_http": {
+              "avg": 5.9331499999999995,
+              "min": 4.615,
+              "med": 5.855,
+              "max": 7.518,
+              "p(90)": 7.1518,
+              "p(95)": 7.29665,
+              "p(99)": 7.47373
+            },
+            "admission_new": {
+              "avg": 6.2548,
+              "min": 5.809,
+              "med": 6.194,
+              "max": 6.799,
+              "p(90)": 6.6846000000000005,
+              "p(95)": 6.7418000000000005,
+              "p(99)": 6.78756
+            },
+            "admission_replayed": {
+              "avg": 5.541799999999999,
+              "min": 5.1,
+              "med": 5.574,
+              "max": 5.901,
+              "p(90)": 5.856199999999999,
+              "p(95)": 5.8786,
+              "p(99)": 5.89652
+            },
+            "admission_sold_out": {
+              "avg": 5.968,
+              "min": 4.615,
+              "med": 5.8629999999999995,
+              "max": 7.518,
+              "p(90)": 7.3083,
+              "p(95)": 7.41315,
+              "p(99)": 7.49703
+            }
+          },
+          "unexpected_http_error_rate": 0
+        },
+        "ledger": {
+          "new_orders": 5,
+          "unique_users": 5,
+          "unique_order_ids": 5,
+          "stream_events": 5,
+          "database_stock": 0,
+          "redis_stock": 0,
+          "pending": 0,
+          "dead_entries": 0,
+          "invariants_verified": true
+        },
+        "driver_load_wall_seconds": 0.07174445799319074,
+        "load_exit_to_all_orders_observed_seconds": 0.11132670901133679,
+        "observation_poll_seconds": 0.5,
+        "observation_timeout_seconds": 90
+      }
+    },
+    {
+      "repeat": 2,
+      "measured": {
+        "actors": 200,
+        "initial_stock": 100,
+        "requests": 400,
+        "iterations": 200,
+        "checks_passed": 1200,
+        "outcomes": {
+          "admission_new": 100,
+          "admission_replayed": 100,
+          "admission_sold_out": 200,
+          "unexpected_outcomes": 0
+        },
+        "batch_http_requests_per_second": 1047.4275180157533,
+        "client_duration_ms": {
+          "all_http": {
+            "avg": 165.74571750000007,
+            "min": 4.63,
+            "med": 165.47,
+            "max": 367.326,
+            "p(90)": 296.951,
+            "p(95)": 348.9381499999999,
+            "p(99)": 365.50719
+          },
+          "admission_new": {
+            "avg": 96.92585000000001,
+            "min": 28.156,
+            "med": 66.86099999999999,
+            "max": 268.413,
+            "p(90)": 161.4752,
+            "p(95)": 175.49099999999999,
+            "p(99)": 250.32768
+          },
+          "admission_replayed": {
+            "avg": 210.98726000000002,
+            "min": 38.664,
+            "med": 207.048,
+            "max": 332.069,
+            "p(90)": 303.90070000000003,
+            "p(95)": 311.20505,
+            "p(99)": 320.33651000000003
+          },
+          "admission_sold_out": {
+            "avg": 177.53488000000007,
+            "min": 4.63,
+            "med": 176.5105,
+            "max": 367.326,
+            "p(90)": 349.26930000000004,
+            "p(95)": 362.12765,
+            "p(99)": 366.41469
+          }
+        },
+        "unexpected_http_error_rate": 0
+      },
+      "ledger": {
+        "new_orders": 100,
+        "unique_users": 100,
+        "unique_order_ids": 100,
+        "stream_events": 100,
+        "database_stock": 0,
+        "redis_stock": 0,
+        "pending": 0,
+        "dead_entries": 0,
+        "invariants_verified": true
+      },
+      "driver_load_wall_seconds": 0.6549837500060676,
+      "load_exit_to_all_orders_observed_seconds": 0.8232082499889657,
+      "observation_poll_seconds": 0.5,
+      "observation_timeout_seconds": 90,
+      "summary": "flash-sale-n200-r2.json",
+      "warmup_summary": "flash-sale-n200-r2-warmup.json",
+      "warmup": {
+        "repeat": 2200,
+        "measured": {
+          "actors": 10,
+          "initial_stock": 5,
+          "requests": 20,
+          "iterations": 10,
+          "checks_passed": 60,
+          "outcomes": {
+            "admission_new": 5,
+            "admission_replayed": 5,
+            "admission_sold_out": 10,
+            "unexpected_outcomes": 0
+          },
+          "batch_http_requests_per_second": 1588.0578053041131,
+          "client_duration_ms": {
+            "all_http": {
+              "avg": 4.8865,
+              "min": 3.41,
+              "med": 4.9495000000000005,
+              "max": 6.142,
+              "p(90)": 5.8182,
+              "p(95)": 5.930149999999999,
+              "p(99)": 6.09963
+            },
+            "admission_new": {
+              "avg": 5.1026,
+              "min": 4.576,
+              "med": 5.019,
+              "max": 5.807,
+              "p(90)": 5.5766,
+              "p(95)": 5.6918,
+              "p(99)": 5.78396
+            },
+            "admission_replayed": {
+              "avg": 4.224600000000001,
+              "min": 3.41,
+              "med": 4.07,
+              "max": 5.553,
+              "p(90)": 4.9778,
+              "p(95)": 5.2654,
+              "p(99)": 5.49548
+            },
+            "admission_sold_out": {
+              "avg": 5.1094,
+              "min": 3.734,
+              "med": 5.4815000000000005,
+              "max": 6.142,
+              "p(90)": 5.9413,
+              "p(95)": 6.04165,
+              "p(99)": 6.12193
+            }
+          },
+          "unexpected_http_error_rate": 0
+        },
+        "ledger": {
+          "new_orders": 5,
+          "unique_users": 5,
+          "unique_order_ids": 5,
+          "stream_events": 5,
+          "database_stock": 0,
+          "redis_stock": 0,
+          "pending": 0,
+          "dead_entries": 0,
+          "invariants_verified": true
+        },
+        "driver_load_wall_seconds": 0.06980895799642894,
+        "load_exit_to_all_orders_observed_seconds": 0.13626400000066496,
+        "observation_poll_seconds": 0.5,
+        "observation_timeout_seconds": 90
+      }
+    },
+    {
+      "repeat": 3,
+      "measured": {
+        "actors": 20,
+        "initial_stock": 10,
+        "requests": 40,
+        "iterations": 20,
+        "checks_passed": 120,
+        "outcomes": {
+          "admission_new": 10,
+          "admission_replayed": 10,
+          "admission_sold_out": 20,
+          "unexpected_outcomes": 0
+        },
+        "batch_http_requests_per_second": 2390.2001792650135,
+        "client_duration_ms": {
+          "all_http": {
+            "avg": 6.91375,
+            "min": 5.18,
+            "med": 6.7245,
+            "max": 9.872,
+            "p(90)": 9.0832,
+            "p(95)": 9.4189,
+            "p(99)": 9.71678
+          },
+          "admission_new": {
+            "avg": 6.744600000000001,
+            "min": 5.18,
+            "med": 6.8445,
+            "max": 9.474,
+            "p(90)": 7.4697000000000005,
+            "p(95)": 8.47185,
+            "p(99)": 9.27357
+          },
+          "admission_replayed": {
+            "avg": 6.211799999999999,
+            "min": 5.271,
+            "med": 6.189,
+            "max": 7.211,
+            "p(90)": 7.1426,
+            "p(95)": 7.1768,
+            "p(99)": 7.20416
+          },
+          "admission_sold_out": {
+            "avg": 7.3492999999999995,
+            "min": 5.195,
+            "med": 7.343999999999999,
+            "max": 9.872,
+            "p(90)": 9.2963,
+            "p(95)": 9.4388,
+            "p(99)": 9.78536
+          }
+        },
+        "unexpected_http_error_rate": 0
+      },
+      "ledger": {
+        "new_orders": 10,
+        "unique_users": 10,
+        "unique_order_ids": 10,
+        "stream_events": 10,
+        "database_stock": 0,
+        "redis_stock": 0,
+        "pending": 0,
+        "dead_entries": 0,
+        "invariants_verified": true
+      },
+      "driver_load_wall_seconds": 0.07275120800477453,
+      "load_exit_to_all_orders_observed_seconds": 0.14313862498966046,
+      "observation_poll_seconds": 0.5,
+      "observation_timeout_seconds": 90,
+      "summary": "flash-sale-n20-r3.json",
+      "warmup_summary": "flash-sale-n20-r3-warmup.json",
+      "warmup": {
+        "repeat": 3020,
+        "measured": {
+          "actors": 10,
+          "initial_stock": 5,
+          "requests": 20,
+          "iterations": 10,
+          "checks_passed": 60,
+          "outcomes": {
+            "admission_new": 5,
+            "admission_replayed": 5,
+            "admission_sold_out": 10,
+            "unexpected_outcomes": 0
+          },
+          "batch_http_requests_per_second": 1745.5053237912377,
+          "client_duration_ms": {
+            "all_http": {
+              "avg": 4.5728,
+              "min": 3.228,
+              "med": 4.37,
+              "max": 6.183,
+              "p(90)": 5.825500000000001,
+              "p(95)": 5.9331499999999995,
+              "p(99)": 6.13303
+            },
+            "admission_new": {
+              "avg": 4.9238,
+              "min": 4.448,
+              "med": 4.895,
+              "max": 5.204,
+              "p(90)": 5.2004,
+              "p(95)": 5.2021999999999995,
+              "p(99)": 5.20364
+            },
+            "admission_replayed": {
+              "avg": 3.6788,
+              "min": 3.228,
+              "med": 3.708,
+              "max": 3.958,
+              "p(90)": 3.9356,
+              "p(95)": 3.9468,
+              "p(99)": 3.95576
+            },
+            "admission_sold_out": {
+              "avg": 4.8443000000000005,
+              "min": 3.247,
+              "med": 4.638999999999999,
+              "max": 6.183,
+              "p(90)": 5.9463,
+              "p(95)": 6.064649999999999,
+              "p(99)": 6.15933
+            }
+          },
+          "unexpected_http_error_rate": 0
+        },
+        "ledger": {
+          "new_orders": 5,
+          "unique_users": 5,
+          "unique_order_ids": 5,
+          "stream_events": 5,
+          "database_stock": 0,
+          "redis_stock": 0,
+          "pending": 0,
+          "dead_entries": 0,
+          "invariants_verified": true
+        },
+        "driver_load_wall_seconds": 0.037699458000133745,
+        "load_exit_to_all_orders_observed_seconds": 0.12607495799602475,
+        "observation_poll_seconds": 0.5,
+        "observation_timeout_seconds": 90
+      }
+    },
+    {
+      "repeat": 3,
+      "measured": {
+        "actors": 200,
+        "initial_stock": 100,
+        "requests": 400,
+        "iterations": 200,
+        "checks_passed": 1200,
+        "outcomes": {
+          "admission_new": 100,
+          "admission_replayed": 100,
+          "admission_sold_out": 200,
+          "unexpected_outcomes": 0
+        },
+        "batch_http_requests_per_second": 1077.4933195414187,
+        "client_duration_ms": {
+          "all_http": {
+            "avg": 127.97510749999996,
+            "min": 7.812,
+            "med": 132.276,
+            "max": 271.783,
+            "p(90)": 218.3605,
+            "p(95)": 235.9006,
+            "p(99)": 264.99661
+          },
+          "admission_new": {
+            "avg": 36.360339999999994,
+            "min": 7.812,
+            "med": 24.006999999999998,
+            "max": 66.497,
+            "p(90)": 63.5897,
+            "p(95)": 64.5188,
+            "p(99)": 66.24553999999999
+          },
+          "admission_replayed": {
+            "avg": 191.56738999999993,
+            "min": 70.82,
+            "med": 209.2905,
+            "max": 271.783,
+            "p(90)": 254.6298,
+            "p(95)": 262.0651,
+            "p(99)": 267.54283
+          },
+          "admission_sold_out": {
+            "avg": 141.98635000000004,
+            "min": 26.113,
+            "med": 139.393,
+            "max": 265.874,
+            "p(90)": 211.529,
+            "p(95)": 216.58805,
+            "p(99)": 258.36554
+          }
+        },
+        "unexpected_http_error_rate": 0
+      },
+      "ledger": {
+        "new_orders": 100,
+        "unique_users": 100,
+        "unique_order_ids": 100,
+        "stream_events": 100,
+        "database_stock": 0,
+        "redis_stock": 0,
+        "pending": 0,
+        "dead_entries": 0,
+        "invariants_verified": true
+      },
+      "driver_load_wall_seconds": 0.6543769999989308,
+      "load_exit_to_all_orders_observed_seconds": 0.8735512500134064,
+      "observation_poll_seconds": 0.5,
+      "observation_timeout_seconds": 90,
+      "summary": "flash-sale-n200-r3.json",
+      "warmup_summary": "flash-sale-n200-r3-warmup.json",
+      "warmup": {
+        "repeat": 3200,
+        "measured": {
+          "actors": 10,
+          "initial_stock": 5,
+          "requests": 20,
+          "iterations": 10,
+          "checks_passed": 60,
+          "outcomes": {
+            "admission_new": 5,
+            "admission_replayed": 5,
+            "admission_sold_out": 10,
+            "unexpected_outcomes": 0
+          },
+          "batch_http_requests_per_second": 1674.9015995310276,
+          "client_duration_ms": {
+            "all_http": {
+              "avg": 4.870150000000001,
+              "min": 3.609,
+              "med": 4.699,
+              "max": 6.856,
+              "p(90)": 6.5319,
+              "p(95)": 6.701149999999999,
+              "p(99)": 6.82503
+            },
+            "admission_new": {
+              "avg": 5.2581999999999995,
+              "min": 4.858,
+              "med": 5.249,
+              "max": 5.707,
+              "p(90)": 5.5514,
+              "p(95)": 5.6292,
+              "p(99)": 5.69144
+            },
+            "admission_replayed": {
+              "avg": 4.143199999999999,
+              "min": 3.879,
+              "med": 4.111,
+              "max": 4.54,
+              "p(90)": 4.4052,
+              "p(95)": 4.4726,
+              "p(99)": 4.52652
+            },
+            "admission_sold_out": {
+              "avg": 5.0396,
+              "min": 3.609,
+              "med": 4.7395,
+              "max": 6.856,
+              "p(90)": 6.7093,
+              "p(95)": 6.782649999999999,
+              "p(99)": 6.84133
+            }
+          },
+          "unexpected_http_error_rate": 0
+        },
+        "ledger": {
+          "new_orders": 5,
+          "unique_users": 5,
+          "unique_order_ids": 5,
+          "stream_events": 5,
+          "database_stock": 0,
+          "redis_stock": 0,
+          "pending": 0,
+          "dead_entries": 0,
+          "invariants_verified": true
+        },
+        "driver_load_wall_seconds": 0.06944545800797641,
+        "load_exit_to_all_orders_observed_seconds": 0.1364259999973001,
+        "observation_poll_seconds": 0.5,
+        "observation_timeout_seconds": 90
+      }
+    }
+  ],
+  "aggregate": [
+    {
+      "actors": 20,
+      "repeats": 3,
+      "load_exit_to_all_orders_observed_seconds": {
+        "median": 0.14313862498966046,
+        "min": 0.13867437500448432,
+        "max": 0.16224179101118352
+      },
+      "admission_new_per_run_p(95)_ms": {
+        "median": 10.71885,
+        "min": 8.47185,
+        "max": 18.977649999999997
+      },
+      "admission_new_per_run_p(99)_ms": {
+        "median": 10.77177,
+        "min": 9.27357,
+        "max": 19.34593
+      },
+      "admission_replayed_per_run_p(95)_ms": {
+        "median": 8.336599999999999,
+        "min": 7.1768,
+        "max": 18.95865
+      },
+      "admission_replayed_per_run_p(99)_ms": {
+        "median": 8.499319999999999,
+        "min": 7.20416,
+        "max": 19.21893
+      },
+      "admission_sold_out_per_run_p(95)_ms": {
+        "median": 12.380749999999999,
+        "min": 9.4388,
+        "max": 21.27075
+      },
+      "admission_sold_out_per_run_p(99)_ms": {
+        "median": 12.84815,
+        "min": 9.78536,
+        "max": 21.58615
+      }
+    },
+    {
+      "actors": 200,
+      "repeats": 3,
+      "load_exit_to_all_orders_observed_seconds": {
+        "median": 0.8232082499889657,
+        "min": 0.18243833299493417,
+        "max": 0.8735512500134064
+      },
+      "admission_new_per_run_p(95)_ms": {
+        "median": 175.49099999999999,
+        "min": 64.5188,
+        "max": 590.2716
+      },
+      "admission_new_per_run_p(99)_ms": {
+        "median": 250.32768,
+        "min": 66.24553999999999,
+        "max": 600.28221
+      },
+      "admission_replayed_per_run_p(95)_ms": {
+        "median": 311.20505,
+        "min": 262.0651,
+        "max": 504.4494
+      },
+      "admission_replayed_per_run_p(99)_ms": {
+        "median": 320.33651000000003,
+        "min": 267.54283,
+        "max": 560.3198
+      },
+      "admission_sold_out_per_run_p(95)_ms": {
+        "median": 362.12765,
+        "min": 216.58805,
+        "max": 1037.6746
+      },
+      "admission_sold_out_per_run_p(99)_ms": {
+        "median": 366.41469,
+        "min": 258.36554,
+        "max": 1084.7364400000001
+      }
+    }
+  ],
+  "cleanup_verified": true,
+  "raw_format": "unaltered k6 aggregate summary exports, not per-request samples",
+  "files_sha256": {
+    "flash-sale-n20-r1-warmup.json": "4fee565cdcc45b50d3302a81089d4f2467bbb6dcf2dc818a10094b56bd5624e4",
+    "flash-sale-n20-r1.json": "841ecade70bd86368eba2228719d4938a8c9d1432f58f0b39de9eae8e6c09195",
+    "flash-sale-n200-r1-warmup.json": "467d5ee7531189625c83e46fdaacd4846901bacdfe29d37ea9c74370c613aaa4",
+    "flash-sale-n200-r1.json": "c83e7501e803ff82e71e5d8de7a18ade66a492530920693347d13251aba1e578",
+    "flash-sale-n20-r2-warmup.json": "500a7e1ff0bbb52964b7194b1805226ff883f49912e33fef51a404e9520d66c1",
+    "flash-sale-n20-r2.json": "9c67f889fb92a807c92b61bff7f8497b19f3e008d6e829c49b2a3015272c3706",
+    "flash-sale-n200-r2-warmup.json": "9b7238201ccfc549adc49a06332cb91de090b4f0e3d0a391f06768d7c4d0b4b3",
+    "flash-sale-n200-r2.json": "4dcb44ff5a488ca85ad9c8b76da5ce6b1262cc52f217c2f65225f5a92ac02c88",
+    "flash-sale-n20-r3-warmup.json": "bf2e38db138025c3fbff8f5823bdc2b6ef05db3ef89188e443e13b2c80c7d0e2",
+    "flash-sale-n20-r3.json": "f9de0d9ab291fc7de55d4a7a7d51243104bd0452bd7c590bab4b20c2cd98e154",
+    "flash-sale-n200-r3-warmup.json": "e29eaf64aaf57227e23aba6b57940a523f61506134264a5c1b089bc1580d95f4",
+    "flash-sale-n200-r3.json": "f4914de7c6df763deb622e6fc610def2b247c68719ed21f865af1876c5bd4475"
+  }
+}

@@ -63,9 +63,9 @@
 8. k6 VU、在线用户数和到达率分别是什么？闭环模型为何不能证明生产峰值容量？
 9. 为什么三轮 P95/P99 不能直接平均或拼成合并分布？原始 JSON 是聚合汇总还是逐请求样本？
 10. 两个不同接口是否缓存优化前后对照？Docker k6 负计时为什么整体拒绝，换原生后能否说根因已修复？
-11. 抢购并发正确性测试是否压测？抢购负载还需要哪些库存、唯一订单、拒绝分类、落库延迟和恢复断言？
+11. Phase 6E2 的有限合成批次验证了什么？20/200 账号、每人两次请求、半库存的结果如何与 Redis、Stream、DB 账本对应？哪些指标不能解释为持续 QPS/TPS、容量或逐单落库延迟？零非预期错误为什么不等于都建单？
 
-核对：[搜索](../learning/shop-search-baseline.md)、[业务诊断](../learning/business-diagnostics.md)、[性能报告](../performance/README.md)。源码：[搜索服务](../../src/main/java/io/github/frewily/campushub/service/ShopSearchService.java)、[SQL](../../src/main/java/io/github/frewily/campushub/mapper/ShopMapper.java)、[业务指标注册](../../src/main/java/io/github/frewily/campushub/config/BusinessMetricsConfiguration.java)、[k6 脚本](../../scripts/load/baseline.js)、[性能驱动](../../scripts/run-performance-baseline.py)。回归入口：`ShopSearchSqlContractTest`、`ShopSearchMySqlIT`、`BusinessMetricsConfigurationTest`、`BusinessRecoveryDiagnosticsTest`；真实诊断由 `scripts/verify-business-diagnostics.py` 验证。
+核对：[搜索](../learning/shop-search-baseline.md)、[业务诊断](../learning/business-diagnostics.md)、[Phase 6C 只读性能报告](../performance/README.md)、[Phase 6E2 有限抢购批次报告](../performance/flash-sale.md)与[阶段记录](../refactor/21-phase-6e2-flash-sale-results.md)。源码：[搜索服务](../../src/main/java/io/github/frewily/campushub/service/ShopSearchService.java)、[SQL](../../src/main/java/io/github/frewily/campushub/mapper/ShopMapper.java)、[业务指标注册](../../src/main/java/io/github/frewily/campushub/config/BusinessMetricsConfiguration.java)、[只读 k6 脚本](../../scripts/load/baseline.js)、[只读性能驱动](../../scripts/run-performance-baseline.py)。回归入口：`ShopSearchSqlContractTest`、`ShopSearchMySqlIT`、`BusinessMetricsConfigurationTest`、`BusinessRecoveryDiagnosticsTest`；真实诊断由 `scripts/verify-business-diagnostics.py` 验证。
 
 ## 6. 复现与诚实边界
 
@@ -77,4 +77,4 @@
 
 显式 IT、自建 Compose 和原生 k6 的环境要求、完整入口以 [仓库 README](../../README.md)、[性能报告](../performance/README.md) 为准。只在自己新建的合成环境中练习故障；不要读取个人验证码/会话、向共享库写 fixture 或清空已有数据。
 
-最后必须能说明：已复现哪些层次、哪些只有历史阶段记录、哪些仍未验证。尚未验证真实短信、历史迁移、SIGKILL 关键窗口、多副本、任意网络分区、HA；尚未进行限量活动实际压测，没有性能优化提升比例或生产 SLO。
+最后必须能说明：已复现哪些层次、哪些只有历史阶段记录、哪些仍未验证。Phase 6E2 已实际运行有限合成抢购批次，不应继续称“尚未进行抢购实测”；Phase 6C 仍是只读历史基线。6E2 的 batch request rate 不是持续 QPS/TPS，20/200 不是同步起跑或容量；k6 退出到观察到订单完成含 CLI/轮询等开销，不是逐单落库延迟。零非预期错误也不代表每个请求都建单。仍未验证真实短信、历史迁移、SIGKILL 关键窗口、多副本、任意网络分区、HA 或生产 SLO，也没有性能提升百分比结论。

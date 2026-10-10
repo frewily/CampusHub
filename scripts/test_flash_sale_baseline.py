@@ -110,6 +110,24 @@ class SummaryTests(unittest.TestCase):
 
 
 class LedgerTests(unittest.TestCase):
+    def test_redis_62_structured_read_preserves_string_ids_and_nested_arrays(self):
+        data = [["1-0", ["id", "9223372036854775807", "userId", "1", "voucherId", "123"]]]
+        with patch.object(f.a, "redis", return_value=json.dumps(data)) as read:
+            self.assertEqual(data, f.redis_json("XRANGE", "stream.orders", "-", "+"))
+            read.assert_called_once_with("EVAL", "return cjson.encode(redis.call(unpack(ARGV)))", "0",
+                                         "XRANGE", "stream.orders", "-", "+")
+        for command in (("SET", "x", "1"), ("XINFO", "CONSUMERS", "stream.orders", "g1"), ()):
+            with self.subTest(command=command), self.assertRaises(ValueError): f.redis_json(*command)
+
+    def test_cli_integer_text_is_parsed_at_command_boundary(self):
+        for value, expected in (("0", 0), ("10", 10), ("100", 100)):
+            self.assertEqual(expected, f.cli_integer(value))
+        for bad in ("", "-1", "01", "1.0", "NaN", "1\n2", " 1", "1 ", True, 1, None):
+            with self.subTest(value=bad), self.assertRaises(ValueError): f.cli_integer(bad)
+        with self.assertRaises(ValueError): f.cli_integer("0", 1)
+        # Numeric JSON metrics stay strict; CLI parsing must not broaden their contract.
+        with self.assertRaises(ValueError): f.integer("0")
+
     def test_full_mapping_not_just_counts(self):
         self.assertTrue(f.validate_ledger(**ledger())["invariants_verified"])
         for name, bad in (("rows", [("101", "1", "123", "1")] * 10),
@@ -156,6 +174,18 @@ class LedgerTests(unittest.TestCase):
 
 
 class PublicationTests(unittest.TestCase):
+    def test_only_native_empty_root_group_digest_is_public(self):
+        data = summary()
+        data["root_group"] = {"name": "", "path": "", "id": "d41d8cd98f00b204e9800998ecf8427e",
+                              "groups": {}, "checks": {}}
+        f.validate_raw_privacy(json.dumps(data).encode())
+        for mutate in (lambda d: d.update(extra="d41d8cd98f00b204e9800998ecf8427e"),
+                       lambda d: d["root_group"].update(id="a" * 32),
+                       lambda d: d["root_group"].update(path="unexpected"),
+                       lambda d: d.update(extra="a" * 32)):
+            bad = copy.deepcopy(data); mutate(bad)
+            with self.assertRaises(ValueError): f.validate_raw_privacy(json.dumps(bad).encode())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="campushub-flash-unit-")
         self.addCleanup(self.temp.cleanup)

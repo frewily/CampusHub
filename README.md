@@ -165,7 +165,7 @@ python3 scripts/verify-business-diagnostics.py
 
 原生 macOS ARM64 k6 1.3.0 测量合成正缓存详情与 MySQL 搜索，1/10 VU、每组合三轮、独立 5s 预热与 20s 测量；保留 24 份未修改的聚合汇总及环境/参数/哈希记录。只报告逐轮 RPS/P95/P99 的中位数和范围，不拼接百分位数、不当生产容量或优化前后对照。复现入口、具体数字和计时异常的历史拒绝记录见 [性能报告](docs/performance/README.md)；事实限定的讲述见 [面试材料](docs/interview/README.md)。临时工具不全局安装、不进入 Git。
 
-限量活动另按 [有限批次方案](docs/performance/flash-sale-plan.md) 推进：Phase 6E1 只交付负载脚本与离线门禁，正式运行/结果报告留给 6E2，**尚未进行限量活动实际压测**。20/200 合成账号、各半库存、每人两请求的计划数字不是实测并发容量；`--inspect-only` 与 Node VM stub 也不是抢购验收或压测结果。
+限量活动的 [6E2 有限批次实测](docs/performance/flash-sale.md) 已完成：20/200 个不同合成账号、各三轮、半库存、每人连续两请求；正式 1320 请求、330 新受理/330 重放/660 正常售罄，12 批正式及独立预热的身份/库存/订单对账、原始汇总与清理通过。三类客户端 P95/P99 分别报告，后台完成观察区间不是逐单落库延迟；没有持续 QPS、订单 TPS、同步起跑、生产容量或 SLO 结论。方案见 [固定模型](docs/performance/flash-sale-plan.md)；`--inspect-only` 与 Node VM stub 仍不是实际压测。
 
 ## API 与设计文档
 
@@ -178,7 +178,7 @@ python3 scripts/verify-business-diagnostics.py
 - [Phase 6B 验证记录](docs/refactor/17-phase-6b-business-diagnostics.md)、[质量覆盖矩阵](docs/refactor/phase-6b-quality-matrix.md)、[业务诊断笔记](docs/learning/business-diagnostics.md)。
 - [Phase 6C 验证记录](docs/refactor/18-phase-6c-performance.md)、[性能报告与原始证据](docs/performance/README.md)、[事实限定的面试材料](docs/interview/README.md)。
 - [项目故事](docs/interview/project-story.md)、[面试追问](docs/interview/questions.md)、[事实限定的简历要点](docs/interview/resume-points.md)。
-- [Phase 6D 交付盘点与剩余范围](docs/refactor/19-phase-6d-delivery.md)：当前仅有重点 API 契约，尚无统一穷尽的接口目录；完整商户/管理后台、评论评价、通知及业务模块分包未交付。原始要求的抢购实际压测仍待单独阶段，不能用 6C 读取结果替代。
+- [Phase 6D 交付盘点与剩余范围](docs/refactor/19-phase-6d-delivery.md)：当前仅有重点 API 契约，尚无统一穷尽的接口目录；完整商户/管理后台、评论评价、通知及业务模块分包未交付。当时缺少的选定抢购负载已由 [Phase 6E2](docs/refactor/21-phase-6e2-flash-sale-results.md) 补验，不能用 6C 读取结果替代，也不把有限批次当成容量验收。
 
 `GET /shop/search` 匿名可访问，支持 `keyword,typeId,minPrice,maxPrice,minScore,x,y,radiusMeters,sort,page,size`。详细取值/单位以搜索契约为准；`data` 为 `items,total,page,size,sort,hasNext`，ID 为字符串。HTTP routes、表名和大部分 Redis key 保留；门店详情缓存已切换 `cache:shop:v2:`，不支持新旧缓存写入程序混跑的一致性保证。
 
@@ -209,3 +209,5 @@ Phase 6A 阶段回归：244 项默认测试（0 失败/错误，4 设计跳过�
 Phase 6B 本轮：46 项定向、255 项默认（4 设计跳过）、82 项隔离 IT、8 组目标版本真实业务/故障/诊断验收、10 组部署回归和 5 组管理面采集回归通过。目标流程使用 MySQL 8.4.11 / Redis 6.2.24 / Prometheus 3.5.0；验证码读取只发生在测试自己的 Redis，不是实际短信验收。不同证据层级不能互相替代；未验证关键窗口强杀、多副本、任意网络分区、HA、历史迁移或所有旧业务兼容。
 
 Phase 6C 本轮：Java 8 默认回归 255 项（4 设计跳过）、23 项离线性能/原生工具校验、原生脚本解析及 9 组非法参数拒绝检查通过；12 次正式读取测量和 12 次独立预热通过，共 689737 次正式请求，HTTP/业务错误为 0。原始文件、全部计时分项、缓存窗口、统计与哈希独立复核通过，测试项目已精确清理。没有将上一阶段的 82 项隔离 IT 或 8/10/5 组验收当成本轮重跑；没有限量活动、写入竞争、生产容量、SLO 或性能提升百分比结论。
+
+Phase 6E2 本轮：255 项默认回归（4 设计跳过）、54 项 Python 离线门禁、29 组 Node VM stub 与原生参数检查通过；六个正式有限抢购批次、六个独立预热全部通过。正式 1320 请求与 330 个新订单分别统计，非预期错误为 0，不把正常售罄或重放算新订单；私有身份账本、12 个未修改原始汇总、哈希/统计及测试资源清理另行复核。仅修复测试驱动解析与隐私识别，没有业务代码或性能优化变化；未重跑旧阶段 IT/故障套件。

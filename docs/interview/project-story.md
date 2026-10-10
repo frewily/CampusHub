@@ -63,9 +63,10 @@ Lua 检查活动、时间、资格、库存和重复受理，成功返回预生�
 - 默认测试：纯逻辑、mock 依赖与 HTTP 合同，不证明真实数据库行为。
 - 显式 IT：自建本机 MySQL/Redis 与合成数据；版本与 Docker 目标环境不同。
 - 隔离 Compose 验收：唯一项目、随机 localhost 端口、合成凭据与全新卷；真实目标依赖、HTTP、迁移、故障和实际 Prometheus 采集，见 [Phase 5](../refactor/15-phase-5-engineering.md)、[Phase 6B](../refactor/17-phase-6b-business-diagnostics.md)。
-- 性能基线：原生 k6 的两种只读请求，1/10 VU、每组合三轮、各轮独立 5 秒预热/20 秒测量；保存原始聚合汇总和哈希，见 [性能报告](../performance/README.md)。不是逐请求轨迹、抢购压测、生产容量或优化前后对照。
+- Phase 6C 只读基线：原生 k6 的两种只读请求，1/10 VU、每组合三轮、各轮独立 5 秒预热/20 秒测量；保存原始聚合汇总和哈希，见 [性能报告](../performance/README.md)。这是历史只读结果，不是抢购压测、生产容量或优化前后对照。
+- Phase 6E2 有限抢购批次：使用 20/200 个合成账号各三轮，每账号两次 HTTP 请求，初始库存为账号数的一半。六个正式批次共 1320 次请求，分类为 330 次新受理、330 次原 ID 重放、660 次售罄；六轮彼此独立的预热另有 120 次请求和 30 笔订单。原始 k6 汇总的 outcome/check 计数与 manifest 一致，正式批次账本记录 330 笔新订单、330 个 Stream 事件、库存归零、pending/dead entries 为零，且每轮不变量检查通过。见[有限批次报告](../performance/flash-sale.md)、[Phase 6E2 记录](../refactor/21-phase-6e2-flash-sale-results.md)及 [manifest](../performance/flash-sale-results/20261010T041031Z/manifest.json)。
 
-6A/6B 的“当时尚未压测”是历史阶段边界；6C 的只读数据没有补足抢购负载、关键窗口强杀、多副本、网络分区、历史迁移或 HA 验证。不能把优雅重启说成强杀恢复，也不能把单次 scrape/ready 说成业务健康。
+6A/6B 的“当时尚未压测”是历史阶段边界；6C 仍是只读基线。6E2 只证明本轮有限合成批次中 HTTP 分类和 Redis→Stream→DB 账本按预期收敛：batch request rate 不是持续 QPS/TPS，20/200 是有限执行批次而非同步起跑或容量；零非预期错误不等于每个请求都建单。k6 退出到观察到订单完成的时间包含 CLI/轮询等开销，不是逐单落库延迟。没有真实短信、关键窗口强杀、多副本/HA、SLO 或性能提升百分比结论；也不能把优雅重启说成强杀恢复，或把单次 scrape/ready 说成业务健康。
 
 ## 5. 学习接管出口
 

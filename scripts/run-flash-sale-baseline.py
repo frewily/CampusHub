@@ -33,6 +33,16 @@ def integer(value, minimum=0):
     return int(result)
 
 
+def cli_integer(value, minimum=0):
+    # SQL/redis-cli helpers return stripped text, unlike JSON metrics/evidence.
+    if not isinstance(value, str) or not re.fullmatch(r"0|[1-9][0-9]*", value):
+        raise ValueError("expected canonical nonnegative CLI integer")
+    result = int(value)
+    if result < minimum:
+        raise ValueError("CLI integer below minimum")
+    return result
+
+
 def positive_id(value):
     if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]{0,18}", value) or int(value) > 9223372036854775807:
         raise ValueError("expected lossless positive Java Long string")
@@ -111,6 +121,15 @@ def pairs(value):
     if not isinstance(value, list) or len(value) % 2:
         raise ValueError("malformed Redis pair evidence")
     return list(zip(value[::2], value[1::2]))
+
+
+def redis_json(*args):
+    # Redis 6.2 redis-cli has no --json. Encode only these read-only command
+    # replies in Redis Lua, preserving nested arrays and bulk-string Long IDs.
+    if not args or not (args[0] in ("HGETALL", "SMEMBERS", "XRANGE")
+                        or args[:2] == ("XINFO", "GROUPS")):
+        raise ValueError("structured evidence supports read-only commands only")
+    return json.loads(a.redis("EVAL", "return cjson.encode(redis.call(unpack(ARGV)))", "0", *args))
 
 
 def validate_witness(witness, actor_ids, accepted):
@@ -270,7 +289,7 @@ def cohort(binary, base, actors, admin, repeat, warm=False):
         raise ValueError("native executable changed before cohort")
     population = len(actors); stock = population // 2
     activity = create_activity(base, admin, stock)
-    stream_before = integer(a.redis("XLEN", "stream.orders"))
+    stream_before = cli_integer(a.redis("XLEN", "stream.orders"))
     prefix = "warmup" if warm else "measured"
     folder = a.ARTIFACTS / ("%s-n%d-r%d" % (prefix, population, repeat))
     fixture = private_fixture(folder, {"version": 1, "activityId": activity, "actors": actors}, population)
@@ -283,19 +302,19 @@ def cohort(binary, base, actors, admin, repeat, warm=False):
     measured = validate_summary(json.loads(raw.read_text()), population)
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        count = integer(a.sql("SELECT COUNT(*) FROM tb_voucher_order WHERE voucher_id=%s;" % activity))
-        pending = integer(a.redis("XPENDING", "stream.orders", "g1").splitlines()[0])
+        count = cli_integer(a.sql("SELECT COUNT(*) FROM tb_voucher_order WHERE voucher_id=%s;" % activity))
+        pending = cli_integer(a.redis("XPENDING", "stream.orders", "g1").splitlines()[0])
         if count == stock and pending == 0:
             break
         time.sleep(.5)
     else:
         raise ValueError("finite cohort did not drain within observation budget")
     observed_end = time.monotonic()
-    accepted = pairs(json.loads(a.redis("--json", "HGETALL", "seckill:request:" + activity)))
+    accepted = pairs(redis_json("HGETALL", "seckill:request:" + activity))
     validate_witness(parse_witness_log(private_log), [entry["id"] for entry in actors], accepted)
-    participants = json.loads(a.redis("--json", "SMEMBERS", "seckill:order:" + activity))
+    participants = redis_json("SMEMBERS", "seckill:order:" + activity)
     rows = parse_rows(a.sql("SELECT id,user_id,voucher_id,status FROM tb_voucher_order WHERE voucher_id=%s ORDER BY id;" % activity), 4)
-    stream = json.loads(a.redis("--json", "XRANGE", "stream.orders", "-", "+"))
+    stream = redis_json("XRANGE", "stream.orders", "-", "+")
     events = []
     for source_id, fields in stream:
         parsed = pairs(fields)
@@ -306,20 +325,20 @@ def cohort(binary, base, actors, admin, repeat, warm=False):
             if set(values) != {"id", "userId", "voucherId"}:
                 raise ValueError("unexpected event fields")
             events.append((values["id"], values["userId"], values["voucherId"]))
-    stream_length = integer(a.redis("XLEN", "stream.orders"))
+    stream_length = cli_integer(a.redis("XLEN", "stream.orders"))
     if stream_length - stream_before != stock:
         raise ValueError("replay appended duplicate events")
-    groups = json.loads(a.redis("--json", "XINFO", "GROUPS", "stream.orders"))
+    groups = redis_json("XINFO", "GROUPS", "stream.orders")
     group = [dict(pairs(item)) for item in groups]
     if len(group) != 1 or group[0]["name"] != "g1":
         raise ValueError("unexpected consumer group")
     # last-delivered-id must equal the current last Stream ID, including acknowledged records.
     ledger = validate_ledger(rows, accepted, participants, events, [entry["id"] for entry in actors], activity,
-        stock, integer(a.sql("SELECT stock FROM tb_seckill_voucher WHERE voucher_id=%s;" % activity)),
-        integer(a.redis("GET", "seckill:stock:" + activity)), integer(group[0]["pending"]),
-        group[0]["last-delivered-id"], stream[-1][0], integer(a.redis("XLEN", "stream.orders.dead")),
-        integer(a.redis("HLEN", "stream.orders.attempts")), integer(a.redis("HLEN", "stream.orders.failures")),
-        integer(a.sql("SELECT COUNT(*) FROM tb_order_cancellation;")))
+        stock, cli_integer(a.sql("SELECT stock FROM tb_seckill_voucher WHERE voucher_id=%s;" % activity)),
+        cli_integer(a.redis("GET", "seckill:stock:" + activity)), integer(group[0]["pending"]),
+        group[0]["last-delivered-id"], stream[-1][0], cli_integer(a.redis("XLEN", "stream.orders.dead")),
+        cli_integer(a.redis("HLEN", "stream.orders.attempts")), cli_integer(a.redis("HLEN", "stream.orders.failures")),
+        cli_integer(a.sql("SELECT COUNT(*) FROM tb_order_cancellation;")))
     return raw, {"repeat": repeat, "measured": measured, "ledger": ledger,
         "driver_load_wall_seconds": load_end - start,
         "load_exit_to_all_orders_observed_seconds": observed_end - load_end,
@@ -341,6 +360,31 @@ def aggregate(runs):
         output.append({"actors": actors, "repeats": 3, **{key: {"median": statistics.median([b.number(v) for v in sample]),
             "min": min(sample), "max": max(sample)} for key, sample in values.items()}})
     return output
+
+
+def validate_raw_privacy(data):
+    private = re.compile(r"/Users/|/private/tmp/|/var/folders/|(?i:authorization|password|token|phone|session|cookie)")
+    digest_like = re.compile(r"[0-9a-f]{32}(?![0-9a-f])")
+    if private.search(data.decode("utf-8")):
+        raise ValueError("private field in raw public export")
+    summary = json.loads(data)
+    # Pinned native export uses empty objects (not arrays) for these maps.
+    empty_root = {"name": "", "path": "", "id": "d41d8cd98f00b204e9800998ecf8427e", "groups": {}, "checks": {}}
+
+    def visit(value, path=()):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                visit(key, path + ("<key>",)); visit(child, path + (key,))
+        elif isinstance(value, list):
+            for index, child in enumerate(value): visit(child, path + (index,))
+        else:
+            text = str(value)
+            if private.search(text):
+                raise ValueError("private field in raw public export")
+            if digest_like.search(text) and not (path == ("root_group", "id")
+                    and summary.get("root_group") == empty_root):
+                raise ValueError("private identifier in raw public export")
+    visit(summary)
 
 
 def publish(report, files, destination):
@@ -365,8 +409,7 @@ def publish(report, files, destination):
             raise ValueError("formal/warmup evidence does not match report")
         for field in ("driver_load_wall_seconds", "load_exit_to_all_orders_observed_seconds"):
             b.number(evidence[field])
-        if re.search(rb"/Users/|/private/tmp/|/var/folders/|(?i:authorization|password|token|phone|session|cookie)|[0-9a-f]{32}(?![0-9a-f])", data):
-            raise ValueError("private field in raw public export")
+        validate_raw_privacy(data)
     # SHA hashes are intentionally public in the manifest; private credentials never are.
     if re.search(rb"/Users/|/private/tmp/|/var/folders/|(?i:authorization|password|token|phone|session|cookie)", content):
         raise ValueError("private field in public report")

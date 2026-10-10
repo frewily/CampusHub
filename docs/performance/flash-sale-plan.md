@@ -1,6 +1,6 @@
 # 限量活动负载：有限批次方案与验收门禁
 
-当前状态：Phase 6E1 提供脚本与离线门禁，**尚未进行限量活动实际压测**。正式 `--run` 路线、真实依赖解析和原始结果发布留给 6E2；本文没有活动 RPS/TPS/P95/P99 结论。
+当前状态：Phase 6E1 固定方案与离线门禁，Phase 6E2 已完成本文固定模型的真实有限批次、原始结果与清理复核，见 [实测报告](flash-sale.md) 与 [阶段记录](../refactor/21-phase-6e2-flash-sale-results.md)。本文仍是方案，不把预算或预期计数当容量结论，也不提供持续 RPS/TPS。
 
 ## 1. 回答什么问题
 
@@ -70,10 +70,10 @@ export K6_BINARY="$(python3 scripts/prepare-native-k6.py)"
 python3 scripts/run-flash-sale-baseline.py --inspect-only
 ```
 
-工具沿用官方 macOS ARM64 k6 1.3.0 和固定 archive/binary SHA-256，临时准备，不全局安装。`--inspect-only` 仅解析与检查选项，既不创建 Compose 资源，也不发 HTTP；VM 测试也是 HTTP stub，不是实际压测。`--run` 必须显式传入，下一阶段会创建隔离环境并执行正式批次；目前不把该路径写成已经通过：
+工具沿用官方 macOS ARM64 k6 1.3.0 和固定 archive/binary SHA-256，临时准备，不全局安装。`--inspect-only` 仅解析与检查选项，既不创建 Compose 资源，也不发 HTTP；VM 测试也是 HTTP stub，不是实际压测。`--run` 必须显式传入；6E2 实际通过的路线会建立全新环境，不连接自己的库：
 
 ```bash
 python3 scripts/run-flash-sale-baseline.py --run
 ```
 
-下一阶段若遇到 native、CLI、账本或隐私不匹配，先定位根因并补回归，再完整重跑；无效批次不能算已验收。总体流程仍是本阶段验证、提交、独立审查后，才开始正式运行与结果报告，见 [Phase 6E1](../refactor/20-phase-6e1-flash-sale-tooling.md)。
+再次运行若遇到 native、CLI、账本或隐私不匹配，先定位根因并补回归，再完整重跑；无效批次不能算已验收。6E2 已补严格 CLI 文本整数边界、Redis 6.2 兼容的白名单只读 cjson 证据和 k6 空 root_group 固定标识的精确隐私白名单，不修改导出原文。6E1 的“当时尚未实际运行”保留为历史事实，见 [Phase 6E1](../refactor/20-phase-6e1-flash-sale-tooling.md)。总体仍按阶段验证、提交、独立审查后才继续。
