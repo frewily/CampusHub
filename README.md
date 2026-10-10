@@ -165,6 +165,8 @@ python3 scripts/verify-business-diagnostics.py
 
 原生 macOS ARM64 k6 1.3.0 测量合成正缓存详情与 MySQL 搜索，1/10 VU、每组合三轮、独立 5s 预热与 20s 测量；保留 24 份未修改的聚合汇总及环境/参数/哈希记录。只报告逐轮 RPS/P95/P99 的中位数和范围，不拼接百分位数、不当生产容量或优化前后对照。复现入口、具体数字和计时异常的历史拒绝记录见 [性能报告](docs/performance/README.md)；事实限定的讲述见 [面试材料](docs/interview/README.md)。临时工具不全局安装、不进入 Git。
 
+限量活动另按 [有限批次方案](docs/performance/flash-sale-plan.md) 推进：Phase 6E1 只交付负载脚本与离线门禁，正式运行/结果报告留给 6E2，**尚未进行限量活动实际压测**。20/200 合成账号、各半库存、每人两请求的计划数字不是实测并发容量；`--inspect-only` 与 Node VM stub 也不是抢购验收或压测结果。
+
 ## API 与设计文档
 
 - [领域模型](docs/domain-model.md)、[迁移计划](docs/refactor/02-migration-plan.md)、[遗留兼容说明](docs/learning/legacy-compatibility.md)。
