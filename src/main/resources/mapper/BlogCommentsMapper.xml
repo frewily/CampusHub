@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.github.frewily.campushub.mapper.BlogCommentsMapper">
+    <select id="lockBlog" resultType="long" timeout="5">
+        SELECT id FROM tb_blog WHERE id = #{blogId} FOR UPDATE
+    </select>
+    <select id="findBlog" resultType="long" timeout="5">
+        SELECT id FROM tb_blog WHERE id = #{blogId}
+    </select>
+    <update id="incrementCommentCount" timeout="5">
+        UPDATE tb_blog SET comments = COALESCE(comments, 0) + 1 WHERE id = #{blogId}
+    </update>
+    <select id="findFirstLevelComments" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id, user_id, content, create_time
+        FROM tb_blog_comments
+        WHERE blog_id = #{blogId} AND parent_id = 0 AND answer_id = 0 AND status = 0
+        <if test="beforeId != null">AND id &lt; #{beforeId}</if>
+        ORDER BY id DESC LIMIT #{limit}
+    </select>
+</mapper>

@@ -119,9 +119,32 @@ class ApiInventoryContractTest {
     }
 
     @Test
-    void emptyCommentControllerDoesNotCreateACommentEndpoint() {
+    void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
-        for (JsonNode route : documented) assertNotEquals("BlogCommentsController", route.get("controller").asText());
+        assertEquals(12, controllerTypes.size());
+        assertEquals(39, actual.size());
+        assertCommentRoute("POST", "/blog-comments", "createComment",
+                "hasAnyRole('USER', 'MERCHANT', 'ADMIN')");
+        assertCommentRoute("GET", "/blog-comments/of/blog/{blogId}", "listComments", "");
+        int actualCommentRouteCount = 0;
+        for (String route : actual) {
+            if (route.contains("\"BlogCommentsController\"")) actualCommentRouteCount++;
+        }
+        assertEquals(2, actualCommentRouteCount);
+        int commentRouteCount = 0;
+        for (JsonNode route : documented) {
+            if ("BlogCommentsController".equals(route.path("controller").asText())) commentRouteCount++;
+        }
+        assertEquals(2, commentRouteCount);
+    }
+
+    private static void assertCommentRoute(String method, String path, String handler, String guard) {
+        ObjectNode expected = JSON.createObjectNode();
+        expected.put("method", method); expected.put("path", path);
+        expected.put("controller", "BlogCommentsController"); expected.put("handler", handler);
+        expected.put("preAuthorize", guard);
+        assertTrue(actual.contains(canonical(expected)), "production mapping/guard changed for " + method + " " + path);
+        assertTrue(rows(documented).contains(canonical(expected)), "documented mapping/guard missing for " + method + " " + path);
     }
 
     private static Set<String> rows(ArrayNode routes) {

@@ -4,7 +4,7 @@
 
 本文定义 CampusHub 从点评教学项目演进为校园生活与商户服务平台时采用的统一业务语言、实体关系、核心规则、权限边界和旧数据映射。它是 Phase 1A 的设计结论，不在本阶段修改 Java 类、数据库表、接口或运行行为。
 
-后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog），不代表本文其他评论、点赞持久化、通知或完整后台设计已实现。
+后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog）。Phase 7B 已按[阶段记录](refactor/24-phase-7b-comments.md)落地一级评论创建和可见评论游标读取（V007）；回复、删除、审核、通知、点赞持久化和完整后台仍未实现。
 
 CampusHub 继续采用模块化单体。第一版按单校园场景设计，不引入多租户或 `Campus` 表；当系统出现跨校数据隔离、不同校区运营或独立管理员等真实需求时，再增加校园维度。当前重点是把“账号、商户主体、门店、内容、活动和订单”分清，而不是机械替换 `Shop`、`Blog`、`Voucher` 等名称。
 
@@ -29,7 +29,7 @@ CampusHub 继续采用模块化单体。第一版按单校园场景设计，不�
 | Store | 用户可浏览、搜索和到店消费的门店 | `Shop`、`tb_shop` | 先保持表和接口兼容，Phase 1C 再迁移代码身份 |
 | StoreCategory | 门店分类 | `ShopType`、`tb_shop_type` | 保留语义，后续改名 |
 | Post | 校园动态或与门店关联的内容 | `Blog`、`tb_blog` | 先修 Feed，再迁移名称与请求响应边界 |
-| Comment | 对动态的评论或回复 | `BlogComments`、`tb_blog_comments` | 当前只有空接口，后续实现 |
+| Comment | 对动态的一级评论；旧表还包含回复字段 | `BlogComments`、`tb_blog_comments` | 7B 只实现一级评论创建和可见评论读取，回复/删除/审核待后续设计 |
 | Follow | 用户对用户的关注关系 | `Follow`、`tb_follow` | MySQL 为事实来源，Redis 仅加速 |
 | PostLike | 用户对动态的点赞关系 | Redis ZSet 和 `tb_blog.liked` 计数 | 后续增加持久化关系，计数作为派生值 |
 | FeedEntry | 用户 Feed 收件箱中的动态投影 | Redis ZSet | 不是独立业务事实，可由关注与动态重建 |
@@ -88,6 +88,8 @@ Store 保存名称、分类、图片、地址、坐标、营业时间和展示�
 第一版把校园动态和门店体验统一为 Post，通过是否关联 Store 和内容类型区分，不立即增加独立 Review 聚合。当前没有结构化星级评价、消费凭证或“一次订单一次评价”的实现；若这些规则成为真实需求，再从 Post 中拆出 Review，不能仅凭 `tb_shop.score` 宣称已经具备评价系统。
 
 `Comment` 属于一个 Post 并由一个账号创建。一级评论没有父评论；回复必须引用同一 Post 下存在且可见的评论。评论状态采用枚举语义，例如 `NORMAL`、`REPORTED`、`HIDDEN`，不能继续用 Boolean 表达三种状态。
+
+当前实现仅写入 `parent_id=0`、`answer_id=0`、`liked=0`、`status=0` 的一级评论；列表仅读取状态为 0 的一级评论，按 ID 倒序游标分页。它不实现回复或状态管理，旧表中的状态/回复字段不等于对应业务能力已经交付。
 
 `Follow` 只表示账号关注账号，禁止自己关注自己；同一 `(follower_id, followee_id)` 只能存在一次。MySQL 保存关系事实，Redis 集合或有序集合只能作为查询加速，结构必须统一。
 

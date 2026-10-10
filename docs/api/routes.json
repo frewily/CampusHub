@@ -26,6 +26,8 @@
     {"method":"GET","path":"/blog/likes/{id}","controller":"BlogController","handler":"queryBlogLikes","preAuthorize":""},
     {"method":"GET","path":"/blog/of/user","controller":"BlogController","handler":"queryBlogByUserId","preAuthorize":""},
     {"method":"GET","path":"/blog/of/follow","controller":"BlogController","handler":"queryBlogOfFollow","preAuthorize":""},
+    {"method":"POST","path":"/blog-comments","controller":"BlogCommentsController","handler":"createComment","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
+    {"method":"GET","path":"/blog-comments/of/blog/{blogId}","controller":"BlogCommentsController","handler":"listComments","preAuthorize":""},
     {"method":"PUT","path":"/follow/{id}/{isFollow}","controller":"FollowController","handler":"follow","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
     {"method":"GET","path":"/follow/or/not/{id}","controller":"FollowController","handler":"isFollow","preAuthorize":""},
     {"method":"GET","path":"/follow/common/{id}","controller":"FollowController","handler":"common","preAuthorize":""},

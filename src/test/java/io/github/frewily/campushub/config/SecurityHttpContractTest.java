@@ -4,6 +4,7 @@ import io.github.frewily.campushub.controller.UserController;
 import io.github.frewily.campushub.controller.ShopController;
 import io.github.frewily.campushub.controller.VoucherController;
 import io.github.frewily.campushub.controller.BlogController;
+import io.github.frewily.campushub.controller.BlogCommentsController;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.mapper.AccountAccessMapper;
 import io.github.frewily.campushub.security.RedisTokenAuthenticationFilter;
@@ -14,6 +15,8 @@ import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.service.IShopService;
 import io.github.frewily.campushub.service.IVoucherService;
 import io.github.frewily.campushub.service.IBlogService;
+import io.github.frewily.campushub.service.IBlogCommentsService;
+import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -61,6 +64,8 @@ class SecurityHttpContractTest {
     @MockBean
     private IBlogService blogService;
     @MockBean
+    private IBlogCommentsService blogCommentsService;
+    @MockBean
     private StringRedisTemplate stringRedisTemplate;
     @MockBean
     private HashOperations<String, Object, Object> hashOperations;
@@ -74,6 +79,7 @@ class SecurityHttpContractTest {
             ShopController.class,
             VoucherController.class,
             BlogController.class,
+            BlogCommentsController.class,
             GlobalExceptionHandler.class,
             SecurityConfig.class,
             SecurityErrorResponder.class,
@@ -100,6 +106,51 @@ class SecurityHttpContractTest {
                 .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
 
         verifyNoInteractions(blogService);
+    }
+
+    @Test
+    void anonymousCommentCreationIsUnauthorized() throws Exception {
+        mockMvc.perform(post("/blog-comments").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"blogId\":1,\"content\":\"Nice\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+        verifyNoInteractions(blogCommentsService);
+    }
+
+    @Test
+    void userMerchantAndAdminCanCreateComments() throws Exception {
+        prepareSession("comment-user-token", 31L, "USER");
+        prepareSession("comment-merchant-token", 32L, "MERCHANT");
+        prepareSession("comment-admin-token", 33L, "ADMIN");
+        when(blogCommentsService.createComment(any())).thenReturn(
+                new BlogCommentItem("41", "51", "31", "Nice", null));
+
+        for (String token : Arrays.asList("comment-user-token", "comment-merchant-token", "comment-admin-token")) {
+            mockMvc.perform(post("/blog-comments").header("authorization", token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"blogId\":51,\"content\":\"Nice\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value("41"));
+        }
+        verify(blogCommentsService, times(3)).createComment(any());
+    }
+
+    @Test
+    void disabledAccountCannotCreateComment() throws Exception {
+        String token = "disabled-comment-token";
+        Map<Object, Object> session = new HashMap<>();
+        session.put("id", "34");
+        session.put("nickName", "disabled-user");
+        when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(LOGIN_USER_KEY + token)).thenReturn(session);
+        when(accountAccessMapper.findAccountStatus(34L)).thenReturn("DISABLED");
+
+        mockMvc.perform(post("/blog-comments").header("authorization", token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"blogId\":51,\"content\":\"Nice\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+        verifyNoInteractions(blogCommentsService);
     }
 
     @Test

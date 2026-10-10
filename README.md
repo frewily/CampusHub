@@ -2,7 +2,7 @@
 
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
 
-目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；6E1/6E2 补选定的有限抢购批次实测，6F 补当前接口目录与源码漂移检查；7A 支持不关联门店的校园动态并完成选定读写/Feed 验收。不代表原始业务目标全部落地、生产容量或性能优化提升。
+目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；6E1/6E2 补选定的有限抢购批次实测，6F 补当前接口目录与源码漂移检查；7A 支持不关联门店的校园动态并完成选定读写/Feed 验收；7B 增加一级评论创建与按动态游标读取。不代表原始业务目标全部落地、生产容量或性能优化提升。
 
 ## 架构与业务
 
@@ -17,7 +17,8 @@ HTTP → Spring Security（Redis Token + 数据库账号/角色）→ Controller
 
 - USER / MERCHANT / ADMIN 权限与商户资源归属检查；采用可失效的 Redis Token，不是 JWT。
 - 门店、校园动态、关注、Feed、签到和优惠活动沿用合理的遗留模块；不是所有遗留接口都已完成 DTO 改造。
-- Phase 7A 支持不关联门店的校园动态：POST /blog 的 shopId 可省略/null，提供则为正数，标题/图片/正文和角色要求不变；不是纯文字帖、评论或审核功能。
+- Phase 7A 支持不关联门店的校园动态：POST /blog 的 shopId 可省略/null，提供则为正数，标题/图片/正文和角色要求不变；当时未包含纯文字帖或审核功能，一级评论由 7B 单独增加。
+- Phase 7B 支持一级评论创建与可见评论游标读取；不包含回复、删除、审核、通知或完整评价系统。
 - 库存、资格、时间窗口、一人一单与请求重放由 Redis Lua 校验。`ACCEPTED` 只代表进入 Stream，不代表订单落库或支付。
 - 消费者支持 pending 恢复、有限重试、失败归档和运维前向重放；数据库有唯一约束。保留 Redis Stream，不引入专业 MQ，见 [ADR 0001](docs/adr/0001-order-message-broker.md)。
 - 本人已落库未支付订单支持查询/取消，取消与 outbox 同事务；Redis 补偿独立恢复。不包含支付、退款或自动超时取消。
@@ -85,10 +86,10 @@ smoke 检查 live、ready 和合成门店搜索，成功输出 `PASS`；它只�
 首次使用全新 MySQL 卷时，官方镜像运行 `deploy/mysql/init/00-bootstrap.sh`：
 
 ```text
-空库检查 → schema.sql → V001…V006 → seed.sql（合成类别与一间门店）
+空库检查 → schema.sql → V001…V007 → seed.sql（合成类别与一间门店）
 ```
 
-没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V006；不会自动修复脏数据或同名错误索引。7A 的 V006 必须在升级应用前应用，已有卷不会因重启自动迁移；新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
+没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V007；不会自动修复脏数据或同名错误索引。7A 的 V006、7B 的 V007 必须在升级应用前应用，已有卷不会因重启自动迁移。V007 只按索引名判断是否存在；同名但定义错误的索引需人工核查，不会自动修复。新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)；评论索引的现有库升级要求见[7B 阶段记录](docs/refactor/24-phase-7b-comments.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
 
 日常停止容器并保留数据：
 
@@ -170,8 +171,9 @@ python3 scripts/verify-business-diagnostics.py
 
 ## API 与设计文档
 
-- [当前 API 目录](docs/api/README.md)、[37 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：另列两个管理端 GET，不含未来接口；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
+- [当前 API 目录](docs/api/README.md)、[39 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：另列两个管理端 GET，不含未来接口；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
 - [Phase 7A 校园动态](docs/refactor/23-phase-7a-campus-posts.md)、[可选门店关联与发布/回退](docs/learning/campus-post-store-association.md)。
+- [Phase 7B 一级评论](docs/refactor/24-phase-7b-comments.md)、[一级评论与游标分页学习笔记](docs/learning/first-level-comments-and-cursors.md)。
 - [领域模型](docs/domain-model.md)、[迁移计划](docs/refactor/02-migration-plan.md)、[遗留兼容说明](docs/learning/legacy-compatibility.md)。
 - [请求/响应契约](docs/refactor/09-phase-2d-api-models.md)、[权限](docs/refactor/08-phase-2c-authorization.md)。
 - [活动准入](docs/refactor/10-phase-3a-flash-sale-admission.md)、[消费恢复](docs/refactor/11-phase-3b-reliable-order-consumption.md)、[订单取消](docs/refactor/12-phase-3c-order-lifecycle.md)。
@@ -189,7 +191,7 @@ python3 scripts/verify-business-diagnostics.py
 
 ```bash
 ./mvnw clean test
-./mvnw -Dtest=ShopCacheRedisIT,OrderCancellationRedisIT,OrderStreamRedisIT,FlashSaleRedisScriptIT,ShopCacheMySqlRedisIT,OrderLifecycleMySqlRedisIT,ShopSearchMySqlIT,BlogPublicationMySqlIT test
+./mvnw -Dtest=ShopCacheRedisIT,OrderCancellationRedisIT,OrderStreamRedisIT,FlashSaleRedisScriptIT,ShopCacheMySqlRedisIT,OrderLifecycleMySqlRedisIT,ShopSearchMySqlIT,BlogPublicationMySqlIT,BlogCommentsMySqlIT test
 ```
 
 Surefire 3.1.2 已固定在 POM，无需版本覆盖。默认套件不需要数据库/Redis，4 项教学手动实验按设计跳过；显式 IT 自建进程和合成数据，需要 `mysqld`、`redis-server` 在 PATH（或 `MYSQLD_SERVER_BINARY` / `REDIS_SERVER_BINARY`）。不要在共享库运行教学手动实验。
@@ -218,3 +220,5 @@ Phase 6E2 本轮：255 项默认回归（4 设计跳过）、54 项 Python 离�
 Phase 6F 本轮：新增 4 项 API 目录契约检查，Java 8 默认回归与打包 259 项（0 失败/错误、4 设计跳过）通过。37 个主源码显式 MVC 映射与机器清单、逐接口表格一致；只核验映射/授权声明及文档事实，不等于 37 个完整端到端接口已验收。没有运行 Docker、真实 DB/Redis IT 或重跑历史性能；没有改业务、依赖或部署配置。
 
 Phase 7A 本轮：默认回归与打包 275 项（0 失败/错误、4 设计跳过）、显式 BlogPublicationMySqlIT 2 项和目标版本 Compose 11 组通过。覆盖新/旧动态发布、真实 MyBatis NULL 读写、旧行保留、V006 重复执行、身份白名单、读取/Feed 与部署回归；测试项目资源清理复核通过。显式 IT 使用本机 MySQL 9.6.0、Redis/关注为 mock，Compose 使用 MySQL 8.4.11 / Redis 6.2.24。没有重跑旧 82 项 IT 或性能，也不承诺历史脏库迁移、客户端兼容或 Feed 故障恢复。
+
+Phase 7B 本轮：默认回归与打包 294 项（0 失败/错误、4 设计跳过）、显式 BlogCommentsMySqlIT 8 项、目标版本 Compose 13 组通过。验证一级评论发布/分页、会话作者白名单、三态映射与可见性、12 并发写入计数、真实事务失败回滚和 V007 重复执行；测试项目资源清理复核通过。显式 IT 为本机 MySQL 9.6.0，Compose 为 MySQL 8.4.11 / Redis 6.2.24；不把无幂等键的评论发布当成安全重试协议，也不承诺回复、审核、历史计数修复或生产热点性能。细节见 [7B 记录](docs/refactor/24-phase-7b-comments.md)。

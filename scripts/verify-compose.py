@@ -206,6 +206,99 @@ def verify_campus_posts(base, tokens):
     check("campus posts omit/null store, legacy store publication, author whitelist, reads/Feed and invalid IDs")
 
 
+def verify_first_level_comments(base, tokens):
+    """Own synthetic rows/triggers only; SQL injection and transaction failure are deliberate test inputs."""
+    blog_id = int(sql("SELECT MIN(id) FROM tb_blog;"))
+    route = "/blog-comments/of/blog/%d" % blog_id
+    headers = {"Content-Type": "application/json", "authorization": tokens[0]}
+    payload = {"blogId": blog_id, "content": "synthetic <script>text</script> ' ; --",
+               "id": 999999, "userId": 900002, "parentId": 123, "answerId": 456,
+               "liked": 99, "status": 2, "createTime": "2000-01-01T00:00:00"}
+    request(base, "/blog-comments", 401, "POST", json.dumps(payload).encode(), {"Content-Type": "application/json"})
+    request(base, route, 401)
+    assert sql("SELECT COUNT(*) FROM tb_blog_comments;") == "0"
+    ids = []
+    for user_id, token in ((900001, tokens[0]), (900002, tokens[1])):
+        result, _ = request(base, "/blog-comments", 200, "POST", json.dumps(payload).encode(),
+                            {"Content-Type": "application/json", "authorization": token})
+        item = json.loads(result)["data"]
+        assert set(item) == {"id", "blogId", "userId", "content", "createTime"}
+        assert item["blogId"] == str(blog_id) and item["userId"] == str(user_id)
+        assert isinstance(item["id"], str) and item["id"].isdigit() and item["id"] != "999999"
+        assert item["content"] == payload["content"] and item["createTime"]
+        ids.append(item["id"])
+        assert sql("SELECT COUNT(*) FROM tb_blog_comments WHERE id=%s AND user_id=%d AND parent_id=0 "
+                   "AND answer_id=0 AND liked=0 AND status=0;" % (item["id"], user_id)) == "1"
+    sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(900003,'00000000003','synthetic-merchant');"
+        "INSERT INTO tb_user_role(user_id,role) VALUES(900003,'MERCHANT');")
+    merchant_token = "synthetic-comments-" + uuid.uuid4().hex
+    redis("HSET", "login:token:" + merchant_token, "id", "900003", "nickName", "synthetic")
+    redis("EXPIRE", "login:token:" + merchant_token, "600")
+    merchant_headers = {"Content-Type": "application/json", "authorization": merchant_token}
+    result, _ = request(base, "/blog-comments", 200, "POST", json.dumps(payload).encode(), merchant_headers)
+    ids.append(json.loads(result)["data"]["id"])
+    sql("UPDATE tb_user SET status='DISABLED' WHERE id=900003;")
+    request(base, "/blog-comments", 401, "POST", json.dumps(payload).encode(), merchant_headers)
+    request(base, route, 401, headers=merchant_headers)
+    for invalid in ({"blogId": blog_id, "content": " "}, {"blogId": 0, "content": "x"},
+                    {"blogId": blog_id, "content": "x" * 256}, {"content": "x"}):
+        result, _ = request(base, "/blog-comments", 400, "POST", json.dumps(invalid).encode(), headers)
+        assert json.loads(result)["errorCode"] == "VALIDATION_FAILED"
+    for suffix in ("?size=0", "?size=51", "?beforeId=0", "?beforeId=-1", "?size=bad"):
+        request(base, route + suffix, 400, headers=headers)
+    request(base, "/blog-comments/of/blog/0", 400, headers=headers)
+    request(base, "/blog-comments/of/blog/999999999", 404, headers=headers)
+    request(base, "/blog-comments", 404, "POST", b'{"blogId":999999999,"content":"missing"}', headers)
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == "3"
+    # Make visibility exclusions explicit; neither the migration nor service silently repairs history.
+    fixtures = [(9007199254740993, 0, 0, "0"), (9007199254740994, 0, 0, "1"),
+                (9007199254740995, 0, 0, "2"), (9007199254740996, 0, 0, "NULL"),
+                (9007199254740997, 1, 0, "0"), (9007199254740998, 0, 1, "0")]
+    for comment_id, parent, answer, status in fixtures:
+        sql("INSERT INTO tb_blog_comments(id,user_id,blog_id,parent_id,answer_id,content,liked,status) "
+            "VALUES(%d,900001,%d,%d,%d,'synthetic historical fixture',0,%s);" %
+            (comment_id, blog_id, parent, answer, status))
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == "3"
+    first, _ = request(base, route + "?size=2", headers=headers)
+    page = json.loads(first)["data"]
+    assert [item["id"] for item in page["items"]] == ["9007199254740993", ids[-1]]
+    assert page["hasNext"] is True and page["nextBeforeId"] == ids[-1]
+    newer, _ = request(base, "/blog-comments", 200, "POST", json.dumps(payload).encode(), headers)
+    assert int(json.loads(newer)["data"]["id"]) > 9007199254740998
+    last, _ = request(base, route + "?size=2&beforeId=" + page["nextBeforeId"], headers=headers)
+    last = json.loads(last)["data"]
+    assert [item["id"] for item in last["items"]] == ids[-2::-1]
+    assert last["hasNext"] is False and "nextBeforeId" not in last
+    all_rows, _ = request(base, route + "?size=50", headers=headers)
+    assert len(json.loads(all_rows)["data"]["items"]) == 5
+    other_blog = int(sql("SELECT MAX(id) FROM tb_blog;"))
+    empty, _ = request(base, "/blog-comments/of/blog/%d" % other_blog, headers=headers)
+    assert json.loads(empty)["data"] == {"items": [], "hasNext": False}
+    sql("UPDATE tb_blog SET comments=NULL WHERE id=%d;" % other_blog)
+    request(base, "/blog-comments", 200, "POST", json.dumps({"blogId": other_blog, "content": "null counter"}).encode(), headers)
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % other_blog) == "1"
+    check("first-level comments real roles, validation/whitelist, visibility, lossless cursor and NULL counter")
+
+    original_count = sql("SELECT COUNT(*) FROM tb_blog_comments;")
+    original_counter = sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id)
+    for name, definition in (
+            ("synthetic_comment_counter_failure", "BEFORE UPDATE ON tb_blog FOR EACH ROW "
+             "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private counter failure'"),
+            ("synthetic_comment_insert_failure", "BEFORE INSERT ON tb_blog_comments FOR EACH ROW "
+             "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private insert failure'")):
+        sql("CREATE TRIGGER " + name + " " + definition + ";")
+        try:
+            result, _ = request(base, "/blog-comments", 500, "POST", json.dumps(payload).encode(), headers)
+            result = json.loads(result)
+            assert result["success"] is False and result["errorCode"] == "INTERNAL_ERROR"
+            assert "synthetic private" not in json.dumps(result)
+            assert sql("SELECT COUNT(*) FROM tb_blog_comments;") == original_count
+            assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == original_counter
+        finally:
+            sql("DROP TRIGGER " + name + ";")
+    check("comment insert/counter database failures roll back both writes with generic HTTP errors")
+
+
 def cleanup():
     try:
         compose("--profile", "app", "logs", "--no-color", timeout=30)
@@ -248,7 +341,10 @@ def main():
         assert sql("SELECT COUNT(*) FROM tb_shop;") == "1"
         assert sql("SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() "
                    "AND TABLE_NAME='tb_blog' AND COLUMN_NAME='shop_id';") == "YES"
-        check("V001-V006 repeat, nullable post store and populated-database bootstrap refusal")
+        assert sql("SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM INFORMATION_SCHEMA.STATISTICS "
+                   "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog_comments' "
+                   "AND INDEX_NAME='idx_blog_comments_page';") == "blog_id,parent_id,answer_id,status,id"
+        check("V001-V007 repeat, nullable post store, comment index and populated-database bootstrap refusal")
         sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(900001,'00000000001','synthetic-user'),(900002,'00000000002','synthetic-admin');"
             "INSERT INTO tb_user_role(user_id,role) VALUES(900001,'USER'),(900002,'ADMIN');")
         tokens = ["synthetic-phase5-" + uuid.uuid4().hex for _ in range(2)]
@@ -256,6 +352,7 @@ def main():
             redis("HSET", "login:token:" + token, "id", str(user), "nickName", "synthetic")
             redis("EXPIRE", "login:token:" + token, "600")
         verify_campus_posts(base, tokens)
+        verify_first_level_comments(base, tokens)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 37 条。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。`BlogCommentsController` 只有类级 `/blog-comments`，没有 handler，因此当前没有可调用的评论 API。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 39 条，来自 12 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加两条一级评论 API；评论能力和边界见[阶段记录](../refactor/24-phase-7b-comments.md)。
 
 ## 通用约定
 
@@ -8,7 +8,7 @@
 - 成功的 `data=null` 与资源缺失的 404 不等价：用户资料、用户简档以及空的关注动态流会成功但没有 data；门店详情、动态详情和不存在的订单会给 404。集合为空通常是成功的空数组。
 - 登录令牌通过请求头 `authorization` 原样传递（服务端仅 trim 首尾空白），没有 `Bearer` scheme 解析。认证从 Redis 会话装载用户与 `USER`、`MERCHANT`、`ADMIN` 角色；没有独立的学生角色/认证类型。`USER` 是普通用户角色。缺失、无效或已失效 token 不建立认证上下文；受保护路由因此按未认证处理，公开路由仍可匿名访问，包括携带无效 token 的请求。
 - `SecurityConfig` 对登录验证码和登录开放；指定 GET 查询与图片/健康路由公开；其余路由要求已认证。方法级资源策略再限制角色和所属资源。参与秒杀、订单读取/取消和签到的策略允许有效的 USER/MERCHANT 且身份不含 ADMIN；参与本身不要求商户店铺成员关系。创建/管理店铺或促销才由管理员或具有目标商户/店铺有效成员关系的商户执行。标注 `hasAnyRole('USER','MERCHANT','ADMIN')` 的接口确实包含 ADMIN。
-- 标为 Entity 的返回值是当前代码直接返回持久化实体，不代表已统一到安全/稳定的 VO；专用 DTO/Response 只在对应条目明确标出。
+- 标为 Entity 的返回值是当前代码直接返回持久化实体，不代表已统一到安全/稳定的 VO；专用 DTO/Response 只在对应条目明确标出。评论接口没有用户可控的作者、状态或计数字段映射。
 
 ## 用户与会话
 
@@ -74,7 +74,16 @@ Controller：[BlogController.java](../../src/main/java/io/github/frewily/campush
 | GET | `/blog/of/user` | [`queryBlogByUserId`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L70)；需认证 | Query `current` 默认 1 且 ≥1；`id` 用户 ID 必填正数 | `List<Blog>` Entity，每页最多 10；无记录为空数组 |
 | GET | `/blog/of/follow` | [`queryBlogOfFollow`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L81)；需认证 | Query `lastId` 必填正数（滚动时间上界）；`offset` 默认 0 且 ≥0 | 有记录时 `ScrollResult {list: Blog[], minTime, offset}`，当前每批最多 2 条；无动态时 `Result.ok()`，即成功且 data 为 null，不是 404 |
 
-`/blog-comments` 目前只有空 Controller，没有任何 HTTP handler；评论数量字段存在于旧 `Blog` Entity 不代表已有评论读写 API。
+## 动态评论（Phase 7B）
+
+Controller：[BlogCommentsController.java](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；Service：[IBlogCommentsService.java](../../src/main/java/io/github/frewily/campushub/service/IBlogCommentsService.java)、[BlogCommentsServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/BlogCommentsServiceImpl.java)；模型：[BlogCommentCreateRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentCreateRequest.java)、[BlogCommentPageRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentPageRequest.java)、[BlogCommentItem.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogCommentItem.java)、[BlogCommentPage.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogCommentPage.java)。
+
+| Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
+|---|---|---|---|---|
+| POST | `/blog-comments` | [`createComment`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证；方法 guard 为 `hasAnyRole('USER', 'MERCHANT', 'ADMIN')` | JSON：`blogId` 必填正数，`content` 非空白且最多 255 字符；未知字段忽略，包括客户端传入的 author/userId、id、status、parentId、answerId、liked/count 等字段 | 创建一级评论，作者来自会话；parentId/answerId/liked/status 由服务设为 0，并在同一事务中递增动态 comments（空值按 0 处理）。成功返回仅含字符串 `id`、`blogId`、`userId`、`content` 和 `createTime` 的 `BlogCommentItem`；动态不存在为 404，SQL 异常为通用 500，写入/计数行数不符合预期为 422 |
+| GET | `/blog-comments/of/blog/{blogId}` | [`listComments`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证（无方法级 guard，由全局 SecurityConfig 保护） | Path `blogId` 必填正数；Query `beforeId` 可选正数；`size` 为 1..50，默认 20。按 ID 倒序读取，`beforeId` 表示严格小于的游标 | `BlogCommentPage {items, hasNext, nextBeforeId}`；`items` 每项仅有字符串 `id`、`blogId`、`userId`、`content`、`createTime`。仅 status=0、parentId=0、answerId=0 的一级可见评论；举报(1)、隐藏(2)、null 状态及回复不返回。`nextBeforeId` 在 `hasNext=true` 时为下一页游标字符串，否则 null（NON_NULL 配置下省略）；动态不存在为 404 |
+
+本阶段不支持回复、删除、审核/状态变更、通知、请求幂等键或历史 comments 计数回填；不据此宣称完整评论评价系统。V007 增加 `(blog_id,parent_id,answer_id,status,id)` 游标索引，细节与兼容边界见[阶段记录](../refactor/24-phase-7b-comments.md)和[游标学习笔记](../learning/first-level-comments-and-cursors.md)。
 
 ## 关注
 
@@ -105,6 +114,6 @@ Controller：[HealthController.java](../../src/main/java/io/github/frewily/campu
 | GET | `/health/live` | [`live`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L13)；公开 | 无参数 | 原始 JSON `{"status":"UP"}` |
 | GET | `/health/ready` | [`ready`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L14)；公开 | 无参数 | 原始 JSON status；MySQL `SELECT 1` 与 Redis `PING` 都成功为 HTTP 200/UP，否则 HTTP 503/DOWN |
 
-## 独立管理端（不计入 37 条）
+## 独立管理端（不计入 39 条）
 
 `SecurityConfig.managementSecurityFilterChain` 与 `application.yaml` 暴露两个 Actuator GET：`GET /actuator/health`、`GET /actuator/prometheus`。它们不属于业务 Controller 清单；管理监听地址默认 `127.0.0.1:8082`（端口可由配置替换），管理链对这两个 GET 公开并拒绝其他 Actuator 请求。Actuator 路由由 Spring Boot 管理端框架提供。
