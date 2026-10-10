@@ -2,7 +2,7 @@
 
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
 
-目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。不代表生产容量、限量活动压测或性能优化提升。
+目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；不代表原始业务目标全部落地、生产容量、限量活动压测或性能优化提升。
 
 ## 架构与业务
 
@@ -175,6 +175,8 @@ python3 scripts/verify-business-diagnostics.py
 - [Phase 6A 验证记录](docs/refactor/16-phase-6a-observability.md)、[可观测性学习笔记](docs/learning/observability-baseline.md)。
 - [Phase 6B 验证记录](docs/refactor/17-phase-6b-business-diagnostics.md)、[质量覆盖矩阵](docs/refactor/phase-6b-quality-matrix.md)、[业务诊断笔记](docs/learning/business-diagnostics.md)。
 - [Phase 6C 验证记录](docs/refactor/18-phase-6c-performance.md)、[性能报告与原始证据](docs/performance/README.md)、[事实限定的面试材料](docs/interview/README.md)。
+- [项目故事](docs/interview/project-story.md)、[面试追问](docs/interview/questions.md)、[事实限定的简历要点](docs/interview/resume-points.md)。
+- [Phase 6D 交付盘点与剩余范围](docs/refactor/19-phase-6d-delivery.md)：当前仅有重点 API 契约，尚无统一穷尽的接口目录；完整商户/管理后台、评论评价、通知及业务模块分包未交付。原始要求的抢购实际压测仍待单独阶段，不能用 6C 读取结果替代。
 
 `GET /shop/search` 匿名可访问，支持 `keyword,typeId,minPrice,maxPrice,minScore,x,y,radiusMeters,sort,page,size`。详细取值/单位以搜索契约为准；`data` 为 `items,total,page,size,sort,hasNext`，ID 为字符串。HTTP routes、表名和大部分 Redis key 保留；门店详情缓存已切换 `cache:shop:v2:`，不支持新旧缓存写入程序混跑的一致性保证。
 
