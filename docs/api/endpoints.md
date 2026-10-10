@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 39 条，来自 12 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加两条一级评论 API；评论能力和边界见[阶段记录](../refactor/24-phase-7b-comments.md)。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 41 条，来自 12 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加两条一级评论 API，7C 再增加直接回复发布/读取；边界见[7B](../refactor/24-phase-7b-comments.md)和[7C](../refactor/25-phase-7c-comment-replies.md)。
 
 ## 通用约定
 
@@ -74,7 +74,7 @@ Controller：[BlogController.java](../../src/main/java/io/github/frewily/campush
 | GET | `/blog/of/user` | [`queryBlogByUserId`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L70)；需认证 | Query `current` 默认 1 且 ≥1；`id` 用户 ID 必填正数 | `List<Blog>` Entity，每页最多 10；无记录为空数组 |
 | GET | `/blog/of/follow` | [`queryBlogOfFollow`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L81)；需认证 | Query `lastId` 必填正数（滚动时间上界）；`offset` 默认 0 且 ≥0 | 有记录时 `ScrollResult {list: Blog[], minTime, offset}`，当前每批最多 2 条；无动态时 `Result.ok()`，即成功且 data 为 null，不是 404 |
 
-## 动态评论（Phase 7B）
+## 动态评论与直接回复（Phase 7B/7C）
 
 Controller：[BlogCommentsController.java](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；Service：[IBlogCommentsService.java](../../src/main/java/io/github/frewily/campushub/service/IBlogCommentsService.java)、[BlogCommentsServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/BlogCommentsServiceImpl.java)；模型：[BlogCommentCreateRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentCreateRequest.java)、[BlogCommentPageRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentPageRequest.java)、[BlogCommentItem.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogCommentItem.java)、[BlogCommentPage.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogCommentPage.java)。
 
@@ -83,7 +83,10 @@ Controller：[BlogCommentsController.java](../../src/main/java/io/github/frewily
 | POST | `/blog-comments` | [`createComment`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证；方法 guard 为 `hasAnyRole('USER', 'MERCHANT', 'ADMIN')` | JSON：`blogId` 必填正数，`content` 非空白且最多 255 字符；未知字段忽略，包括客户端传入的 author/userId、id、status、parentId、answerId、liked/count 等字段 | 创建一级评论，作者来自会话；parentId/answerId/liked/status 由服务设为 0，并在同一事务中递增动态 comments（空值按 0 处理）。成功返回仅含字符串 `id`、`blogId`、`userId`、`content` 和 `createTime` 的 `BlogCommentItem`；动态不存在为 404，SQL 异常为通用 500，写入/计数行数不符合预期为 422 |
 | GET | `/blog-comments/of/blog/{blogId}` | [`listComments`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证（无方法级 guard，由全局 SecurityConfig 保护） | Path `blogId` 必填正数；Query `beforeId` 可选正数；`size` 为 1..50，默认 20。按 ID 倒序读取，`beforeId` 表示严格小于的游标 | `BlogCommentPage {items, hasNext, nextBeforeId}`；`items` 每项仅有字符串 `id`、`blogId`、`userId`、`content`、`createTime`。仅 status=0、parentId=0、answerId=0 的一级可见评论；举报(1)、隐藏(2)、null 状态及回复不返回。`nextBeforeId` 在 `hasNext=true` 时为下一页游标字符串，否则 null（NON_NULL 配置下省略）；动态不存在为 404 |
 
-本阶段不支持回复、删除、审核/状态变更、通知、请求幂等键或历史 comments 计数回填；不据此宣称完整评论评价系统。V007 增加 `(blog_id,parent_id,answer_id,status,id)` 游标索引，细节与兼容边界见[阶段记录](../refactor/24-phase-7b-comments.md)和[游标学习笔记](../learning/first-level-comments-and-cursors.md)。
+| POST | `/blog-comments/{commentId}/replies` | [`createReply`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证；允许 USER、MERCHANT、ADMIN | Path `commentId` 为正数且必须指向 status=0、parentId=0、answerId=0 的一级评论；JSON [BlogCommentReplyRequest](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentReplyRequest.java) 仅接收非空白、≤255 的 content，其他字段忽略 | `BlogCommentItem`（同上字符串 ID 白名单）。blogId 从父评论派生、作者从会话取，parentId/answerId 固定为路径 commentId、liked/status=0。动态和父评论按固定顺序锁定，当前读复核可见性，插入/计数/回读同事务；父评论不存在、非正常一级评论或动态缺失均 404，SQL 异常通用 500，写入行数异常 422 |
+| GET | `/blog-comments/{commentId}/replies` | [`listReplies`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证（全局 SecurityConfig） | Path commentId 必须正数；beforeId 可选正数；size 默认 20、范围 1..50；仅可见正常一级评论的直接回复 | `BlogCommentPage`（同上），派生 blogId，过滤 parentId=answerId=commentId 且 status=0，ID 降序、严格小于游标。动态或父评论不可用/非一级均 404；无回复为 items=[]、hasNext=false，无 nextBeforeId；只读 RR 单请求快照，不承诺跨页快照 |
+
+目前只支持对一级评论的一层直接回复，不能对回复继续回复；不支持删除、审核/状态变更、通知、请求幂等键或历史 comments 计数回填。不据此宣称完整评论评价系统。7C 复用 V007 的 `(blog_id,parent_id,answer_id,status,id)` 索引，不新增 DDL；说明见[7B 记录](../refactor/24-phase-7b-comments.md)、[一级评论笔记](../learning/first-level-comments-and-cursors.md)和[直接回复笔记](../learning/direct-comment-replies.md)。
 
 ## 关注
 
@@ -114,6 +117,6 @@ Controller：[HealthController.java](../../src/main/java/io/github/frewily/campu
 | GET | `/health/live` | [`live`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L13)；公开 | 无参数 | 原始 JSON `{"status":"UP"}` |
 | GET | `/health/ready` | [`ready`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L14)；公开 | 无参数 | 原始 JSON status；MySQL `SELECT 1` 与 Redis `PING` 都成功为 HTTP 200/UP，否则 HTTP 503/DOWN |
 
-## 独立管理端（不计入 39 条）
+## 独立管理端（不计入 41 条）
 
 `SecurityConfig.managementSecurityFilterChain` 与 `application.yaml` 暴露两个 Actuator GET：`GET /actuator/health`、`GET /actuator/prometheus`。它们不属于业务 Controller 清单；管理监听地址默认 `127.0.0.1:8082`（端口可由配置替换），管理链对这两个 GET 公开并拒绝其他 Actuator 请求。Actuator 路由由 Spring Boot 管理端框架提供。

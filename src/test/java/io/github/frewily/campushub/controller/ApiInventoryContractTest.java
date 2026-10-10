@@ -122,20 +122,23 @@ class ApiInventoryContractTest {
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
         assertEquals(12, controllerTypes.size());
-        assertEquals(39, actual.size());
+        assertEquals(41, actual.size());
         assertCommentRoute("POST", "/blog-comments", "createComment",
                 "hasAnyRole('USER', 'MERCHANT', 'ADMIN')");
         assertCommentRoute("GET", "/blog-comments/of/blog/{blogId}", "listComments", "");
+        assertCommentRoute("POST", "/blog-comments/{commentId}/replies", "createReply",
+                "hasAnyRole('USER', 'MERCHANT', 'ADMIN')");
+        assertCommentRoute("GET", "/blog-comments/{commentId}/replies", "listReplies", "");
         int actualCommentRouteCount = 0;
         for (String route : actual) {
             if (route.contains("\"BlogCommentsController\"")) actualCommentRouteCount++;
         }
-        assertEquals(2, actualCommentRouteCount);
+        assertEquals(4, actualCommentRouteCount);
         int commentRouteCount = 0;
         for (JsonNode route : documented) {
             if ("BlogCommentsController".equals(route.path("controller").asText())) commentRouteCount++;
         }
-        assertEquals(2, commentRouteCount);
+        assertEquals(4, commentRouteCount);
     }
 
     private static void assertCommentRoute(String method, String path, String handler, String guard) {

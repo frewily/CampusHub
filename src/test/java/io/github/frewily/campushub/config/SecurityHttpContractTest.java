@@ -17,6 +17,7 @@ import io.github.frewily.campushub.service.IVoucherService;
 import io.github.frewily.campushub.service.IBlogService;
 import io.github.frewily.campushub.service.IBlogCommentsService;
 import io.github.frewily.campushub.dto.response.BlogCommentItem;
+import io.github.frewily.campushub.dto.response.BlogCommentPage;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -33,6 +34,7 @@ import org.springframework.http.MediaType;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Collections;
 
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_USER_KEY;
 import static org.mockito.Mockito.when;
@@ -151,6 +153,62 @@ class SecurityHttpContractTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
         verifyNoInteractions(blogCommentsService);
+    }
+
+    @Test
+    void anonymousReplyCreateAndReadAreUnauthorized() throws Exception {
+        mockMvc.perform(post("/blog-comments/41/replies").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"Nice\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+        mockMvc.perform(get("/blog-comments/41/replies"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+        verifyNoInteractions(blogCommentsService);
+    }
+
+    @Test
+    void disabledAccountCannotCreateOrReadReplies() throws Exception {
+        String token = "disabled-reply-token";
+        Map<Object, Object> session = new HashMap<>();
+        session.put("id", "35");
+        session.put("nickName", "disabled-user");
+        when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(LOGIN_USER_KEY + token)).thenReturn(session);
+        when(accountAccessMapper.findAccountStatus(35L)).thenReturn("DISABLED");
+
+        mockMvc.perform(post("/blog-comments/41/replies").header("authorization", token)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"Nice\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+        mockMvc.perform(get("/blog-comments/41/replies").header("authorization", token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+        verifyNoInteractions(blogCommentsService);
+    }
+
+    @Test
+    void userMerchantAndAdminCanCreateAndReadReplies() throws Exception {
+        prepareSession("reply-user-token", 36L, "USER");
+        prepareSession("reply-merchant-token", 37L, "MERCHANT");
+        prepareSession("reply-admin-token", 38L, "ADMIN");
+        when(blogCommentsService.createReply(any(), any())).thenReturn(
+                new BlogCommentItem("41", "51", "36", "Nice", null));
+        when(blogCommentsService.listReplies(any(), any())).thenReturn(
+                new BlogCommentPage(Collections.singletonList(
+                        new BlogCommentItem("41", "51", "36", "Nice", null)), false, null));
+
+        for (String token : Arrays.asList("reply-user-token", "reply-merchant-token", "reply-admin-token")) {
+            mockMvc.perform(post("/blog-comments/40/replies").header("authorization", token)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"Nice\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value("41"));
+            mockMvc.perform(get("/blog-comments/40/replies").header("authorization", token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.items[0].id").value("41"));
+        }
+        verify(blogCommentsService, times(3)).createReply(any(), any());
+        verify(blogCommentsService, times(3)).listReplies(any(), any());
     }
 
     @Test

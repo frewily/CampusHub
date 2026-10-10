@@ -2,7 +2,7 @@
 
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
 
-目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；6E1/6E2 补选定的有限抢购批次实测，6F 补当前接口目录与源码漂移检查；7A 支持不关联门店的校园动态并完成选定读写/Feed 验收；7B 增加一级评论创建与按动态游标读取。不代表原始业务目标全部落地、生产容量或性能优化提升。
+目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；6E1/6E2 补选定的有限抢购批次实测，6F 补当前接口目录与源码漂移检查；7A 支持不关联门店的校园动态并完成选定读写/Feed 验收；7B/7C 增加一级评论与一层直接回复的创建/游标读取。不代表原始业务目标全部落地、生产容量或性能优化提升。
 
 ## 架构与业务
 
@@ -18,7 +18,7 @@ HTTP → Spring Security（Redis Token + 数据库账号/角色）→ Controller
 - USER / MERCHANT / ADMIN 权限与商户资源归属检查；采用可失效的 Redis Token，不是 JWT。
 - 门店、校园动态、关注、Feed、签到和优惠活动沿用合理的遗留模块；不是所有遗留接口都已完成 DTO 改造。
 - Phase 7A 支持不关联门店的校园动态：POST /blog 的 shopId 可省略/null，提供则为正数，标题/图片/正文和角色要求不变；当时未包含纯文字帖或审核功能，一级评论由 7B 单独增加。
-- Phase 7B 支持一级评论创建与可见评论游标读取；不包含回复、删除、审核、通知或完整评价系统。
+- Phase 7B/7C 支持一级评论和一层直接回复的创建/可见游标读取，关系由服务端派生，写入与计数同事务；不包含多级回复、删除、审核、通知或完整评价系统。
 - 库存、资格、时间窗口、一人一单与请求重放由 Redis Lua 校验。`ACCEPTED` 只代表进入 Stream，不代表订单落库或支付。
 - 消费者支持 pending 恢复、有限重试、失败归档和运维前向重放；数据库有唯一约束。保留 Redis Stream，不引入专业 MQ，见 [ADR 0001](docs/adr/0001-order-message-broker.md)。
 - 本人已落库未支付订单支持查询/取消，取消与 outbox 同事务；Redis 补偿独立恢复。不包含支付、退款或自动超时取消。
@@ -171,9 +171,10 @@ python3 scripts/verify-business-diagnostics.py
 
 ## API 与设计文档
 
-- [当前 API 目录](docs/api/README.md)、[39 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：另列两个管理端 GET，不含未来接口；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
+- [当前 API 目录](docs/api/README.md)、[41 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：另列两个管理端 GET，不含未来接口；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
 - [Phase 7A 校园动态](docs/refactor/23-phase-7a-campus-posts.md)、[可选门店关联与发布/回退](docs/learning/campus-post-store-association.md)。
 - [Phase 7B 一级评论](docs/refactor/24-phase-7b-comments.md)、[一级评论与游标分页学习笔记](docs/learning/first-level-comments-and-cursors.md)。
+- [Phase 7C 直接回复](docs/refactor/25-phase-7c-comment-replies.md)、[关系派生、锁顺序与可见性](docs/learning/direct-comment-replies.md)。
 - [领域模型](docs/domain-model.md)、[迁移计划](docs/refactor/02-migration-plan.md)、[遗留兼容说明](docs/learning/legacy-compatibility.md)。
 - [请求/响应契约](docs/refactor/09-phase-2d-api-models.md)、[权限](docs/refactor/08-phase-2c-authorization.md)。
 - [活动准入](docs/refactor/10-phase-3a-flash-sale-admission.md)、[消费恢复](docs/refactor/11-phase-3b-reliable-order-consumption.md)、[订单取消](docs/refactor/12-phase-3c-order-lifecycle.md)。
@@ -222,3 +223,5 @@ Phase 6F 本轮：新增 4 项 API 目录契约检查，Java 8 默认回归与�
 Phase 7A 本轮：默认回归与打包 275 项（0 失败/错误、4 设计跳过）、显式 BlogPublicationMySqlIT 2 项和目标版本 Compose 11 组通过。覆盖新/旧动态发布、真实 MyBatis NULL 读写、旧行保留、V006 重复执行、身份白名单、读取/Feed 与部署回归；测试项目资源清理复核通过。显式 IT 使用本机 MySQL 9.6.0、Redis/关注为 mock，Compose 使用 MySQL 8.4.11 / Redis 6.2.24。没有重跑旧 82 项 IT 或性能，也不承诺历史脏库迁移、客户端兼容或 Feed 故障恢复。
 
 Phase 7B 本轮：默认回归与打包 294 项（0 失败/错误、4 设计跳过）、显式 BlogCommentsMySqlIT 8 项、目标版本 Compose 13 组通过。验证一级评论发布/分页、会话作者白名单、三态映射与可见性、12 并发写入计数、真实事务失败回滚和 V007 重复执行；测试项目资源清理复核通过。显式 IT 为本机 MySQL 9.6.0，Compose 为 MySQL 8.4.11 / Redis 6.2.24；不把无幂等键的评论发布当成安全重试协议，也不承诺回复、审核、历史计数修复或生产热点性能。细节见 [7B 记录](docs/refactor/24-phase-7b-comments.md)。
+
+Phase 7C 本轮：默认回归与打包 314 项（0 失败/错误、4 设计跳过）、显式 BlogCommentsMySqlIT 14 项、目标版本 Compose 15 组通过。验证一层直接回复、服务端派生关系、锁定复核根可见性、混合并发/计数、真实事务回滚、游标/大 ID 与一级列表隔离；自有测试资源清理复核通过。显式 IT 为本机 MySQL 9.6.0，Compose 为 MySQL 8.4.11 / Redis 6.2.24。不新增 DDL，复用 V007；不承诺多级回复、幂等、安全重试、历史关系/计数修复或热点性能，见 [7C 记录](docs/refactor/25-phase-7c-comment-replies.md)。

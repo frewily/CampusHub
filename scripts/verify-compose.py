@@ -299,6 +299,125 @@ def verify_first_level_comments(base, tokens):
     check("comment insert/counter database failures roll back both writes with generic HTTP errors")
 
 
+def verify_direct_comment_replies(base, tokens):
+    """Direct replies only, using the previous synthetic large-ID root and project-owned fault triggers."""
+    root_id = 9007199254740993
+    blog_id = int(sql("SELECT blog_id FROM tb_blog_comments WHERE id=%d;" % root_id))
+    other_blog = int(sql("SELECT MAX(id) FROM tb_blog;"))
+    route = "/blog-comments/%d/replies" % root_id
+    headers = {"Content-Type": "application/json", "authorization": tokens[0]}
+    payload = {"content": "synthetic reply <script>untrusted</script> ' ; --",
+               "id": 999999, "userId": 900002, "blogId": other_blog, "parentId": 456,
+               "answerId": 789, "liked": 99, "status": 2, "createTime": "2000-01-01T00:00:00"}
+    first_level, _ = request(base, "/blog-comments/of/blog/%d?size=50" % blog_id, headers=headers)
+    initial_roots = [item["id"] for item in json.loads(first_level)["data"]["items"]]
+    initial_counter = int(sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id))
+    initial_rows = sql("SELECT COUNT(*) FROM tb_blog_comments;")
+    request(base, route, 401)
+    request(base, route, 401, "POST", json.dumps(payload).encode(), {"Content-Type": "application/json"})
+    assert sql("SELECT COUNT(*) FROM tb_blog_comments;") == initial_rows
+    empty, _ = request(base, route, headers=headers)
+    assert json.loads(empty)["data"] == {"items": [], "hasNext": False}
+
+    sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(900004,'00000000004','synthetic-reply-merchant');"
+        "INSERT INTO tb_user_role(user_id,role) VALUES(900004,'MERCHANT');")
+    merchant_token = "synthetic-replies-" + uuid.uuid4().hex
+    redis("HSET", "login:token:" + merchant_token, "id", "900004", "nickName", "synthetic")
+    redis("EXPIRE", "login:token:" + merchant_token, "600")
+    reply_ids = []
+    for user_id, token in ((900001, tokens[0]), (900002, tokens[1]), (900004, merchant_token)):
+        own_headers = {"Content-Type": "application/json", "authorization": token}
+        result, _ = request(base, route, 200, "POST", json.dumps(payload).encode(), own_headers)
+        item = json.loads(result)["data"]
+        assert set(item) == {"id", "blogId", "userId", "content", "createTime"}
+        assert item["blogId"] == str(blog_id) and item["userId"] == str(user_id)
+        assert isinstance(item["id"], str) and item["id"].isdigit() and int(item["id"]) > root_id
+        assert item["content"] == payload["content"] and item["createTime"]
+        reply_ids.append(item["id"])
+        assert sql("SELECT COUNT(*) FROM tb_blog_comments WHERE id=%s AND blog_id=%d AND user_id=%d "
+                   "AND parent_id=%d AND answer_id=%d AND liked=0 AND status=0;" %
+                   (item["id"], blog_id, user_id, root_id, root_id)) == "1"
+        request(base, route, headers=own_headers)
+    sql("UPDATE tb_user SET status='DISABLED' WHERE id=900004;")
+    disabled = {"Content-Type": "application/json", "authorization": merchant_token}
+    request(base, route, 401, "POST", json.dumps(payload).encode(), disabled)
+    request(base, route, 401, headers=disabled)
+    for body in (b"null", b"{", b"{}", b'{"content":" "}', json.dumps({"content": "x" * 256}).encode()):
+        result, _ = request(base, route, 400, "POST", body, headers)
+        assert json.loads(result)["errorCode"] == "VALIDATION_FAILED"
+    for invalid_path in ("0", "-1", "bad", "9223372036854775808"):
+        path = "/blog-comments/" + invalid_path + "/replies"
+        request(base, path, 400, "POST", json.dumps(payload).encode(), headers)
+        request(base, path, 400, headers=headers)
+    for suffix in ("?size=0", "?size=51", "?beforeId=0", "?beforeId=-1", "?beforeId=bad"):
+        request(base, route + suffix, 400, headers=headers)
+
+    for status in ("1", "2", "NULL"):
+        sql("INSERT INTO tb_blog_comments(user_id,blog_id,parent_id,answer_id,content,status) "
+            "VALUES(900001,%d,%d,%d,'synthetic excluded reply',%s);" % (blog_id, root_id, root_id, status))
+    sql("INSERT INTO tb_blog_comments(user_id,blog_id,parent_id,answer_id,content,status) "
+        "VALUES(900001,%d,%d,1,'synthetic wrong answer',0),"
+        "(900001,%d,1,%d,'synthetic other root',0),"
+        "(900001,%d,%d,%d,'synthetic wrong blog',0);" %
+        (blog_id, root_id, blog_id, root_id, other_blog, root_id, root_id))
+    page, _ = request(base, route + "?size=2", headers=headers)
+    page = json.loads(page)["data"]
+    assert [item["id"] for item in page["items"]] == reply_ids[:0:-1]
+    assert page["hasNext"] is True and page["nextBeforeId"] == reply_ids[1]
+    newer, _ = request(base, route, 200, "POST", json.dumps(payload).encode(), headers)
+    newer_id = json.loads(newer)["data"]["id"]
+    final_page, _ = request(base, route + "?size=2&beforeId=" + page["nextBeforeId"], headers=headers)
+    final_page = json.loads(final_page)["data"]
+    assert set(final_page) == {"items", "hasNext"} and final_page["hasNext"] is False
+    assert [item["id"] for item in final_page["items"]] == reply_ids[:1]
+    visible, _ = request(base, route + "?size=50", headers=headers)
+    assert [item["id"] for item in json.loads(visible)["data"]["items"]] == [newer_id] + reply_ids[::-1]
+    first_level, _ = request(base, "/blog-comments/of/blog/%d?size=50" % blog_id, headers=headers)
+    assert [item["id"] for item in json.loads(first_level)["data"]["items"]] == initial_roots
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == str(initial_counter + 4)
+    rows_before_invalid = sql("SELECT COUNT(*) FROM tb_blog_comments;")
+    for invalid_root in (999999, 9007199254740994, 9007199254740995, 9007199254740996,
+                         9007199254740997, 9007199254740998, int(reply_ids[0])):
+        path = "/blog-comments/%d/replies" % invalid_root
+        request(base, path, 404, "POST", json.dumps(payload).encode(), headers)
+        request(base, path, 404, headers=headers)
+    assert sql("SELECT COUNT(*) FROM tb_blog_comments;") == rows_before_invalid
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == str(initial_counter + 4)
+    # A root without a post is not a usable reply target either.
+    sql("INSERT INTO tb_blog_comments(id,user_id,blog_id,parent_id,answer_id,content,status) "
+        "VALUES(999999,900001,999999999,0,0,'synthetic orphan root',0);")
+    request(base, "/blog-comments/999999/replies", 404, "POST", json.dumps(payload).encode(), headers)
+    request(base, "/blog-comments/999999/replies", 404, headers=headers)
+    # Synthetic external moderation; no new moderation endpoint or automatic data cleanup.
+    sql("UPDATE tb_blog_comments SET status=2 WHERE id=%d;" % root_id)
+    request(base, route, 404, "POST", json.dumps(payload).encode(), headers)
+    request(base, route, 404, headers=headers)
+    sql("UPDATE tb_blog_comments SET status=0 WHERE id=%d;" % root_id)
+    check("direct replies real roles/whitelist, visible root, same-post relation, large-ID cursor and first-level isolation")
+
+    # Compatibility with a legacy NULL aggregate counter, without historical recounting.
+    sql("UPDATE tb_blog SET comments=NULL WHERE id=%d;" % blog_id)
+    request(base, route, 200, "POST", b'{"content":"NULL counter reply"}', headers)
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == "1"
+    original_count = sql("SELECT COUNT(*) FROM tb_blog_comments;")
+    for name, definition in (
+            ("synthetic_reply_counter_failure", "BEFORE UPDATE ON tb_blog FOR EACH ROW "
+             "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private reply counter failure'"),
+            ("synthetic_reply_insert_failure", "BEFORE INSERT ON tb_blog_comments FOR EACH ROW "
+             "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private reply insert failure'")):
+        sql("CREATE TRIGGER " + name + " " + definition + ";")
+        try:
+            result, _ = request(base, route, 500, "POST", json.dumps(payload).encode(), headers)
+            result = json.loads(result)
+            assert result["success"] is False and result["errorCode"] == "INTERNAL_ERROR"
+            assert "synthetic private" not in json.dumps(result)
+            assert sql("SELECT COUNT(*) FROM tb_blog_comments;") == original_count
+            assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == "1"
+        finally:
+            sql("DROP TRIGGER " + name + ";")
+    check("direct reply NULL counter and insert/counter faults are atomic with generic HTTP errors")
+
+
 def cleanup():
     try:
         compose("--profile", "app", "logs", "--no-color", timeout=30)
@@ -353,6 +472,7 @@ def main():
             redis("EXPIRE", "login:token:" + token, "600")
         verify_campus_posts(base, tokens)
         verify_first_level_comments(base, tokens)
+        verify_direct_comment_replies(base, tokens)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

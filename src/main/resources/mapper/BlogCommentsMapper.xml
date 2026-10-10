@@ -10,6 +10,21 @@
     <update id="incrementCommentCount" timeout="5">
         UPDATE tb_blog SET comments = COALESCE(comments, 0) + 1 WHERE id = #{blogId}
     </update>
+    <select id="findVisibleRoot" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id FROM tb_blog_comments
+        WHERE id = #{commentId} AND parent_id = 0 AND answer_id = 0 AND status = 0
+    </select>
+    <select id="lockVisibleRoot" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id FROM tb_blog_comments
+        WHERE id = #{commentId} AND blog_id = #{blogId} AND parent_id = 0 AND answer_id = 0 AND status = 0
+        FOR UPDATE
+    </select>
+    <select id="findDirectReplies" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id, user_id, content, create_time FROM tb_blog_comments
+        WHERE blog_id = #{blogId} AND parent_id = #{commentId} AND answer_id = #{commentId} AND status = 0
+        <if test="beforeId != null">AND id &lt; #{beforeId}</if>
+        ORDER BY id DESC LIMIT #{limit}
+    </select>
     <select id="findFirstLevelComments" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
         SELECT id, blog_id, user_id, content, create_time
         FROM tb_blog_comments

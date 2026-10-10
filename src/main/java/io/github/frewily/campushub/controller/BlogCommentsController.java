@@ -3,6 +3,7 @@ package io.github.frewily.campushub.controller;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.request.BlogCommentCreateRequest;
 import io.github.frewily.campushub.dto.request.BlogCommentPageRequest;
+import io.github.frewily.campushub.dto.request.BlogCommentReplyRequest;
 import io.github.frewily.campushub.service.IBlogCommentsService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
@@ -37,5 +38,18 @@ public class BlogCommentsController {
     public Result listComments(@Positive @PathVariable("blogId") Long blogId,
                                @Valid @ModelAttribute BlogCommentPageRequest request) {
         return Result.ok(blogCommentsService.listComments(blogId, request));
+    }
+
+    @PostMapping("/{commentId}/replies")
+    @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
+    public Result createReply(@Positive @PathVariable("commentId") Long commentId,
+                              @Valid @NotNull @RequestBody BlogCommentReplyRequest request) {
+        return Result.ok(blogCommentsService.createReply(commentId, request));
+    }
+
+    @GetMapping("/{commentId}/replies")
+    public Result listReplies(@Positive @PathVariable("commentId") Long commentId,
+                             @Valid @ModelAttribute BlogCommentPageRequest request) {
+        return Result.ok(blogCommentsService.listReplies(commentId, request));
     }
 }
