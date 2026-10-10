@@ -65,7 +65,7 @@ Controller：[BlogController.java](../../src/main/java/io/github/frewily/campush
 
 | Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
 |---|---|---|---|---|
-| POST | `/blog` | [`saveBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L33)；需认证；允许 USER、MERCHANT、ADMIN | JSON `BlogCreateRequest`：`shopId` 必填正数；`title` 非空、≤255；`images`、`content` 非空且各≤2048；未知字段忽略 | 返回新 Blog ID；输入映射为 `Blog` Entity，发布者 ID 从会话取得，liked/comments 初始化为 0 |
+| POST | `/blog` | [`saveBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L33)；需认证；允许 USER、MERCHANT、ADMIN | JSON `BlogCreateRequest`：`shopId` 可省略/null（校园动态），提供则须为正数；`title` 非空、≤255；`images`、`content` 非空且各≤2048；未知字段忽略 | 返回新 Blog ID；发布者从会话取得，liked/comments 初始化为 0；读取无关联动态时 shopId 可因 NON_NULL 省略。7A 需先应用 V006；关联不代表商户身份，未新增门店存在性验证 |
 | PUT | `/blog/like/{id}` | [`likeBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L39)；需认证；允许 USER、MERCHANT、ADMIN | Path `id` 动态 ID 正数；无 body | 成功无 data；点赞/取消点赞切换。服务未对不存在的 ID 单独报 404 |
 | GET | `/blog/of/me` | [`queryMyBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L44)；需认证 | Query `current` 默认 1 且 ≥1 | `List<Blog>` Entity，按当前用户分页（每页最多 10）；无记录为空数组 |
 | GET | `/blog/hot` | [`queryHotBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L54)；公开 | Query `current` 默认 1 且 ≥1 | `List<Blog>` Entity，按 liked 倒序（每页最多 10），附用户昵称/头像和当前用户点赞标记；匿名标记为 false；无记录为空数组 |

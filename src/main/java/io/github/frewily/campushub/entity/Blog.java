@@ -25,7 +25,7 @@ public class Blog implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
     /**
-     * 商户id
+     * 可选关联门店id；NULL 表示普通校园动态
      */
     private Long shopId;
     /**

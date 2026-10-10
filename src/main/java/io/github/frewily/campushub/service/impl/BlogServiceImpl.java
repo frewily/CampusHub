@@ -147,8 +147,8 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Override
     public Result saveBlog(Blog blog) {
-        if (blog.getShopId() == null) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "门店ID不能为空");
+        if (blog.getShopId() != null && blog.getShopId() <= 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "门店ID必须为正数");
         }
         if (blog.getTitle() == null || blog.getTitle().trim().isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "标题不能为空");

@@ -26,7 +26,7 @@ Compose 为 MySQL 设置 `--default-time-zone=+00:00`，数据库 JDBC URL 同�
 
 ## Fresh bootstrap 不是旧库迁移
 
-MySQL 服务把 `schema.sql`、`seed.sql`、V001–V005 迁移文件只读挂入 `/opt/campushub/db`，把 `00-bootstrap.sh` 单独挂入官方初始化目录。MySQL 官方镜像的初始化目录仅在数据目录为空的首次初始化流程中执行。脚本还自行检查 `campushub` 中现有表数，非空时拒绝继续，然后按顺序建 fresh schema、应用五个迁移并载入种子数据。
+MySQL 服务把 `schema.sql`、`seed.sql`、V001–V006 迁移文件只读挂入 `/opt/campushub/db`，把 `00-bootstrap.sh` 单独挂入官方初始化目录。MySQL 官方镜像的初始化目录仅在数据目录为空的首次初始化流程中执行。脚本还自行检查 `campushub` 中现有表数，非空时拒绝继续，然后按顺序建 fresh schema、应用六个迁移并载入种子数据。7A 新增 V006 允许动态门店关联为空，既有卷必须另行审查并先应用迁移后升级应用，见[发布/回退顺序](campus-post-store-association.md)。
 
 因此这是一条针对全新 `mysql-data` 卷的 CampusHub 引导路径，不是把旧 `hmdp` 数据自动搬迁、改名或兼容升级的工具。已有非空库不会因重新启动容器而重放这些文件；对旧数据需要另行制定备份、结构差异核对、数据转换、迁移顺序与回滚方案。不要把“初始化脚本可重复挂载”表述成“初始化会在每次启动重跑”。
 

@@ -19,6 +19,7 @@
 - Phase 3A 保留旧库存/参与 key 和 `stream.orders` 事件字段，新增活动规则与原订单 ID 映射 key；旧活动若只有库存 key，不会自动补齐规则或重置库存。
 - 抢购成功仍以数字 ID 放在 `data`，增量返回 `acceptanceStatus=ACCEPTED` 和 `replayed`。这仅表示 Redis Stream 已受理。活动状态、时间、资格与库存拒绝改为明确错误码；超时/规则异常返回 503，详情见 [Phase 3A 记录](../refactor/10-phase-3a-flash-sale-admission.md)。
 - 旧业务类名如 `Shop`、`Blog`、`Voucher` 暂时保留，并按领域模型中的映射逐阶段迁移。
+- Phase 7A 保留 POST /blog 和旧带门店的请求，新增省略/null shopId 的校园动态；提供则必须为正数，其他字段和角色约束不变。先应用 V006 再升级应用；客户端要能处理读取时缺省的 shopId，已有无关联动态时不能直接恢复 NOT NULL。见[可选门店关联](campus-post-store-association.md)。
 
 这些名称属于现有数据和接口的兼容约束，不再代表项目产品身份。后续修改必须配套数据迁移、接口版本边界或 Redis 读写过渡，不能只做字符串替换。
 

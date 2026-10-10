@@ -1,6 +1,6 @@
 # CampusHub 当前 API 目录
 
-本目录以应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 的源码为准，记录当前可注册的接口，不把目标领域图或未来后台当已实现。应用端共有 **37 个显式 method/path 映射**（含健康和图片），来自 11 个有方法映射的 Controller；另一个空的评论 Controller 不产生接口。管理面另列两个 GET，不混入应用端数量。
+机器清单在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 建立；参数/响应说明随业务阶段更新，7A 已将动态的门店关联改为可选，见[阶段记录](../refactor/23-phase-7a-campus-posts.md)。当前仍有 **37 个显式 method/path 映射**（含健康和图片），来自 11 个有方法映射的 Controller；另一个空的评论 Controller 不产生接口。管理面另列两个 GET，不混入应用端数量，不把未来后台当已实现。
 
 - [逐接口目录](endpoints.md)：方法、路径、身份/资源限制、参数、响应与缺失资源语义，链接 Controller、Service 和模型。
 - [机器清单](routes.json)：method/path、Controller、handler 与声明的 `preAuthorize` 原文，用于回归。空字符串仅表示没有该注解，**不代表匿名可访问**；仍受 SecurityConfig 和服务层授权约束。
@@ -48,7 +48,7 @@ JSON 写入使用 `Content-Type: application/json`；上传用 multipart 字段 
 
 活动受理成功是 HTTP 200、`acceptanceStatus=ACCEPTED`，新受理 `replayed=false`，原单重放 `replayed=true` 且同一 orderId；不是落库、支付或完成核销。取消的 DB 状态成功也不等于 Redis 补偿已完成。详细状态与示例见 [准入](../refactor/10-phase-3a-flash-sale-admission.md)、[订单生命周期](../refactor/12-phase-3c-order-lifecycle.md)。日期/时间格式与单位以具体模型为准，LocalDateTime 本身不携带时区，不能自动当所有接口都是带 Z 的 UTC 时间戳。
 
-本阶段未改请求字段、字段忽略/部分更新语义、HTTP 路径、错误状态或版本。优先写接口的字段白名单见 [API 模型说明](../refactor/09-phase-2d-api-models.md)；额外实体字段可能被忽略，而非统一拒绝。无普通券支付/领券闭环、没有自动超时取消或退款 API。
+优先写接口的字段白名单见 [API 模型说明](../refactor/09-phase-2d-api-models.md)；额外实体字段可能被忽略，而非统一拒绝。7A 仅将 POST /blog 的 shopId 改为省略/null 或正数，其余字段要求、路径和角色不变；无关联动态的响应可能省略 shopId，客户端应适配。部署前先应用 V006，不能只升级应用。无普通券支付/领券闭环、没有自动超时取消或退款 API。
 
 ## 管理面与图片边界
 

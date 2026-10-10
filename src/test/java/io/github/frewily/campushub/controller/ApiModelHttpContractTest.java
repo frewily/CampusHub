@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -115,7 +116,26 @@ class ApiModelHttpContractTest {
         assertNull(blog.getCreateTime());
         assertEquals(0, blog.getLiked());
         assertEquals(0, blog.getComments());
+        assertEquals(11L, blog.getShopId());
         assertEquals("Good", blog.getContent());
+    }
+
+    @Test
+    void publishBlogAcceptsOmittedOrNullShopId() throws Exception {
+        when(blogService.saveBlog(any())).thenReturn(Result.ok(22L));
+        String fields = "\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"";
+
+        mockMvc.perform(post("/blog").contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + fields + "}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data").value(22));
+        mockMvc.perform(post("/blog").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"shopId\":null," + fields + "}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data").value(22));
+
+        ArgumentCaptor<Blog> captor = ArgumentCaptor.forClass(Blog.class);
+        verify(blogService, times(2)).saveBlog(captor.capture());
+        assertNull(captor.getAllValues().get(0).getShopId());
+        assertNull(captor.getAllValues().get(1).getShopId());
     }
 
     @Test
@@ -192,6 +212,9 @@ class ApiModelHttpContractTest {
     }
 
     static Stream<Arguments> invalidRequests() {
+        String validBlogFields = "\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"";
+        String tooLongTitle = String.join("", Collections.nCopies(256, "x"));
+        String tooLongText = String.join("", Collections.nCopies(2049, "x"));
         return Stream.of(
                 Arguments.of("POST", "/shop", "{}"),
                 Arguments.of("POST", "/shop", "{" + SHOP.replace("Campus Cafe", " ") + "}"),
@@ -201,6 +224,14 @@ class ApiModelHttpContractTest {
                 Arguments.of("PUT", "/shop", "{\"name\":\"Cafe\"}"),
                 Arguments.of("PUT", "/shop", "{\"id\":-1}"),
                 Arguments.of("PUT", "/shop", "{\"id\":11,\"name\":\" \"}"),
+                Arguments.of("POST", "/blog", "{\"shopId\":0," + validBlogFields + "}"),
+                Arguments.of("POST", "/blog", "{\"shopId\":-1," + validBlogFields + "}"),
+                Arguments.of("POST", "/blog", "{\"title\":\" \",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"}"),
+                Arguments.of("POST", "/blog", "{\"title\":\"" + tooLongTitle + "\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"}"),
+                Arguments.of("POST", "/blog", "{\"title\":\"Lunch\",\"images\":\" \",\"content\":\"Good\"}"),
+                Arguments.of("POST", "/blog", "{\"title\":\"Lunch\",\"images\":\"" + tooLongText + "\",\"content\":\"Good\"}"),
+                Arguments.of("POST", "/blog", "{\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\" \"}"),
+                Arguments.of("POST", "/blog", "{\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"" + tooLongText + "\"}"),
                 Arguments.of("POST", "/blog", "{\"shopId\":11,\"title\":\"Lunch\"}"),
                 Arguments.of("POST", "/voucher", "{" + VOUCHER.replace("\"payValue\":100", "\"payValue\":-1") + "}"),
                 Arguments.of("POST", "/voucher", "{" + VOUCHER.replace("Coupon", " ") + "}"),

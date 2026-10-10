@@ -8,8 +8,8 @@ import javax.validation.constraints.*;
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class BlogCreateRequest {
-    @NotNull(message = "门店ID不能为空")
-    @Positive
+    // Omitted/null means a campus post; a supplied association must remain positive.
+    @Positive(message = "门店ID必须为正数")
     private Long shopId;
     @NotBlank(message = "标题不能为空")
     @Size(max = 255)

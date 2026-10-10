@@ -163,6 +163,49 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_campus_posts(base, tokens):
+    """Synthetic HTTP -> real DB/Redis acceptance, not a load or delivery guarantee."""
+    sql("INSERT INTO tb_follow(user_id,follow_user_id) VALUES(900002,900001);")
+    payload = {"title": "synthetic campus post", "images": "/imgs/synthetic.png",
+               "content": "synthetic campus content", "id": 999999, "userId": 900002,
+               "liked": 99, "comments": 88}
+    headers = {"Content-Type": "application/json", "authorization": tokens[0]}
+    body = json.dumps(payload).encode()
+    request(base, "/blog", 401, "POST", body, {"Content-Type": "application/json"})
+    assert sql("SELECT COUNT(*) FROM tb_blog;") == "0"
+    response, _ = request(base, "/blog", 200, "POST", body, headers)
+    first = json.loads(response)["data"]
+    assert type(first) is int and first > 0 and first != 999999
+    assert sql("SELECT COUNT(*) FROM tb_blog WHERE id=%d AND shop_id IS NULL "
+               "AND user_id=900001 AND liked=0 AND comments=0;" % first) == "1"
+    detail, _ = request(base, "/blog/%d" % first, headers=headers)
+    detail = json.loads(detail)["data"]
+    assert detail["id"] == first and detail["userId"] == 900001 and "shopId" not in detail
+    assert redis("ZSCORE", "feed:900002", str(first)) != ""
+    feed, _ = request(base, "/blog/of/follow?lastId=%d&offset=0" % (int(time.time() * 1000) + 60000),
+                      headers={"authorization": tokens[1]})
+    assert [row["id"] for row in json.loads(feed)["data"]["list"]] == [first]
+    ids = {first}
+    for shop_id in (None, 1):
+        payload["shopId"] = shop_id
+        response, _ = request(base, "/blog", 200, "POST", json.dumps(payload).encode(), headers)
+        post_id = json.loads(response)["data"]
+        assert type(post_id) is int and post_id > 0
+        assert post_id not in ids
+        ids.add(post_id)
+        stored = sql("SELECT COALESCE(CAST(shop_id AS CHAR),'NULL') FROM tb_blog WHERE id=%d;" % post_id)
+        assert stored == ("NULL" if shop_id is None else "1")
+    for route in ("/blog/of/me", "/blog/hot"):
+        response, _ = request(base, route, headers=headers)
+        assert {row["id"] for row in json.loads(response)["data"]} == ids
+    for shop_id in (0, -1):
+        payload["shopId"] = shop_id
+        response, _ = request(base, "/blog", 400, "POST", json.dumps(payload).encode(), headers)
+        assert json.loads(response)["errorCode"] == "VALIDATION_FAILED"
+    assert sql("SELECT COUNT(*) FROM tb_blog;") == "3"
+    check("campus posts omit/null store, legacy store publication, author whitelist, reads/Feed and invalid IDs")
+
+
 def cleanup():
     try:
         compose("--profile", "app", "logs", "--no-color", timeout=30)
@@ -203,13 +246,16 @@ def main():
         assert sql("SELECT COUNT(*) FROM tb_shop;") == "1"
         compose("exec", "-T", "mysql", "sh", "/docker-entrypoint-initdb.d/00-bootstrap.sh", expect_failure=True)
         assert sql("SELECT COUNT(*) FROM tb_shop;") == "1"
-        check("V001-V005 repeat and populated-database bootstrap refusal")
+        assert sql("SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() "
+                   "AND TABLE_NAME='tb_blog' AND COLUMN_NAME='shop_id';") == "YES"
+        check("V001-V006 repeat, nullable post store and populated-database bootstrap refusal")
         sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(900001,'00000000001','synthetic-user'),(900002,'00000000002','synthetic-admin');"
             "INSERT INTO tb_user_role(user_id,role) VALUES(900001,'USER'),(900002,'ADMIN');")
         tokens = ["synthetic-phase5-" + uuid.uuid4().hex for _ in range(2)]
         for user, token in zip((900001, 900002), tokens):
             redis("HSET", "login:token:" + token, "id", str(user), "nickName", "synthetic")
             redis("EXPIRE", "login:token:" + token, "600")
+        verify_campus_posts(base, tokens)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

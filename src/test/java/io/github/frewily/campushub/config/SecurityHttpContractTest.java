@@ -3,6 +3,7 @@ package io.github.frewily.campushub.config;
 import io.github.frewily.campushub.controller.UserController;
 import io.github.frewily.campushub.controller.ShopController;
 import io.github.frewily.campushub.controller.VoucherController;
+import io.github.frewily.campushub.controller.BlogController;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.mapper.AccountAccessMapper;
 import io.github.frewily.campushub.security.RedisTokenAuthenticationFilter;
@@ -12,6 +13,7 @@ import io.github.frewily.campushub.service.IUserInfoService;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.service.IShopService;
 import io.github.frewily.campushub.service.IVoucherService;
+import io.github.frewily.campushub.service.IBlogService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -31,6 +33,9 @@ import java.util.Map;
 
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_USER_KEY;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.times;
 import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -54,6 +59,8 @@ class SecurityHttpContractTest {
     @MockBean
     private IVoucherService voucherService;
     @MockBean
+    private IBlogService blogService;
+    @MockBean
     private StringRedisTemplate stringRedisTemplate;
     @MockBean
     private HashOperations<String, Object, Object> hashOperations;
@@ -66,6 +73,7 @@ class SecurityHttpContractTest {
             UserController.class,
             ShopController.class,
             VoucherController.class,
+            BlogController.class,
             GlobalExceptionHandler.class,
             SecurityConfig.class,
             SecurityErrorResponder.class,
@@ -82,6 +90,54 @@ class SecurityHttpContractTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"))
                 .andExpect(jsonPath("$.errorMsg").value("请先登录"));
+    }
+
+    @Test
+    void anonymousBlogPublishShouldRemainUnauthorizedWithoutCallingBusinessService() throws Exception {
+        mockMvc.perform(post("/blog").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+
+        verifyNoInteractions(blogService);
+    }
+
+    @Test
+    void activeUserMerchantAndAdminCanPublishBlogWithoutShop() throws Exception {
+        prepareSession("blog-user-token", 21L, "USER");
+        prepareSession("blog-merchant-token", 22L, "MERCHANT");
+        prepareSession("blog-admin-token", 23L, "ADMIN");
+        when(blogService.saveBlog(any())).thenReturn(Result.ok(31L));
+        String body = "{\"shopId\":null,\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"}";
+
+        for (String token : Arrays.asList("blog-user-token", "blog-merchant-token", "blog-admin-token")) {
+            mockMvc.perform(post("/blog").header("authorization", token)
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data").value(31));
+        }
+
+        verify(blogService, times(3)).saveBlog(any());
+    }
+
+    @Test
+    void disabledAccountCannotPublishBlogEvenWithValidSessionAndRole() throws Exception {
+        String token = "disabled-blog-token";
+        Map<Object, Object> session = new HashMap<>();
+        session.put("id", "24");
+        session.put("nickName", "disabled-user");
+        when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(LOGIN_USER_KEY + token)).thenReturn(session);
+        when(accountAccessMapper.findAccountStatus(24L)).thenReturn("DISABLED");
+        when(accountAccessMapper.findRoles(24L)).thenReturn(Arrays.asList("USER"));
+
+        mockMvc.perform(post("/blog").header("authorization", token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+
+        verifyNoInteractions(blogService);
     }
 
     @Test
