@@ -9,6 +9,7 @@ import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.dto.request.BlogCommentCreateRequest;
 import io.github.frewily.campushub.dto.request.BlogCommentPageRequest;
 import io.github.frewily.campushub.dto.request.BlogCommentReplyRequest;
+import io.github.frewily.campushub.dto.request.BlogCommentHideRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
 import io.github.frewily.campushub.exception.BusinessException;
@@ -172,6 +173,43 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
             // No cascade: descendants retain content/status and their authors can still withdraw them.
             if (baseMapper.withdrawFirstLevelComment(commentId, candidate.getBlogId(), user.getId()) != 1
                     || baseMapper.decrementCommentCount(candidate.getBlogId()) != 1) {
+                throw new BusinessException(ErrorCode.OPERATION_FAILED);
+            }
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void hideComment(Long commentId, BlogCommentHideRequest request) {
+        validateCommentId(commentId);
+        validate(request);
+        UserDTO operator = UserHolder.getUser();
+        if (operator == null || operator.getId() == null || operator.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        try {
+            // The dedicated HTTP entry is ADMIN-only; the operator is always the authenticated session.
+            BlogComments candidate = baseMapper.findModeratableFirstLevelComment(commentId);
+            if (candidate == null || baseMapper.lockBlog(candidate.getBlogId()) == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND);
+            }
+            // Same post-before-comment order as author withdrawal and reply creation; recheck current state.
+            BlogComments current = baseMapper.lockModeratableFirstLevelComment(commentId, candidate.getBlogId());
+            if (current == null) throw new BusinessException(ErrorCode.NOT_FOUND);
+            if (Integer.valueOf(2).equals(current.getStatus())) {
+                // Legacy status=2 without this use case's audit is not evidence of a completed operation.
+                if (baseMapper.findFirstLevelHideAudit(commentId, candidate.getBlogId()) == null) {
+                    throw new BusinessException(ErrorCode.NOT_FOUND);
+                }
+                return;
+            }
+            // Preserve original content and all descendants; first successful operator/reason wins.
+            if (baseMapper.hideFirstLevelComment(commentId, candidate.getBlogId()) != 1
+                    || baseMapper.decrementCommentCount(candidate.getBlogId()) != 1
+                    || baseMapper.insertFirstLevelHideAudit(commentId, candidate.getBlogId(),
+                            operator.getId(), request.getReason()) != 1) {
                 throw new BusinessException(ErrorCode.OPERATION_FAILED);
             }
         } catch (DataAccessException error) {

@@ -56,6 +56,28 @@
         WHERE id = #{commentId} AND blog_id = #{blogId} AND user_id = #{userId}
           AND parent_id = 0 AND answer_id = 0 AND status = 0
     </update>
+    <select id="findModeratableFirstLevelComment" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id FROM tb_blog_comments
+        WHERE id = #{commentId} AND parent_id = 0 AND answer_id = 0 AND status IN (0, 2)
+    </select>
+    <select id="lockModeratableFirstLevelComment" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id, status FROM tb_blog_comments
+        WHERE id = #{commentId} AND blog_id = #{blogId} AND parent_id = 0 AND answer_id = 0 AND status IN (0, 2)
+        FOR UPDATE
+    </select>
+    <update id="hideFirstLevelComment" timeout="5">
+        UPDATE tb_blog_comments SET status = 2
+        WHERE id = #{commentId} AND blog_id = #{blogId} AND parent_id = 0 AND answer_id = 0 AND status = 0
+    </update>
+    <select id="findFirstLevelHideAudit" resultType="long" timeout="5">
+        SELECT id FROM tb_blog_comment_hide_audit
+        WHERE comment_id = #{commentId} AND blog_id = #{blogId} AND from_status = 0 AND to_status = 2
+        FOR UPDATE
+    </select>
+    <insert id="insertFirstLevelHideAudit" timeout="5">
+        INSERT INTO tb_blog_comment_hide_audit (comment_id, blog_id, operator_user_id, reason, from_status, to_status)
+        VALUES (#{commentId}, #{blogId}, #{operatorUserId}, #{reason}, 0, 2)
+    </insert>
     <select id="findDirectReplies" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
         SELECT id, blog_id, user_id, content, create_time FROM tb_blog_comments
         WHERE blog_id = #{blogId} AND parent_id = #{commentId} AND answer_id = #{commentId} AND status = 0

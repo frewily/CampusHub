@@ -4,7 +4,7 @@
 
 本文定义 CampusHub 从点评教学项目演进为校园生活与商户服务平台时采用的统一业务语言、实体关系、核心规则、权限边界和旧数据映射。它是 Phase 1A 的设计结论，不在本阶段修改 Java 类、数据库表、接口或运行行为。
 
-后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog）。Phase 7B 已按[阶段记录](refactor/24-phase-7b-comments.md)落地一级评论（V007），Phase 7C 增加[一层直接回复](refactor/25-phase-7c-comment-replies.md)；多级回复、删除、审核、通知、点赞持久化和完整后台仍未实现。
+后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog）。Phase 7B 已按[阶段记录](refactor/24-phase-7b-comments.md)落地一级评论（V007），Phase 7C 增加[一层直接回复](refactor/25-phase-7c-comment-replies.md)，7D/7E 增加作者本人逻辑撤回，7F 增加[ADMIN 隐藏一级评论及审计](refactor/28-phase-7f-comment-moderation.md)（V008）。仍未实现多级回复、恢复、回复审核、举报工作流、通知、点赞持久化和完整管理后台。
 
 CampusHub 继续采用模块化单体。第一版按单校园场景设计，不引入多租户或 `Campus` 表；当系统出现跨校数据隔离、不同校区运营或独立管理员等真实需求时，再增加校园维度。当前重点是把“账号、商户主体、门店、内容、活动和订单”分清，而不是机械替换 `Shop`、`Blog`、`Voucher` 等名称。
 
@@ -29,7 +29,7 @@ CampusHub 继续采用模块化单体。第一版按单校园场景设计，不�
 | Store | 用户可浏览、搜索和到店消费的门店 | `Shop`、`tb_shop` | 先保持表和接口兼容，Phase 1C 再迁移代码身份 |
 | StoreCategory | 门店分类 | `ShopType`、`tb_shop_type` | 保留语义，后续改名 |
 | Post | 校园动态或与门店关联的内容 | `Blog`、`tb_blog` | 先修 Feed，再迁移名称与请求响应边界 |
-| Comment | 对动态的一级评论及一层直接回复 | `BlogComments`、`tb_blog_comments` | 7B/7C 创建和可见列表读取，7D/7E 本人回复/一级评论逻辑撤回；多级回复/级联或物理删除/审核待后续设计 |
+| Comment | 对动态的一级评论及一层直接回复 | `BlogComments`、`tb_blog_comments` | 7B/7C 创建和可见列表读取，7D/7E 作者本人逻辑撤回，7F ADMIN 隐藏一级评论并记审计；多级回复/级联或物理删除/恢复/回复审核与举报工作流待后续设计 |
 | Follow | 用户对用户的关注关系 | `Follow`、`tb_follow` | MySQL 为事实来源，Redis 仅加速 |
 | PostLike | 用户对动态的点赞关系 | Redis ZSet 和 `tb_blog.liked` 计数 | 后续增加持久化关系，计数作为派生值 |
 | FeedEntry | 用户 Feed 收件箱中的动态投影 | Redis ZSet | 不是独立业务事实，可由关注与动态重建 |
@@ -91,9 +91,11 @@ Store 保存名称、分类、图片、地址、坐标、营业时间和展示�
 
 7B 的一级评论写入 `parent_id=answer_id=0`；7C 的直接回复只接受正常一级评论为目标，blog_id 从根评论派生，parent_id=answer_id=根评论 ID，作者来自会话，liked/status=0。两类列表独立按 ID 倒序游标查询，回复不混入一级列表。写回复先锁动态后锁根评论，当前读复核根状态；不实现多级回复，不将旧字段直接视为完整业务能力。
 
-7D 的 `DELETE /blog-comments/replies/{replyId}` 是本人直接回复逻辑撤回：所有角色均只可操作本人符合 parent_id>0、answer_id=parent_id 的 0/3 状态行，要求动态存在，不要求父评论仍存在/可见（包括本人符合格式的旧孤立回复）。先锁动态，再当前读锁回复并复核归属/关系/状态；0→3 和计数递减同事务，3 重复不扣计数。保留原文，无物理删除、恢复或管理员审核。NULL/0 计数下限为 0，不回填历史，不保证聚合等于可见数。规则及回退限制见[回复撤回笔记](learning/direct-reply-withdrawal.md)。
+7D 的 `DELETE /blog-comments/replies/{replyId}` 是本人直接回复逻辑撤回：所有角色均只可操作本人符合 parent_id>0、answer_id=parent_id 的 0/3 状态行，要求动态存在，不要求父评论仍存在/可见（包括本人符合格式的旧孤立回复）。先锁动态，再当前读锁回复并复核归属/关系/状态；0→3 和计数递减同事务，3 重复不扣计数。保留原文，无物理删除、恢复或回复审核。NULL/0 计数下限为 0，不回填历史，不保证聚合等于可见数。规则及回退限制见[回复撤回笔记](learning/direct-reply-withdrawal.md)。
 
-7E 的 `DELETE /blog-comments/{commentId}` 是本人一级评论撤回：作者及 parent_id=answer_id=0、status 0/3、动态存在同时成立。保持相同锁顺序/当前读复核，根 0→3 和减一同事务，重复不扣。保留全部回复行/状态，不级联修改或扣回复数；撤回根从一级列表排除，其下新请求的回复读取/创建为 404，回复作者仍可用 7D 独立撤回。管理员和商户也仅本人，不扩展恢复/审核。并发只读快照可能看见旧版本，细节见[一级评论撤回笔记](learning/first-level-comment-withdrawal.md)。
+7E 的 `DELETE /blog-comments/{commentId}` 是本人一级评论撤回：作者及 parent_id=answer_id=0、status 0/3、动态存在同时成立。保持相同锁顺序/当前读复核，根 0→3 和减一同事务，重复不扣。保留全部回复行/状态，不级联修改或扣回复数；撤回根从一级列表排除，其下新请求的回复读取/创建为 404，回复作者仍可用 7D 独立撤回。管理员和商户也仅本人，不扩展恢复/回复审核。并发只读快照可能看见旧版本，细节见[一级评论撤回笔记](learning/first-level-comment-withdrawal.md)。
+
+7F 的 `POST /admin/blog-comments/{commentId}/hide` 是独立于 Actuator 管理监听器的 ADMIN 应用端能力。只接受正 Java Long 评论 ID 和非空白 `reason`（最多 255 个 Java UTF-16 单元）；未知 JSON 字段忽略，操作人取登录会话。隐藏只针对存在动态下的正常一级评论，作者不限制；普通 USER/MERCHANT 即使是作者也返回 403。先锁动态，再当前读锁根评论；状态 0→2、动态评论数递减（NULL/0 下限为 0）和写入 V008 审计行在同一事务。任一写入影响行数不是 1 即回滚并返回 422，数据访问异常映射为不含原因的通用 500。只有 status=2 且存在 comment/blog/from=0/to=2 匹配审计行时重复请求才成功，不修改首次操作人/原因、不再次扣数；无匹配审计、status 1/3/NULL、回复、无效关系或缺失动态均为 404。保留根评论原文与全部回复行/状态，不级联或修改回复计数；根从一级列表排除，其下新回复读取/创建为 404，回复作者仍可独立撤回，根作者不能撤回 status=2。V008 不回填旧 status=2 记录；回退应用不恢复状态/计数，保留审计表和数据。审计不是防篡改证据，也没有受保护的导出 API、内容快照、外键或恢复流程。并发 RR 普通读可能看到旧快照；回复创建若先拿到动态锁可能先完成。范围和迁移边界见[7F 阶段记录](refactor/28-phase-7f-comment-moderation.md)。
 
 `Follow` 只表示账号关注账号，禁止自己关注自己；同一 `(follower_id, followee_id)` 只能存在一次。MySQL 保存关系事实，Redis 集合或有序集合只能作为查询加速，结构必须统一。
 
@@ -119,7 +121,7 @@ Notification 只定义为未来独立模块。只有在订单状态、活动结�
 
 ## 4 角色与资源权限
 
-下表是目标权限边界，并非全部已实现 API。当前 7D/7E 回复/一级评论逻辑撤回对 USER/MERCHANT/ADMIN 一律仅本人，无商户内容或管理员覆盖；动态编辑、级联/物理删除、恢复与审核仍未实现。
+下表是目标权限边界，并非全部已实现 API。当前 7D/7E 回复/一级评论逻辑撤回对 USER/MERCHANT/ADMIN 一律仅本人，无商户内容或管理员覆盖；7F 只增加 ADMIN 隐藏正常一级评论。动态编辑、级联/物理删除、恢复、回复审核、举报工作流和完整审核后台仍未实现。
 
 | 操作 | 匿名用户 | USER | MERCHANT | ADMIN |
 | --- | --- | --- | --- | --- |
@@ -127,6 +129,7 @@ Notification 只定义为未来独立模块。只有在订单状态、活动结�
 | 管理本人资料和会话 | 不允许 | 仅本人 | 仅本人 | 仅本人 |
 | 发布普通校园动态、评论、关注和点赞 | 不允许 | 允许 | 允许 | 允许 |
 | 修改或删除动态、评论 | 不允许 | 仅本人 | 仅本人或所属商户内容 | 可按审核规则处理 |
+| 隐藏正常一级评论（7F） | 不允许 | 不允许 | 不允许 | 允许；作者身份不影响管理权限 |
 | 签到、参与活动、查看订单 | 不允许 | 仅本人 | 以用户身份仅本人 | 仅管理接口，不能冒充用户下单 |
 | 创建或修改门店 | 不允许 | 不允许 | 仅有效成员所属 Merchant 的 Store | 允许审核和平台管理 |
 | 创建、上下架活动 | 不允许 | 不允许 | 仅所属 Store | 允许审核和平台管理 |
