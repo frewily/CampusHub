@@ -18,4 +18,6 @@ public interface IBlogCommentsService extends IService<BlogComments> {
     BlogCommentPage listReplies(Long commentId, BlogCommentPageRequest request);
 
     void withdrawReply(Long replyId);
+
+    void withdrawComment(Long commentId);
 }

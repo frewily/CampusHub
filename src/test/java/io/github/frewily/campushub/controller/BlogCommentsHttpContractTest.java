@@ -321,6 +321,51 @@ class BlogCommentsHttpContractTest {
         org.mockito.Mockito.verifyNoMoreInteractions(commentsService);
     }
 
+    @Test
+    void withdrawCommentAcceptsPositive64BitIdAndOmitsSuccessData() throws Exception {
+        prepareUserSession();
+
+        mockMvc.perform(delete("/blog-comments/9007199254740995").header("authorization", "token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(commentsService).withdrawComment(9007199254740995L);
+        org.mockito.Mockito.verifyNoMoreInteractions(commentsService);
+    }
+
+    @Test
+    void invalidWithdrawCommentIdsAreRejectedBeforeServiceCall() throws Exception {
+        prepareUserSession();
+        for (String path : new String[]{"/blog-comments/0", "/blog-comments/-1",
+                "/blog-comments/not-a-number", "/blog-comments/9223372036854775808"}) {
+            mockMvc.perform(delete(path).header("authorization", "token")).andExpect(status().isBadRequest());
+        }
+        verifyNoInteractions(commentsService);
+    }
+
+    @Test
+    void withdrawCommentBusinessErrorsKeepTheirHttpMappings() throws Exception {
+        prepareUserSession();
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.NOT_FOUND))
+                .when(commentsService).withdrawComment(41L);
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.OPERATION_FAILED))
+                .when(commentsService).withdrawComment(42L);
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.INTERNAL_ERROR))
+                .when(commentsService).withdrawComment(43L);
+
+        mockMvc.perform(delete("/blog-comments/41").header("authorization", "token"))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.errorCode").value("NOT_FOUND"));
+        mockMvc.perform(delete("/blog-comments/42").header("authorization", "token"))
+                .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.errorCode").value("OPERATION_FAILED"));
+        mockMvc.perform(delete("/blog-comments/43").header("authorization", "token"))
+                .andExpect(status().isInternalServerError()).andExpect(jsonPath("$.errorCode").value("INTERNAL_ERROR"));
+        verify(commentsService).withdrawComment(41L);
+        verify(commentsService).withdrawComment(42L);
+        verify(commentsService).withdrawComment(43L);
+        org.mockito.Mockito.verifyNoMoreInteractions(commentsService);
+    }
+
     private void prepareUserSession() {
         when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
         java.util.Map<Object, Object> session = new java.util.HashMap<>();

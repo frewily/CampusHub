@@ -1,6 +1,6 @@
 # CampusHub 当前 API 目录
 
-机器清单在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 建立；这是目录初建来源，不表示该提交包含后续路由。参数/响应说明随业务阶段更新：7A 允许动态不关联门店，7B 增加一级评论，7C 增加一层直接回复，7D 增加本人回复撤回，见[7A](../refactor/23-phase-7a-campus-posts.md)、[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)和[7D](../refactor/26-phase-7d-reply-withdrawal.md)。当前有 **42 个显式 method/path 映射**（含健康和图片），来自 12 个 Controller。管理面另列两个 GET，不混入应用端数量，不把未来后台当已实现。
+机器清单在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 建立；这是目录初建来源，不表示该提交包含后续路由。参数/响应说明随业务阶段更新：7A 校园动态，7B 一级评论，7C 直接回复，7D/7E 本人回复/一级评论撤回，见[7A](../refactor/23-phase-7a-campus-posts.md)、[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)、[7D](../refactor/26-phase-7d-reply-withdrawal.md)和[7E](../refactor/27-phase-7e-comment-withdrawal.md)。当前有 **43 个显式 method/path 映射**（含健康和图片），来自 12 个 Controller。管理面另列两个 GET，不混入应用端数量，不把未来后台当已实现。
 
 - [逐接口目录](endpoints.md)：方法、路径、身份/资源限制、参数、响应与缺失资源语义，链接 Controller、Service 和模型。
 - [机器清单](routes.json)：method/path、Controller、handler 与声明的 `preAuthorize` 原文，用于回归。空字符串仅表示没有该注解，**不代表匿名可访问**；仍受 SecurityConfig 和服务层授权约束。
@@ -48,7 +48,7 @@ JSON 写入使用 `Content-Type: application/json`；上传用 multipart 字段 
 
 活动受理成功是 HTTP 200、`acceptanceStatus=ACCEPTED`，新受理 `replayed=false`，原单重放 `replayed=true` 且同一 orderId；不是落库、支付或完成核销。取消的 DB 状态成功也不等于 Redis 补偿已完成。详细状态与示例见 [准入](../refactor/10-phase-3a-flash-sale-admission.md)、[订单生命周期](../refactor/12-phase-3c-order-lifecycle.md)。日期/时间格式与单位以具体模型为准，LocalDateTime 本身不携带时区，不能自动当所有接口都是带 Z 的 UTC 时间戳。
 
-优先写接口的字段白名单见 [API 模型说明](../refactor/09-phase-2d-api-models.md)；额外实体字段可能被忽略，而非统一拒绝。7A 仅将 POST /blog 的 shopId 改为省略/null 或正数，其余字段要求、路径和角色不变；无关联动态的响应可能省略 shopId，客户端应适配。7B/7C 支持一级评论/直接回复，7D 仅增加作者直接回复撤回（0→3、保留原文、重复不扣计数），不提供多级回复、一级评论删除或审核。7C/7D 无新结构迁移，但部署前仍需具备 V006/V007；3 是已有 TINYINT 的新应用语义，旧版本仅查 status=0，回退不会恢复已撤回内容或计数，未来工具不得把 3 当作 2。无普通券支付/领券闭环、没有自动超时取消或退款 API。
+优先写接口的字段白名单见 [API 模型说明](../refactor/09-phase-2d-api-models.md)；额外实体字段可能被忽略，而非统一拒绝。7A 仅将 POST /blog 的 shopId 改为省略/null 或正数，其余字段要求、路径和角色不变；无关联动态的响应可能省略 shopId，客户端应适配。7B/7C 支持一级评论/直接回复，7D/7E 分别增加作者本人回复/一级评论撤回（0→3、保留原文、重复不扣计数），无级联/物理删除、恢复、多级回复或审核。7C–7E 无新结构迁移，但部署前仍需具备 V006/V007；3 是已有 TINYINT 的撤回语义，旧版本仅查 status=0，回退不会恢复已撤回内容状态或计数，未来工具不得把 3 当作 2。根撤回只扣一，保留回复状态和其作者独立撤回入口，根下回复列表/创建随后为 404。无普通券支付/领券闭环、没有自动超时取消或退款 API。
 
 ## 管理面与图片边界
 
@@ -65,6 +65,6 @@ Java 8，使用当前已有 Maven 依赖：
 ./mvnw clean package
 ```
 
-[ApiInventoryContractTest](../../src/test/java/io/github/frewily/campushub/controller/ApiInventoryContractTest.java) 自动扫描主源码产物中的 Controller（排除测试探针），注册到 standalone Spring MVC，将实际 method/path、handler 与方法级授权声明逐项对照 routes.json，再检查逐接口表格没有缺失、多写或重复。遗漏、新增、授权声明变化和重复清单有负向门禁；另明确断言五条评论/回复/撤回映射及其方法级授权声明。测试不发请求、不启用安全过滤链、不连接 DB/Redis、不启动 worker。
+[ApiInventoryContractTest](../../src/test/java/io/github/frewily/campushub/controller/ApiInventoryContractTest.java) 自动扫描主源码产物中的 Controller（排除测试探针），注册到 standalone Spring MVC，将实际 method/path、handler 与方法级授权声明逐项对照 routes.json，再检查逐接口表格没有缺失、多写或重复。遗漏、新增、授权声明变化和重复清单有负向门禁；另明确断言六条评论/回复/撤回映射及其方法级授权声明。测试不发请求、不启用安全过滤链、不连接 DB/Redis、不启动 worker。
 
-它不能自动核验文档中的字段语义、真实角色/归属执行、Service/Mapper 成功路径、数据库状态或管理面暴露；这些仍需源码审查及阶段明确范围内的 HTTP/隔离验收，不能把映射一致等同于 42 个完整端到端接口都已验收。新增接口应同一提交更新清单、表格、契约测试与必要的真实依赖验证，不自动生成未来接口。6E2 性能原始证据本阶段不重跑/改写。
+它不能自动核验文档中的字段语义、真实角色/归属执行、Service/Mapper 成功路径、数据库状态或管理面暴露；这些仍需源码审查及阶段明确范围内的 HTTP/隔离验收，不能把映射一致等同于 43 个完整端到端接口都已验收。新增接口应同一提交更新清单、表格、契约测试与必要的真实依赖验证，不自动生成未来接口。6E2 性能原始证据本阶段不重跑/改写。

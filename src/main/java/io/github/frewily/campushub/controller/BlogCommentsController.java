@@ -60,4 +60,11 @@ public class BlogCommentsController {
         blogCommentsService.withdrawReply(replyId);
         return Result.ok();
     }
+
+    @DeleteMapping("/{commentId}")
+    @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
+    public Result withdrawComment(@Positive @PathVariable("commentId") Long commentId) {
+        blogCommentsService.withdrawComment(commentId);
+        return Result.ok();
+    }
 }

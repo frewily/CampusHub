@@ -254,6 +254,49 @@ class SecurityHttpContractTest {
     }
 
     @Test
+    void userMerchantAndAdminCanAccessFirstLevelCommentWithdrawal() throws Exception {
+        prepareSession("withdraw-comment-user-token", 56L, "USER");
+        prepareSession("withdraw-comment-merchant-token", 57L, "MERCHANT");
+        prepareSession("withdraw-comment-admin-token", 58L, "ADMIN");
+
+        for (String token : Arrays.asList("withdraw-comment-user-token", "withdraw-comment-merchant-token",
+                "withdraw-comment-admin-token")) {
+            mockMvc.perform(delete("/blog-comments/61").header("authorization", token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data").doesNotExist());
+        }
+
+        verify(blogCommentsService, times(3)).withdrawComment(61L);
+    }
+
+    @Test
+    void anonymousDisabledAndUnknownRoleCannotWithdrawFirstLevelComments() throws Exception {
+        mockMvc.perform(delete("/blog-comments/61"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+
+        String disabledToken = "withdraw-comment-disabled-token";
+        Map<Object, Object> disabledSession = new HashMap<>();
+        disabledSession.put("id", "59");
+        disabledSession.put("nickName", "disabled-user");
+        when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(LOGIN_USER_KEY + disabledToken)).thenReturn(disabledSession);
+        when(accountAccessMapper.findAccountStatus(59L)).thenReturn("DISABLED");
+        when(accountAccessMapper.findRoles(59L)).thenReturn(Collections.singletonList("USER"));
+        mockMvc.perform(delete("/blog-comments/61").header("authorization", disabledToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+
+        prepareSession("withdraw-comment-unknown-role-token", 60L, "AUDITOR");
+        mockMvc.perform(delete("/blog-comments/61").header("authorization", "withdraw-comment-unknown-role-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+
+        verifyNoInteractions(blogCommentsService);
+    }
+
+    @Test
     void activeUserMerchantAndAdminCanPublishBlogWithoutShop() throws Exception {
         prepareSession("blog-user-token", 21L, "USER");
         prepareSession("blog-merchant-token", 22L, "MERCHANT");

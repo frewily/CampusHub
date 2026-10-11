@@ -152,6 +152,33 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
         }
     }
 
+    @Override
+    @Transactional
+    public void withdrawComment(Long commentId) {
+        validateCommentId(commentId);
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null || user.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        try {
+            BlogComments candidate = baseMapper.findOwnedFirstLevelComment(commentId, user.getId());
+            if (candidate == null || baseMapper.lockBlog(candidate.getBlogId()) == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND);
+            }
+            // Serialize with reply creation on the post, then recheck root ownership/status via current read.
+            BlogComments current = baseMapper.lockOwnedFirstLevelComment(commentId, candidate.getBlogId(), user.getId());
+            if (current == null) throw new BusinessException(ErrorCode.NOT_FOUND);
+            if (Integer.valueOf(3).equals(current.getStatus())) return;
+            // No cascade: descendants retain content/status and their authors can still withdraw them.
+            if (baseMapper.withdrawFirstLevelComment(commentId, candidate.getBlogId(), user.getId()) != 1
+                    || baseMapper.decrementCommentCount(candidate.getBlogId()) != 1) {
+                throw new BusinessException(ErrorCode.OPERATION_FAILED);
+            }
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
     private BlogCommentPage toPage(List<BlogComments> rows, int size) {
         boolean hasNext = rows.size() > size;
         int visible = Math.min(rows.size(), size);

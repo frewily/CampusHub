@@ -40,6 +40,22 @@
         WHERE id = #{commentId} AND blog_id = #{blogId} AND parent_id = 0 AND answer_id = 0 AND status = 0
         FOR UPDATE
     </select>
+    <select id="findOwnedFirstLevelComment" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id FROM tb_blog_comments
+        WHERE id = #{commentId} AND user_id = #{userId}
+          AND parent_id = 0 AND answer_id = 0 AND status IN (0, 3)
+    </select>
+    <select id="lockOwnedFirstLevelComment" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id, status FROM tb_blog_comments
+        WHERE id = #{commentId} AND blog_id = #{blogId} AND user_id = #{userId}
+          AND parent_id = 0 AND answer_id = 0 AND status IN (0, 3)
+        FOR UPDATE
+    </select>
+    <update id="withdrawFirstLevelComment" timeout="5">
+        UPDATE tb_blog_comments SET status = 3
+        WHERE id = #{commentId} AND blog_id = #{blogId} AND user_id = #{userId}
+          AND parent_id = 0 AND answer_id = 0 AND status = 0
+    </update>
     <select id="findDirectReplies" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
         SELECT id, blog_id, user_id, content, create_time FROM tb_blog_comments
         WHERE blog_id = #{blogId} AND parent_id = #{commentId} AND answer_id = #{commentId} AND status = 0

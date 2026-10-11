@@ -19,6 +19,11 @@ public interface BlogCommentsMapper extends BaseMapper<BlogComments> {
     int withdrawDirectReply(@Param("replyId") Long replyId, @Param("blogId") Long blogId,
                             @Param("userId") Long userId);
     int decrementCommentCount(@Param("blogId") Long blogId);
+    BlogComments findOwnedFirstLevelComment(@Param("commentId") Long commentId, @Param("userId") Long userId);
+    BlogComments lockOwnedFirstLevelComment(@Param("commentId") Long commentId, @Param("blogId") Long blogId,
+                                            @Param("userId") Long userId);
+    int withdrawFirstLevelComment(@Param("commentId") Long commentId, @Param("blogId") Long blogId,
+                                  @Param("userId") Long userId);
     List<BlogComments> findFirstLevelComments(@Param("blogId") Long blogId,
                                             @Param("beforeId") Long beforeId,
                                             @Param("limit") int limit);

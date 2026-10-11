@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 42 条，来自 12 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加两条一级评论 API，7C 增加直接回复发布/读取，7D 增加本人直接回复撤回；边界见[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)和[7D](../refactor/26-phase-7d-reply-withdrawal.md)。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 43 条，来自 12 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加一级评论，7C 增加直接回复，7D/7E 分别增加本人直接回复/一级评论撤回；边界见[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)、[7D](../refactor/26-phase-7d-reply-withdrawal.md)和[7E](../refactor/27-phase-7e-comment-withdrawal.md)。
 
 ## 通用约定
 
@@ -74,7 +74,7 @@ Controller：[BlogController.java](../../src/main/java/io/github/frewily/campush
 | GET | `/blog/of/user` | [`queryBlogByUserId`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L70)；需认证 | Query `current` 默认 1 且 ≥1；`id` 用户 ID 必填正数 | `List<Blog>` Entity，每页最多 10；无记录为空数组 |
 | GET | `/blog/of/follow` | [`queryBlogOfFollow`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L81)；需认证 | Query `lastId` 必填正数（滚动时间上界）；`offset` 默认 0 且 ≥0 | 有记录时 `ScrollResult {list: Blog[], minTime, offset}`，当前每批最多 2 条；无动态时 `Result.ok()`，即成功且 data 为 null，不是 404 |
 
-## 动态评论与直接回复（Phase 7B/7C/7D）
+## 动态评论与直接回复（Phase 7B/7C/7D/7E）
 
 Controller：[BlogCommentsController.java](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；Service：[IBlogCommentsService.java](../../src/main/java/io/github/frewily/campushub/service/IBlogCommentsService.java)、[BlogCommentsServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/BlogCommentsServiceImpl.java)；模型：[BlogCommentCreateRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentCreateRequest.java)、[BlogCommentPageRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentPageRequest.java)、[BlogCommentItem.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogCommentItem.java)、[BlogCommentPage.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogCommentPage.java)。
 
@@ -88,7 +88,9 @@ Controller：[BlogCommentsController.java](../../src/main/java/io/github/frewily
 
 | DELETE | `/blog-comments/replies/{replyId}` | [`withdrawReply`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证；允许 USER、MERCHANT、ADMIN，但均仅可操作本人回复，没有管理员覆盖权限 | Path replyId 为 Java Long 正数；无 body。目标须作者匹配、parentId>0 且 answerId=parentId、状态为 0 或 3，所属动态存在；不要求父评论存在或可见 | HTTP 200、`{"success":true}`，无 data。0→3（作者撤回）与动态 comments 递减同事务，NULL/0 下限为 0；3 重复成功不重复写入/扣计数。保留原文及关系，不物理删除。非本人、一级评论、不符合关系/状态、缺失目标/动态均 404；参数 400、无效会话 401、SQL 异常通用 500、影响行数异常 422 |
 
-目前只支持一层直接回复及作者本人撤回，不支持多级回复、一级评论删除、物理删除/恢复、管理员审核、通知、创建请求幂等键或历史 comments 计数回填。撤回采用现有 TINYINT 状态 3，无新列/索引或 V008；fresh schema 仅更新列说明，已有库仍先具备 V006/V007。comments 仅做本次增减，不保证等于当前可见数量。并发中的只读快照可读到撤回前数据；提交后开始的新读取不返回 status=3。说明见[7D 记录](../refactor/26-phase-7d-reply-withdrawal.md)、[撤回笔记](../learning/direct-reply-withdrawal.md)、[一级评论笔记](../learning/first-level-comments-and-cursors.md)和[直接回复笔记](../learning/direct-comment-replies.md)。
+| DELETE | `/blog-comments/{commentId}` | [`withdrawComment`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证；允许 USER、MERCHANT、ADMIN，但均仅可操作本人一级评论，没有商户/管理员覆盖权限 | Path commentId 为 Java Long 正数；无 body。目标须作者匹配、parentId=answerId=0、状态为 0 或 3，所属动态存在；直接回复不能用此入口撤回 | HTTP 200、`{"success":true}`，无 data。0→3 与动态 comments 递减同事务，NULL/0 下限 0；3 重复不写入/扣计数。仅根评论减一，保留原文及所有回复行/状态；随后新请求的回复读取/创建为 404，回复作者仍可用上述回复撤回入口。非本人（含已撤回）、关系/状态不符、目标/动态缺失均 404；参数 400、无效会话 401、SQL 异常通用 500、影响行数异常 422 |
+
+目前只支持一层直接回复，以及作者本人对一级评论/直接回复的逻辑撤回；不支持多级回复、级联/物理删除、恢复、管理员审核、通知、创建请求幂等键或历史 comments 计数回填。复用现有 TINYINT 状态 3/V007，无新列/索引或 V008；fresh schema 仅补列说明，已有库仍先具备 V006/V007。根撤回只扣根一次，未扣/改动被遮蔽的回复；comments 不保证等于当前可见数量。并发中的只读快照可读到撤回前数据；提交后开始的新请求不返回撤回根及其回复列表。说明见[7E 记录](../refactor/27-phase-7e-comment-withdrawal.md)、[一级评论撤回笔记](../learning/first-level-comment-withdrawal.md)、[回复撤回笔记](../learning/direct-reply-withdrawal.md)、[一级评论笔记](../learning/first-level-comments-and-cursors.md)和[直接回复笔记](../learning/direct-comment-replies.md)。
 
 ## 关注
 
@@ -119,6 +121,6 @@ Controller：[HealthController.java](../../src/main/java/io/github/frewily/campu
 | GET | `/health/live` | [`live`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L13)；公开 | 无参数 | 原始 JSON `{"status":"UP"}` |
 | GET | `/health/ready` | [`ready`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L14)；公开 | 无参数 | 原始 JSON status；MySQL `SELECT 1` 与 Redis `PING` 都成功为 HTTP 200/UP，否则 HTTP 503/DOWN |
 
-## 独立管理端（不计入 42 条）
+## 独立管理端（不计入 43 条）
 
 `SecurityConfig.managementSecurityFilterChain` 与 `application.yaml` 暴露两个 Actuator GET：`GET /actuator/health`、`GET /actuator/prometheus`。它们不属于业务 Controller 清单；管理监听地址默认 `127.0.0.1:8082`（端口可由配置替换），管理链对这两个 GET 公开并拒绝其他 Actuator 请求。Actuator 路由由 Spring Boot 管理端框架提供。

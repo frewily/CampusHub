@@ -31,6 +31,7 @@
     {"method":"POST","path":"/blog-comments/{commentId}/replies","controller":"BlogCommentsController","handler":"createReply","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
     {"method":"GET","path":"/blog-comments/{commentId}/replies","controller":"BlogCommentsController","handler":"listReplies","preAuthorize":""},
     {"method":"DELETE","path":"/blog-comments/replies/{replyId}","controller":"BlogCommentsController","handler":"withdrawReply","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
+    {"method":"DELETE","path":"/blog-comments/{commentId}","controller":"BlogCommentsController","handler":"withdrawComment","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
     {"method":"PUT","path":"/follow/{id}/{isFollow}","controller":"FollowController","handler":"follow","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
     {"method":"GET","path":"/follow/or/not/{id}","controller":"FollowController","handler":"isFollow","preAuthorize":""},
     {"method":"GET","path":"/follow/common/{id}","controller":"FollowController","handler":"common","preAuthorize":""},

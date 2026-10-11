@@ -507,6 +507,108 @@ def verify_reply_withdrawal(base, tokens):
     check("reply withdrawal NULL/zero clamp and real row/counter/zero-row faults roll back with typed generic HTTP errors")
 
 
+def verify_first_level_withdrawal(base, tokens):
+    """Root withdrawal preserves descendants; real HTTP verifies author-only rights and atomicity."""
+    blog_id = int(sql("SELECT blog_id FROM tb_blog_comments WHERE id=9007199254740993;"))
+    user_headers = {"authorization": tokens[0], "Content-Type": "application/json"}
+    admin_headers = {"authorization": tokens[1], "Content-Type": "application/json"}
+    sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(900006,'00000000006','synthetic-root-withdraw-merchant');"
+        "INSERT INTO tb_user_role(user_id,role) VALUES(900006,'MERCHANT');")
+    merchant_token = "synthetic-root-withdraw-" + uuid.uuid4().hex
+    redis("HSET", "login:token:" + merchant_token, "id", "900006", "nickName", "synthetic")
+    redis("EXPIRE", "login:token:" + merchant_token, "600")
+    merchant_headers = {"authorization": merchant_token, "Content-Type": "application/json"}
+
+    def create_root(headers):
+        payload = json.dumps({"blogId": str(blog_id), "content": "retained root withdrawal content"}).encode()
+        result, _ = request(base, "/blog-comments", 200, "POST", payload, headers)
+        return json.loads(result)["data"]["id"]
+
+    roots = [create_root(headers) for headers in (user_headers, admin_headers, merchant_headers)]
+    reply_route = "/blog-comments/" + roots[0] + "/replies"
+    result, _ = request(base, reply_route, 200, "POST", b'{"content":"preserved child withdrawal content"}', admin_headers)
+    child = json.loads(result)["data"]["id"]
+    route = "/blog-comments/" + roots[0]
+    counter = int(sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id))
+    rows = sql("SELECT COUNT(*) FROM tb_blog_comments;")
+    request(base, route, 401, "DELETE")
+    request(base, route, 404, "DELETE", headers=admin_headers)
+    request(base, "/blog-comments/" + roots[1], 404, "DELETE", headers=user_headers)
+    request(base, "/blog-comments/" + child, 404, "DELETE", headers=admin_headers)
+    for invalid in ("0", "-1", "bad", "9223372036854775808"):
+        request(base, "/blog-comments/" + invalid, 400, "DELETE", headers=user_headers)
+    for status, parent, answer, owner_blog in (("1", 0, 0, blog_id), ("2", 0, 0, blog_id),
+            ("NULL", 0, 0, blog_id), ("0", 0, int(roots[0]), blog_id),
+            ("0", int(roots[0]), 0, blog_id), ("0", 0, 0, 999999999)):
+        target = sql("INSERT INTO tb_blog_comments(user_id,blog_id,parent_id,answer_id,content,status) "
+                     "VALUES(900001,%d,%d,%d,'synthetic excluded root withdrawal',%s); SELECT LAST_INSERT_ID();" %
+                     (owner_blog, parent, answer, status))
+        request(base, "/blog-comments/" + target, 404, "DELETE", headers=user_headers)
+        assert sql("SELECT COUNT(*) FROM tb_blog_comments WHERE id=%s AND status=3;" % target) == "0"
+    request(base, "/blog-comments/999999999", 404, "DELETE", headers=user_headers)
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == str(counter)
+    # Legacy exclusion fixtures add rows, but no failed HTTP operation should alter them or other content.
+    assert sql("SELECT COUNT(*) FROM tb_blog_comments;") == str(int(rows) + 6)
+    for root, headers in zip(roots, (user_headers, admin_headers, merchant_headers)):
+        for _ in range(2):
+            result, _ = request(base, "/blog-comments/" + root, 200, "DELETE", headers=headers)
+            assert json.loads(result) == {"success": True}
+        assert sql("SELECT status FROM tb_blog_comments WHERE id=%s;" % root) == "3"
+        assert sql("SELECT content FROM tb_blog_comments WHERE id=%s;" % root) == "retained root withdrawal content"
+    request(base, route, 404, "DELETE", headers=admin_headers)
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == str(counter - 3)
+    assert sql("SELECT COUNT(*) FROM tb_blog_comments;") == str(int(rows) + 6)
+    assert sql("SELECT status FROM tb_blog_comments WHERE id=%s;" % child) == "0"
+    assert sql("SELECT content FROM tb_blog_comments WHERE id=%s;" % child) == "preserved child withdrawal content"
+    request(base, reply_route, 404, headers=user_headers)
+    request(base, reply_route, 404, "POST", b'{"content":"must not be created"}', admin_headers)
+    request(base, "/blog-comments/replies/" + child, 404, "DELETE", headers=user_headers)
+    request(base, "/blog-comments/replies/" + child, 200, "DELETE", headers=admin_headers)
+    request(base, "/blog-comments/replies/" + child, 200, "DELETE", headers=admin_headers)
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == str(counter - 4)
+    page, _ = request(base, "/blog-comments/of/blog/%d?size=50" % blog_id, headers=user_headers)
+    assert not set(roots).intersection(item["id"] for item in json.loads(page)["data"]["items"])
+    sql("UPDATE tb_user SET status='DISABLED' WHERE id=900006;")
+    request(base, "/blog-comments/" + roots[2], 401, "DELETE", headers=merchant_headers)
+    check("first-level author withdrawal: three roles, no admin override, retained descendants, closed reply read/create and independent child withdrawal")
+
+    for legacy in ("NULL", "0"):
+        target = create_root(user_headers)
+        sql("UPDATE tb_blog SET comments=%s WHERE id=%d;" % (legacy, blog_id))
+        request(base, "/blog-comments/" + target, 200, "DELETE", headers=user_headers)
+        request(base, "/blog-comments/" + target, 200, "DELETE", headers=user_headers)
+        assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == "0"
+    target = create_root(user_headers)
+    child_route = "/blog-comments/" + target + "/replies"
+    result, _ = request(base, child_route, 200, "POST", b'{"content":"child survives fault"}', admin_headers)
+    child = json.loads(result)["data"]["id"]
+    rows = sql("SELECT COUNT(*) FROM tb_blog_comments;")
+    for name, definition, expected, code in (
+            ("synthetic_root_withdraw_failure", "BEFORE UPDATE ON tb_blog_comments FOR EACH ROW "
+             "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private root withdrawal failure'", 500, "INTERNAL_ERROR"),
+            ("synthetic_root_counter_failure", "BEFORE UPDATE ON tb_blog FOR EACH ROW "
+             "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private root counter failure'", 500, "INTERNAL_ERROR"),
+            ("synthetic_root_zero_counter", "BEFORE UPDATE ON tb_blog_comments FOR EACH ROW "
+             "DELETE FROM tb_blog WHERE id=NEW.blog_id", 422, "OPERATION_FAILED")):
+        sql("CREATE TRIGGER " + name + " " + definition + ";")
+        try:
+            result, _ = request(base, "/blog-comments/" + target, expected, "DELETE", headers=user_headers)
+            result = json.loads(result)
+            assert result["success"] is False and result["errorCode"] == code
+            assert "synthetic private" not in json.dumps(result)
+            assert sql("SELECT COUNT(*) FROM tb_blog_comments WHERE id IN (%s,%s) AND status=0;" % (target, child)) == "2"
+            assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == "2"
+            assert sql("SELECT COUNT(*) FROM tb_blog_comments;") == rows
+            page, _ = request(base, child_route, headers=admin_headers)
+            assert [item["id"] for item in json.loads(page)["data"]["items"]] == [child]
+        finally:
+            sql("DROP TRIGGER " + name + ";")
+    request(base, "/blog-comments/" + target, 200, "DELETE", headers=user_headers)
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == "1"
+    assert sql("SELECT status FROM tb_blog_comments WHERE id=%s;" % child) == "0"
+    check("first-level withdrawal NULL/zero floor and real status/counter/zero-row faults preserve root, descendants and aggregate atomically")
+
+
 def cleanup():
     try:
         compose("--profile", "app", "logs", "--no-color", timeout=30)
@@ -563,6 +665,7 @@ def main():
         verify_first_level_comments(base, tokens)
         verify_direct_comment_replies(base, tokens)
         verify_reply_withdrawal(base, tokens)
+        verify_first_level_withdrawal(base, tokens)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

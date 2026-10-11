@@ -29,7 +29,7 @@ CampusHub 继续采用模块化单体。第一版按单校园场景设计，不�
 | Store | 用户可浏览、搜索和到店消费的门店 | `Shop`、`tb_shop` | 先保持表和接口兼容，Phase 1C 再迁移代码身份 |
 | StoreCategory | 门店分类 | `ShopType`、`tb_shop_type` | 保留语义，后续改名 |
 | Post | 校园动态或与门店关联的内容 | `Blog`、`tb_blog` | 先修 Feed，再迁移名称与请求响应边界 |
-| Comment | 对动态的一级评论及一层直接回复 | `BlogComments`、`tb_blog_comments` | 7B/7C 创建和可见列表读取，7D 本人直接回复撤回；多级回复/一级评论删除/审核待后续设计 |
+| Comment | 对动态的一级评论及一层直接回复 | `BlogComments`、`tb_blog_comments` | 7B/7C 创建和可见列表读取，7D/7E 本人回复/一级评论逻辑撤回；多级回复/级联或物理删除/审核待后续设计 |
 | Follow | 用户对用户的关注关系 | `Follow`、`tb_follow` | MySQL 为事实来源，Redis 仅加速 |
 | PostLike | 用户对动态的点赞关系 | Redis ZSet 和 `tb_blog.liked` 计数 | 后续增加持久化关系，计数作为派生值 |
 | FeedEntry | 用户 Feed 收件箱中的动态投影 | Redis ZSet | 不是独立业务事实，可由关注与动态重建 |
@@ -39,7 +39,7 @@ CampusHub 继续采用模块化单体。第一版按单校园场景设计，不�
 | CheckIn | 用户每日签到行为 | Redis Bitmap；`tb_sign` 未被代码使用 | 第一版继续用 Bitmap，明确其数据保留策略后再决定是否落库 |
 | Notification | 面向用户或商户的通知 | 不存在 | 仅保留模块边界，有明确通知场景后建模 |
 
-Phase 1A 审计时，`UserInfo.level` 的 Java Boolean 与数据库 0 到 9 的等级含义不符；`BlogComments.status` 也用 Boolean 承载三种状态。这是旧模型问题；后者已在 7B 改为 Integer 保留 0/1/2/NULL，7D 增加 3（作者撤回直接回复），不把历史审计描述当成当前类型。
+Phase 1A 审计时，`UserInfo.level` 的 Java Boolean 与数据库 0 到 9 的等级含义不符；`BlogComments.status` 也用 Boolean 承载三种状态。这是旧模型问题；后者已在 7B 改为 Integer 保留 0/1/2/NULL，7D/7E 增加 3（作者撤回直接回复/一级评论），不把历史审计描述当成当前类型。
 
 ## 3 核心实体与关系
 
@@ -91,7 +91,9 @@ Store 保存名称、分类、图片、地址、坐标、营业时间和展示�
 
 7B 的一级评论写入 `parent_id=answer_id=0`；7C 的直接回复只接受正常一级评论为目标，blog_id 从根评论派生，parent_id=answer_id=根评论 ID，作者来自会话，liked/status=0。两类列表独立按 ID 倒序游标查询，回复不混入一级列表。写回复先锁动态后锁根评论，当前读复核根状态；不实现多级回复，不将旧字段直接视为完整业务能力。
 
-7D 的 `DELETE /blog-comments/replies/{replyId}` 是本人直接回复逻辑撤回：所有角色均只可操作本人符合 parent_id>0、answer_id=parent_id 的 0/3 状态行，要求动态存在，不要求父评论仍存在/可见（包括本人符合格式的旧孤立回复）。先锁动态，再当前读锁回复并复核归属/关系/状态；0→3 和计数递减同事务，3 重复不扣计数。保留原文，未实现物理删除、恢复、一级评论撤回或管理员审核。NULL/0 计数下限为 0，不回填历史，不保证聚合等于可见数。规则及回退限制见[撤回笔记](learning/direct-reply-withdrawal.md)。
+7D 的 `DELETE /blog-comments/replies/{replyId}` 是本人直接回复逻辑撤回：所有角色均只可操作本人符合 parent_id>0、answer_id=parent_id 的 0/3 状态行，要求动态存在，不要求父评论仍存在/可见（包括本人符合格式的旧孤立回复）。先锁动态，再当前读锁回复并复核归属/关系/状态；0→3 和计数递减同事务，3 重复不扣计数。保留原文，无物理删除、恢复或管理员审核。NULL/0 计数下限为 0，不回填历史，不保证聚合等于可见数。规则及回退限制见[回复撤回笔记](learning/direct-reply-withdrawal.md)。
+
+7E 的 `DELETE /blog-comments/{commentId}` 是本人一级评论撤回：作者及 parent_id=answer_id=0、status 0/3、动态存在同时成立。保持相同锁顺序/当前读复核，根 0→3 和减一同事务，重复不扣。保留全部回复行/状态，不级联修改或扣回复数；撤回根从一级列表排除，其下新请求的回复读取/创建为 404，回复作者仍可用 7D 独立撤回。管理员和商户也仅本人，不扩展恢复/审核。并发只读快照可能看见旧版本，细节见[一级评论撤回笔记](learning/first-level-comment-withdrawal.md)。
 
 `Follow` 只表示账号关注账号，禁止自己关注自己；同一 `(follower_id, followee_id)` 只能存在一次。MySQL 保存关系事实，Redis 集合或有序集合只能作为查询加速，结构必须统一。
 
@@ -117,7 +119,7 @@ Notification 只定义为未来独立模块。只有在订单状态、活动结�
 
 ## 4 角色与资源权限
 
-下表是目标权限边界，并非全部已实现 API。当前 7D 直接回复撤回对 USER/MERCHANT/ADMIN 一律仅本人，无商户内容或管理员覆盖；动态编辑、一级评论删除与审核仍未实现。
+下表是目标权限边界，并非全部已实现 API。当前 7D/7E 回复/一级评论逻辑撤回对 USER/MERCHANT/ADMIN 一律仅本人，无商户内容或管理员覆盖；动态编辑、级联/物理删除、恢复与审核仍未实现。
 
 | 操作 | 匿名用户 | USER | MERCHANT | ADMIN |
 | --- | --- | --- | --- | --- |
