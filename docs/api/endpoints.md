@@ -119,6 +119,6 @@ Controller：[HealthController.java](../../src/main/java/io/github/frewily/campu
 | GET | `/health/live` | [`live`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L13)；公开 | 无参数 | 原始 JSON `{"status":"UP"}` |
 | GET | `/health/ready` | [`ready`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L14)；公开 | 无参数 | 原始 JSON status；MySQL `SELECT 1` 与 Redis `PING` 都成功为 HTTP 200/UP，否则 HTTP 503/DOWN |
 
-## 独立管理端（不计入 41 条）
+## 独立管理端（不计入 42 条）
 
 `SecurityConfig.managementSecurityFilterChain` 与 `application.yaml` 暴露两个 Actuator GET：`GET /actuator/health`、`GET /actuator/prometheus`。它们不属于业务 Controller 清单；管理监听地址默认 `127.0.0.1:8082`（端口可由配置替换），管理链对这两个 GET 公开并拒绝其他 Actuator 请求。Actuator 路由由 Spring Boot 管理端框架提供。
