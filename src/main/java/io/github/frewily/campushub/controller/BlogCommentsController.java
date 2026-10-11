@@ -8,6 +8,7 @@ import io.github.frewily.campushub.service.IBlogCommentsService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -51,5 +52,12 @@ public class BlogCommentsController {
     public Result listReplies(@Positive @PathVariable("commentId") Long commentId,
                              @Valid @ModelAttribute BlogCommentPageRequest request) {
         return Result.ok(blogCommentsService.listReplies(commentId, request));
+    }
+
+    @DeleteMapping("/replies/{replyId}")
+    @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
+    public Result withdrawReply(@Positive @PathVariable("replyId") Long replyId) {
+        blogCommentsService.withdrawReply(replyId);
+        return Result.ok();
     }
 }

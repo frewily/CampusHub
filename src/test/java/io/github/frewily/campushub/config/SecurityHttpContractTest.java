@@ -43,6 +43,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.times;
 import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -209,6 +210,47 @@ class SecurityHttpContractTest {
         }
         verify(blogCommentsService, times(3)).createReply(any(), any());
         verify(blogCommentsService, times(3)).listReplies(any(), any());
+    }
+
+    @Test
+    void userMerchantAndAdminCanWithdrawTheirReplies() throws Exception {
+        prepareSession("withdraw-user-token", 46L, "USER");
+        prepareSession("withdraw-merchant-token", 47L, "MERCHANT");
+        prepareSession("withdraw-admin-token", 48L, "ADMIN");
+
+        for (String token : Arrays.asList("withdraw-user-token", "withdraw-merchant-token", "withdraw-admin-token")) {
+            mockMvc.perform(delete("/blog-comments/replies/51").header("authorization", token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data").doesNotExist());
+        }
+
+        verify(blogCommentsService, times(3)).withdrawReply(51L);
+    }
+
+    @Test
+    void anonymousDisabledAndUnknownRoleCannotWithdrawReplies() throws Exception {
+        mockMvc.perform(delete("/blog-comments/replies/51"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+
+        String disabledToken = "withdraw-disabled-token";
+        Map<Object, Object> disabledSession = new HashMap<>();
+        disabledSession.put("id", "49");
+        disabledSession.put("nickName", "disabled-user");
+        when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(LOGIN_USER_KEY + disabledToken)).thenReturn(disabledSession);
+        when(accountAccessMapper.findAccountStatus(49L)).thenReturn("DISABLED");
+        when(accountAccessMapper.findRoles(49L)).thenReturn(Collections.singletonList("USER"));
+        mockMvc.perform(delete("/blog-comments/replies/51").header("authorization", disabledToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+
+        prepareSession("withdraw-unknown-role-token", 50L, "AUDITOR");
+        mockMvc.perform(delete("/blog-comments/replies/51").header("authorization", "withdraw-unknown-role-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+
+        verifyNoInteractions(blogCommentsService);
     }
 
     @Test

@@ -35,6 +35,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -272,6 +273,51 @@ class BlogCommentsHttpContractTest {
                 .andExpect(jsonPath("$.errorCode").value("NOT_FOUND"));
 
         verify(commentsService).listReplies(eq(42L), any(BlogCommentPageRequest.class));
+        org.mockito.Mockito.verifyNoMoreInteractions(commentsService);
+    }
+
+    @Test
+    void withdrawReplyAcceptsPositive64BitIdAndReturnsEmptySuccessData() throws Exception {
+        prepareUserSession();
+
+        mockMvc.perform(delete("/blog-comments/replies/9007199254740995").header("authorization", "token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(commentsService).withdrawReply(9007199254740995L);
+        org.mockito.Mockito.verifyNoMoreInteractions(commentsService);
+    }
+
+    @Test
+    void invalidWithdrawReplyIdsAreRejectedBeforeServiceCall() throws Exception {
+        prepareUserSession();
+        for (String path : new String[]{"/blog-comments/replies/0", "/blog-comments/replies/-1",
+                "/blog-comments/replies/not-a-number", "/blog-comments/replies/9223372036854775808"}) {
+            mockMvc.perform(delete(path).header("authorization", "token")).andExpect(status().isBadRequest());
+        }
+        verifyNoInteractions(commentsService);
+    }
+
+    @Test
+    void withdrawReplyBusinessErrorsKeepTheirHttpMappings() throws Exception {
+        prepareUserSession();
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.NOT_FOUND))
+                .when(commentsService).withdrawReply(41L);
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.OPERATION_FAILED))
+                .when(commentsService).withdrawReply(42L);
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.INTERNAL_ERROR))
+                .when(commentsService).withdrawReply(43L);
+
+        mockMvc.perform(delete("/blog-comments/replies/41").header("authorization", "token"))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.errorCode").value("NOT_FOUND"));
+        mockMvc.perform(delete("/blog-comments/replies/42").header("authorization", "token"))
+                .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.errorCode").value("OPERATION_FAILED"));
+        mockMvc.perform(delete("/blog-comments/replies/43").header("authorization", "token"))
+                .andExpect(status().isInternalServerError()).andExpect(jsonPath("$.errorCode").value("INTERNAL_ERROR"));
+        verify(commentsService).withdrawReply(41L);
+        verify(commentsService).withdrawReply(42L);
+        verify(commentsService).withdrawReply(43L);
         org.mockito.Mockito.verifyNoMoreInteractions(commentsService);
     }
 

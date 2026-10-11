@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 41 条，来自 12 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加两条一级评论 API，7C 再增加直接回复发布/读取；边界见[7B](../refactor/24-phase-7b-comments.md)和[7C](../refactor/25-phase-7c-comment-replies.md)。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 42 条，来自 12 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加两条一级评论 API，7C 增加直接回复发布/读取，7D 增加本人直接回复撤回；边界见[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)和[7D](../refactor/26-phase-7d-reply-withdrawal.md)。
 
 ## 通用约定
 
@@ -74,7 +74,7 @@ Controller：[BlogController.java](../../src/main/java/io/github/frewily/campush
 | GET | `/blog/of/user` | [`queryBlogByUserId`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L70)；需认证 | Query `current` 默认 1 且 ≥1；`id` 用户 ID 必填正数 | `List<Blog>` Entity，每页最多 10；无记录为空数组 |
 | GET | `/blog/of/follow` | [`queryBlogOfFollow`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L81)；需认证 | Query `lastId` 必填正数（滚动时间上界）；`offset` 默认 0 且 ≥0 | 有记录时 `ScrollResult {list: Blog[], minTime, offset}`，当前每批最多 2 条；无动态时 `Result.ok()`，即成功且 data 为 null，不是 404 |
 
-## 动态评论与直接回复（Phase 7B/7C）
+## 动态评论与直接回复（Phase 7B/7C/7D）
 
 Controller：[BlogCommentsController.java](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；Service：[IBlogCommentsService.java](../../src/main/java/io/github/frewily/campushub/service/IBlogCommentsService.java)、[BlogCommentsServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/BlogCommentsServiceImpl.java)；模型：[BlogCommentCreateRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentCreateRequest.java)、[BlogCommentPageRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentPageRequest.java)、[BlogCommentItem.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogCommentItem.java)、[BlogCommentPage.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogCommentPage.java)。
 
@@ -86,7 +86,9 @@ Controller：[BlogCommentsController.java](../../src/main/java/io/github/frewily
 | POST | `/blog-comments/{commentId}/replies` | [`createReply`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证；允许 USER、MERCHANT、ADMIN | Path `commentId` 为正数且必须指向 status=0、parentId=0、answerId=0 的一级评论；JSON [BlogCommentReplyRequest](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentReplyRequest.java) 仅接收非空白、≤255 的 content，其他字段忽略 | `BlogCommentItem`（同上字符串 ID 白名单）。blogId 从父评论派生、作者从会话取，parentId/answerId 固定为路径 commentId、liked/status=0。动态和父评论按固定顺序锁定，当前读复核可见性，插入/计数/回读同事务；父评论不存在、非正常一级评论或动态缺失均 404，SQL 异常通用 500，写入行数异常 422 |
 | GET | `/blog-comments/{commentId}/replies` | [`listReplies`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证（全局 SecurityConfig） | Path commentId 必须正数；beforeId 可选正数；size 默认 20、范围 1..50；仅可见正常一级评论的直接回复 | `BlogCommentPage`（同上），派生 blogId，过滤 parentId=answerId=commentId 且 status=0，ID 降序、严格小于游标。动态或父评论不可用/非一级均 404；无回复为 items=[]、hasNext=false，无 nextBeforeId；只读 RR 单请求快照，不承诺跨页快照 |
 
-目前只支持对一级评论的一层直接回复，不能对回复继续回复；不支持删除、审核/状态变更、通知、请求幂等键或历史 comments 计数回填。不据此宣称完整评论评价系统。7C 复用 V007 的 `(blog_id,parent_id,answer_id,status,id)` 索引，不新增 DDL；说明见[7B 记录](../refactor/24-phase-7b-comments.md)、[一级评论笔记](../learning/first-level-comments-and-cursors.md)和[直接回复笔记](../learning/direct-comment-replies.md)。
+| DELETE | `/blog-comments/replies/{replyId}` | [`withdrawReply`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证；允许 USER、MERCHANT、ADMIN，但均仅可操作本人回复，没有管理员覆盖权限 | Path replyId 为 Java Long 正数；无 body。目标须作者匹配、parentId>0 且 answerId=parentId、状态为 0 或 3，所属动态存在；不要求父评论存在或可见 | HTTP 200、`{"success":true}`，无 data。0→3（作者撤回）与动态 comments 递减同事务，NULL/0 下限为 0；3 重复成功不重复写入/扣计数。保留原文及关系，不物理删除。非本人、一级评论、不符合关系/状态、缺失目标/动态均 404；参数 400、无效会话 401、SQL 异常通用 500、影响行数异常 422 |
+
+目前只支持一层直接回复及作者本人撤回，不支持多级回复、一级评论删除、物理删除/恢复、管理员审核、通知、创建请求幂等键或历史 comments 计数回填。撤回采用现有 TINYINT 状态 3，无新列/索引或 V008；fresh schema 仅更新列说明，已有库仍先具备 V006/V007。comments 仅做本次增减，不保证等于当前可见数量。并发中的只读快照可读到撤回前数据；提交后开始的新读取不返回 status=3。说明见[7D 记录](../refactor/26-phase-7d-reply-withdrawal.md)、[撤回笔记](../learning/direct-reply-withdrawal.md)、[一级评论笔记](../learning/first-level-comments-and-cursors.md)和[直接回复笔记](../learning/direct-comment-replies.md)。
 
 ## 关注
 

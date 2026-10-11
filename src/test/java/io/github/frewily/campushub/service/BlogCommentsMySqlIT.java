@@ -83,6 +83,7 @@ class BlogCommentsMySqlIT {
     private static BlogCommentsMapper mapper;
     private static BlogCommentsServiceImpl service;
     private static final AtomicReference<Runnable> AFTER_VISIBLE_ROOT_QUERY = new AtomicReference<>();
+    private static final AtomicReference<Runnable> AFTER_OWNED_REPLY_QUERY = new AtomicReference<>();
     private static final ThreadLocal<Boolean> EXPECT_READ_ONLY_REPLY_LIST =
             ThreadLocal.withInitial(() -> Boolean.FALSE);
 
@@ -231,6 +232,12 @@ class BlogCommentsMySqlIT {
                 Runnable hook = AFTER_VISIBLE_ROOT_QUERY.getAndSet(null);
                 if (hook != null) hook.run();
             }
+            if (id.endsWith(".findOwnedDirectReply")) {
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                Runnable hook = AFTER_OWNED_REPLY_QUERY.getAndSet(null);
+                if (hook != null) hook.run();
+            }
             return result;
         }
     }
@@ -246,6 +253,8 @@ class BlogCommentsMySqlIT {
         dropTrigger("fail_comment_insert");
         dropTrigger("fail_blog_counter_update");
         dropTrigger("remove_blog_before_comment_insert");
+        dropTrigger("fail_reply_update");
+        dropTrigger("remove_blog_before_reply_update");
         jdbc.execute("DELETE FROM tb_blog_comments");
         jdbc.execute("DELETE FROM tb_blog");
         jdbc.execute("ALTER TABLE tb_blog_comments AUTO_INCREMENT=1");
@@ -256,11 +265,14 @@ class BlogCommentsMySqlIT {
     @AfterEach
     void clearUser() {
         AFTER_VISIBLE_ROOT_QUERY.set(null);
+        AFTER_OWNED_REPLY_QUERY.set(null);
         EXPECT_READ_ONLY_REPLY_LIST.remove();
         UserHolder.removeUser();
         dropTrigger("fail_comment_insert");
         dropTrigger("fail_blog_counter_update");
         dropTrigger("remove_blog_before_comment_insert");
+        dropTrigger("fail_reply_update");
+        dropTrigger("remove_blog_before_reply_update");
     }
 
     @Test
@@ -666,6 +678,169 @@ class BlogCommentsMySqlIT {
         assertEquals(Integer.valueOf(6), blogCounter(blogId));
         assertEquals(Integer.valueOf(2), mapper.selectById(root).getStatus());
         assertNull(AFTER_VISIBLE_ROOT_QUERY.get());
+    }
+
+    @Test
+    void withdrawalRetainsContentHidesReplyAndDecrementsOnlyOnce() {
+        long blogId = blog(AUTHOR_ID, 2);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root");
+        jdbc.execute("ALTER TABLE tb_blog_comments AUTO_INCREMENT=" + LARGE_ID);
+        long reply = comment(blogId, AUTHOR_ID, root, root, 0, "retained original content");
+        assertEquals(Collections.singletonList(Long.toString(reply)), itemIds(listReplies(root, pageRequest(null, 50))));
+        service.withdrawReply(reply);
+        service.withdrawReply(reply);
+        assertEquals(Integer.valueOf(3), mapper.selectById(reply).getStatus());
+        assertEquals("retained original content", mapper.selectById(reply).getContent());
+        assertEquals(Integer.valueOf(1), blogCounter(blogId));
+        assertEquals(2, countComments(blogId));
+        assertTrue(listReplies(root, pageRequest(null, 50)).getItems().isEmpty());
+        assertEquals(Collections.singletonList(Long.toString(root)), itemIds(service.listComments(blogId, pageRequest(null, 50))));
+        UserHolder.saveUser(user(AUTHOR_ID + 1));
+        assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class, () -> service.withdrawReply(reply)).getErrorCode());
+        assertEquals(Integer.valueOf(1), blogCounter(blogId));
+    }
+
+    @Test
+    void withdrawalRejectsForeignRootsUnsupportedStatesRelationsAndMissingBlog() {
+        long blogId = blog(AUTHOR_ID, 8);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root");
+        List<Long> rejected = new ArrayList<>(Arrays.asList(root, 999999L));
+        rejected.add(comment(blogId, AUTHOR_ID + 1, root, root, 0, "foreign reply"));
+        for (Integer state : Arrays.asList(1, 2, null, 4)) {
+            rejected.add(comment(blogId, AUTHOR_ID, root, root, state, "unsupported state"));
+        }
+        rejected.add(comment(blogId, AUTHOR_ID, root, root + 1, 0, "wrong answer"));
+        rejected.add(comment(blogId, AUTHOR_ID, 0, root, 0, "answer only"));
+        rejected.add(comment(999999L, AUTHOR_ID, root, root, 0, "missing post"));
+        int before = countComments(blogId);
+        for (Long id : rejected) {
+            assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class, () -> service.withdrawReply(id)).getErrorCode());
+        }
+        assertEquals(Integer.valueOf(8), blogCounter(blogId));
+        assertEquals(before, countComments(blogId));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog_comments WHERE status=3", Integer.class));
+    }
+
+    @Test
+    void withdrawalDoesNotRequireRootVisibilityOrRootExistenceButDoesRequirePost() {
+        long blogId = blog(AUTHOR_ID, 3);
+        long hiddenRoot = comment(blogId, AUTHOR_ID, 0, 0, 2, "hidden root");
+        long own = comment(blogId, AUTHOR_ID, hiddenRoot, hiddenRoot, 0, "own under hidden root");
+        long orphan = comment(blogId, AUTHOR_ID, 888888L, 888888L, 0, "own root missing");
+        service.withdrawReply(own);
+        service.withdrawReply(orphan);
+        assertEquals(Integer.valueOf(3), mapper.selectById(own).getStatus());
+        assertEquals(Integer.valueOf(3), mapper.selectById(orphan).getStatus());
+        assertEquals(Integer.valueOf(2), mapper.selectById(hiddenRoot).getStatus());
+        assertEquals(Integer.valueOf(1), blogCounter(blogId));
+    }
+
+    @Test
+    void withdrawalClampsNullAndZeroLegacyCountersWithoutRecounting() {
+        for (Integer counter : Arrays.asList(null, 0, 1, 7)) {
+            long blogId = blog(AUTHOR_ID, counter);
+            long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root");
+            long reply = comment(blogId, AUTHOR_ID, root, root, 0, "own reply");
+            service.withdrawReply(reply);
+            service.withdrawReply(reply);
+            assertEquals(Integer.valueOf(counter == null || counter == 0 ? 0 : counter - 1), blogCounter(blogId));
+            assertEquals(Integer.valueOf(3), mapper.selectById(reply).getStatus());
+            assertEquals(2, countComments(blogId));
+        }
+    }
+
+    @Test
+    void withdrawalUpdateCounterAndZeroRowFailuresRollBackBothRows() {
+        long blogId = blog(AUTHOR_ID, 4);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root");
+        long reply = comment(blogId, AUTHOR_ID, root, root, 0, "must remain visible");
+        jdbc.execute("CREATE TRIGGER fail_reply_update BEFORE UPDATE ON tb_blog_comments FOR EACH ROW "
+                + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic reply update failure'");
+        BusinessException update = assertThrows(BusinessException.class, () -> service.withdrawReply(reply));
+        assertEquals(ErrorCode.INTERNAL_ERROR, update.getErrorCode());
+        assertNull(update.getCause());
+        assertEquals(Integer.valueOf(0), mapper.selectById(reply).getStatus());
+        assertEquals(Integer.valueOf(4), blogCounter(blogId));
+        dropTrigger("fail_reply_update");
+        jdbc.execute("CREATE TRIGGER fail_blog_counter_update BEFORE UPDATE ON tb_blog FOR EACH ROW "
+                + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic withdrawal counter failure'");
+        BusinessException count = assertThrows(BusinessException.class, () -> service.withdrawReply(reply));
+        assertEquals(ErrorCode.INTERNAL_ERROR, count.getErrorCode());
+        assertNull(count.getCause());
+        assertEquals(Integer.valueOf(0), mapper.selectById(reply).getStatus());
+        assertEquals(Integer.valueOf(4), blogCounter(blogId));
+        dropTrigger("fail_blog_counter_update");
+        jdbc.execute("CREATE TRIGGER remove_blog_before_reply_update BEFORE UPDATE ON tb_blog_comments "
+                + "FOR EACH ROW DELETE FROM tb_blog WHERE id=NEW.blog_id");
+        BusinessException rows = assertThrows(BusinessException.class, () -> service.withdrawReply(reply));
+        assertEquals(ErrorCode.OPERATION_FAILED, rows.getErrorCode());
+        assertEquals(Integer.valueOf(0), mapper.selectById(reply).getStatus());
+        assertEquals(Integer.valueOf(4), blogCounter(blogId), "trigger deletion must roll back");
+        assertEquals(2, countComments(blogId));
+    }
+
+    @Test
+    void concurrentDuplicateWithdrawalsAndNewRepliesKeepCounterAccurate() throws Exception {
+        long blogId = blog(AUTHOR_ID, 2);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root");
+        long reply = comment(blogId, AUTHOR_ID, root, root, 0, "withdraw target");
+        int participants = 12;
+        CountDownLatch ready = new CountDownLatch(participants);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(participants);
+        List<Future<?>> results = new ArrayList<>();
+        try {
+            for (int i = 0; i < participants; i++) {
+                final boolean withdraw = i < 8;
+                results.add(executor.submit(() -> {
+                    UserHolder.saveUser(user(AUTHOR_ID));
+                    ready.countDown();
+                    try {
+                        assertTrue(start.await(10, TimeUnit.SECONDS));
+                        if (withdraw) service.withdrawReply(reply);
+                        else service.createReply(root, replyRequest("concurrent new reply"));
+                        return null;
+                    } finally {
+                        UserHolder.removeUser();
+                    }
+                }));
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
+            start.countDown();
+            for (Future<?> result : results) result.get(20, TimeUnit.SECONDS);
+            assertEquals(Integer.valueOf(5), blogCounter(blogId));
+            assertEquals(6, countComments(blogId));
+            assertEquals(Integer.valueOf(3), mapper.selectById(reply).getStatus());
+            assertEquals(4, listReplies(root, pageRequest(null, 50)).getItems().size());
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void withdrawalCurrentReadRechecksOwnershipStatusRelationAndBlogAfterLookup() {
+        long blogId = blog(AUTHOR_ID, 9);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root");
+        long otherBlog = blog(AUTHOR_ID, 0);
+        for (String change : Arrays.asList("status=2", "user_id=" + (AUTHOR_ID + 1),
+                "answer_id=" + (root + 1000), "blog_id=" + otherBlog)) {
+            long reply = comment(blogId, AUTHOR_ID, root, root, 0, "changed after lookup");
+            AFTER_OWNED_REPLY_QUERY.set(() -> {
+                try (Connection connection = datasource.getConnection();
+                     PreparedStatement statement = connection.prepareStatement(
+                             "UPDATE tb_blog_comments SET " + change + " WHERE id=?")) {
+                    statement.setLong(1, reply);
+                    assertEquals(1, statement.executeUpdate());
+                } catch (SQLException error) {
+                    throw new AssertionError("could not commit concurrent reply eligibility change", error);
+                }
+            });
+            assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class, () -> service.withdrawReply(reply)).getErrorCode());
+            assertEquals(Integer.valueOf(9), blogCounter(blogId));
+            assertNull(AFTER_OWNED_REPLY_QUERY.get());
+        }
     }
 
     private static BlogCommentPage listReplies(Long rootId, BlogCommentPageRequest request) {

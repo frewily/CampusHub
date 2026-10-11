@@ -14,6 +14,27 @@
         SELECT id, blog_id FROM tb_blog_comments
         WHERE id = #{commentId} AND parent_id = 0 AND answer_id = 0 AND status = 0
     </select>
+    <select id="findOwnedDirectReply" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id FROM tb_blog_comments
+        WHERE id = #{replyId} AND user_id = #{userId}
+          AND parent_id &gt; 0 AND answer_id = parent_id AND status IN (0, 3)
+    </select>
+    <select id="lockOwnedDirectReply" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id, status FROM tb_blog_comments
+        WHERE id = #{replyId} AND blog_id = #{blogId} AND user_id = #{userId}
+          AND parent_id &gt; 0 AND answer_id = parent_id AND status IN (0, 3)
+        FOR UPDATE
+    </select>
+    <update id="withdrawDirectReply" timeout="5">
+        UPDATE tb_blog_comments SET status = 3
+        WHERE id = #{replyId} AND blog_id = #{blogId} AND user_id = #{userId}
+          AND parent_id &gt; 0 AND answer_id = parent_id AND status = 0
+    </update>
+    <update id="decrementCommentCount" timeout="5">
+        UPDATE tb_blog
+        SET comments = CASE WHEN COALESCE(comments, 0) &gt; 0 THEN comments - 1 ELSE 0 END
+        WHERE id = #{blogId}
+    </update>
     <select id="lockVisibleRoot" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
         SELECT id, blog_id FROM tb_blog_comments
         WHERE id = #{commentId} AND blog_id = #{blogId} AND parent_id = 0 AND answer_id = 0 AND status = 0

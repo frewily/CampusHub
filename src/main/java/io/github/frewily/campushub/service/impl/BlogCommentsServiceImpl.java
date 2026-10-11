@@ -125,6 +125,33 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
         if (commentId == null || commentId <= 0) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
     }
 
+    @Override
+    @Transactional
+    public void withdrawReply(Long replyId) {
+        validateCommentId(replyId);
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null || user.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        try {
+            // Locate only the caller's eligible row; do not reveal foreign content or allow an admin override.
+            BlogComments candidate = baseMapper.findOwnedDirectReply(replyId, user.getId());
+            if (candidate == null || baseMapper.lockBlog(candidate.getBlogId()) == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND);
+            }
+            // Same writer order as creation: post before comment. A current read sees concurrent withdrawal.
+            BlogComments current = baseMapper.lockOwnedDirectReply(replyId, candidate.getBlogId(), user.getId());
+            if (current == null) throw new BusinessException(ErrorCode.NOT_FOUND);
+            if (Integer.valueOf(3).equals(current.getStatus())) return;
+            if (baseMapper.withdrawDirectReply(replyId, candidate.getBlogId(), user.getId()) != 1
+                    || baseMapper.decrementCommentCount(candidate.getBlogId()) != 1) {
+                throw new BusinessException(ErrorCode.OPERATION_FAILED);
+            }
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
     private BlogCommentPage toPage(List<BlogComments> rows, int size) {
         boolean hasNext = rows.size() > size;
         int visible = Math.min(rows.size(), size);
