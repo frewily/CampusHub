@@ -122,7 +122,7 @@ class ApiInventoryContractTest {
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
         assertEquals(13, controllerTypes.size());
-        assertEquals(44, actual.size());
+        assertEquals(45, actual.size());
         assertCommentRoute("POST", "/blog-comments", "createComment",
                 "hasAnyRole('USER', 'MERCHANT', 'ADMIN')");
         assertCommentRoute("GET", "/blog-comments/of/blog/{blogId}", "listComments", "");
@@ -139,6 +139,12 @@ class ApiInventoryContractTest {
         adminRoute.put("preAuthorize", "hasRole('ADMIN')");
         assertTrue(actual.contains(canonical(adminRoute)), "admin moderation mapping/guard changed");
         assertTrue(rows(documented).contains(canonical(adminRoute)), "admin moderation route missing from inventory");
+        ObjectNode auditRoute = JSON.createObjectNode();
+        auditRoute.put("method", "GET"); auditRoute.put("path", "/admin/blog-comments/{commentId}/hide-audit");
+        auditRoute.put("controller", "AdminBlogCommentsController"); auditRoute.put("handler", "queryHideAudit");
+        auditRoute.put("preAuthorize", "hasRole('ADMIN')");
+        assertTrue(actual.contains(canonical(auditRoute)), "admin hide-audit mapping/guard changed");
+        assertTrue(rows(documented).contains(canonical(auditRoute)), "admin hide-audit route missing from inventory");
         int actualCommentRouteCount = 0;
         for (String route : actual) {
             if (route.contains("\"BlogCommentsController\"")) actualCommentRouteCount++;
@@ -153,14 +159,14 @@ class ApiInventoryContractTest {
         for (String route : actual) {
             if (route.contains("\"AdminBlogCommentsController\"")) adminCommentRouteCount++;
         }
-        assertEquals(1, adminCommentRouteCount);
+        assertEquals(2, adminCommentRouteCount);
         int documentedAdminCommentRouteCount = 0;
         for (JsonNode route : documented) {
             if ("AdminBlogCommentsController".equals(route.path("controller").asText())) {
                 documentedAdminCommentRouteCount++;
             }
         }
-        assertEquals(1, documentedAdminCommentRouteCount);
+        assertEquals(2, documentedAdminCommentRouteCount);
     }
 
     private static void assertCommentRoute(String method, String path, String handler, String guard) {

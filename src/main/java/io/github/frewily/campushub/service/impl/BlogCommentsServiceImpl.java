@@ -12,6 +12,7 @@ import io.github.frewily.campushub.dto.request.BlogCommentReplyRequest;
 import io.github.frewily.campushub.dto.request.BlogCommentHideRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
+import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.utils.UserHolder;
@@ -212,6 +213,25 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
                             operator.getId(), request.getReason()) != 1) {
                 throw new BusinessException(ErrorCode.OPERATION_FAILED);
             }
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public BlogCommentHideAuditResponse queryHideAudit(Long commentId) {
+        validateCommentId(commentId);
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null || user.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        try {
+            // ADMIN-only HTTP entry; read the retained audit, not current comment/post/profile data.
+            // Ordinary snapshot SELECT must neither wait for the hide writer nor expose its uncommitted audit.
+            BlogCommentHideAuditResponse audit = baseMapper.findFirstLevelHideAuditDetails(commentId);
+            if (audit == null) throw new BusinessException(ErrorCode.NOT_FOUND);
+            return audit;
         } catch (DataAccessException error) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }

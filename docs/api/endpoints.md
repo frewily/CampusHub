@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 44 条，来自 13 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加一级评论，7C 增加直接回复，7D/7E 分别增加本人直接回复/一级评论撤回，7F 增加管理员一级评论隐藏；边界见[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)、[7D](../refactor/26-phase-7d-reply-withdrawal.md)、[7E](../refactor/27-phase-7e-comment-withdrawal.md)和[7F](../refactor/28-phase-7f-comment-moderation.md)。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 45 条，来自 13 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加一级评论，7C 增加直接回复，7D/7E 分别增加本人直接回复/一级评论撤回，7F 增加管理员一级评论隐藏，7G 文档化单条隐藏审计查询；边界见[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)、[7D](../refactor/26-phase-7d-reply-withdrawal.md)、[7E](../refactor/27-phase-7e-comment-withdrawal.md)、[7F](../refactor/28-phase-7f-comment-moderation.md)和[7G](../refactor/29-phase-7g-comment-audit-query.md)。
 
 ## 通用约定
 
@@ -94,13 +94,23 @@ Controller：[BlogCommentsController.java](../../src/main/java/io/github/frewily
 
 ## 一级评论管理员隐藏（Phase 7F，业务应用端）
 
-Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；请求：[BlogCommentHideRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentHideRequest.java)；复用上述评论服务/Mapper；[V008](../../src/main/resources/db/migration/V008__add_blog_comment_hide_audit.sql)新增审核记录表。此路由在应用端口，计入 44 条；不是独立 Actuator 管理面。
+Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；请求：[BlogCommentHideRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentHideRequest.java)；复用上述评论服务/Mapper；[V008](../../src/main/resources/db/migration/V008__add_blog_comment_hide_audit.sql)新增审核记录表。此路由在应用端口；不是独立 Actuator 管理面。
 
 | Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
 |---|---|---|---|---|
 | POST | `/admin/blog-comments/{commentId}/hide` | [`hideComment`](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；需认证；方法 guard 为 `hasRole('ADMIN')`，可隐藏他人或本人正常一级评论，USER/MERCHANT 即使是作者也不允许 | Path commentId 为 Java Long 正数；JSON reason 非空白且最多 255 个 Java 字符单元，未知字段忽略。动态存在、parentId=answerId=0、状态 0；已隐藏 2 仅有同动态 0→2 审核记录时允许重复成功 | HTTP 200、`{"success":true}`，无 data。0→2、comments 减一（NULL/0 下限 0）、首次 operator/reason/from/to/时间审核记录同事务；保留原文和回复。重复不扣数、不改首次记录；未审计的旧 2、1/3/NULL、回复、关系不符或目标/动态缺失 404。参数 400、无效会话 401、非管理员 403、数据库异常通用 500、影响行数异常 422 |
 
-先锁动态，再当前读锁根和重复分支的审核记录，避免旧 RR 快照误判并发重复。首次成功原因不可覆盖，审核记录不会由本用例更新/删除；不承诺防数据库管理员篡改。根隐藏后新请求回复列表/创建为 404，回复作者仍可独立撤回；根作者不能把隐藏改成作者撤回。作者撤回先完成则管理员隐藏为 404。未提供审核列表/查询、恢复、举报工作流或完整管理后台，见[7F 记录](../refactor/28-phase-7f-comment-moderation.md)和[审核笔记](../learning/first-level-comment-moderation.md)。
+先锁动态，再当前读锁根和重复分支的审核记录，避免旧 RR 快照误判并发重复。首次成功原因不可覆盖，审核记录不会由本用例更新/删除；不承诺防数据库管理员篡改。根隐藏后新请求回复列表/创建为 404，回复作者仍可独立撤回；根作者不能把隐藏改成作者撤回。作者撤回先完成则管理员隐藏为 404。7F 没有审核读取接口，7G 的单条查询见下节；仍未提供审核列表、恢复、举报工作流或完整管理后台，见[7F 记录](../refactor/28-phase-7f-comment-moderation.md)和[审核笔记](../learning/first-level-comment-moderation.md)。
+
+## 单条隐藏审计查询（Phase 7G 文档契约）
+
+本节记录应用端单条读取契约。实现和本轮选定验证完成：26 项定向、360 项默认统计（4 设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 通过；见[7G 阶段记录](../refactor/29-phase-7g-comment-audit-query.md)。Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；响应：[BlogCommentHideAuditResponse.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogCommentHideAuditResponse.java)；审计表仍为[V008](../../src/main/resources/db/migration/V008__add_blog_comment_hide_audit.sql)。
+
+| Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
+|---|---|---|---|---|
+| GET | `/admin/blog-comments/{commentId}/hide-audit` | [`queryHideAudit`](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；需认证；`hasRole('ADMIN')`。匿名、停用账号和无效/未知角色为 401；USER/MERCHANT 为 403，包括评论作者或原操作人 | Path `commentId` 必须是正 Java Long；无 body。使用普通参数绑定、参数化 SELECT；5 秒查询超时；只读 REPEATABLE READ 事务 | `Result.ok(dto)`；DTO 字段白名单：`String id`、`commentId`、`blogId`、`operatorUserId`，`String reason`，`Integer fromStatus`、`toStatus`，`LocalDateTime createTime`。按审计记录独立读取，不连接当前评论、动态或用户，不推断当前状态；没有对应审计行为 404。非法/溢出 ID 为 400，数据库内部错误为通用 500 |
+
+查询只读取已提交且对本事务快照可见的审计行，不读取脏数据或其他事务未提交的记录；在查询前已建立的 REPEATABLE READ 事务可能继续看到旧快照。普通一致性 SELECT 不使用 `FOR UPDATE`。记录只是 V008 的状态转换元数据，不是防篡改证据；不回填历史隐藏记录。该接口不修改评论状态或动态计数，也不提供审计列表、导出、恢复、审核 UI 或完整管理后台，见[7G 学习笔记](../learning/comment-hide-audit-query.md)。
 
 ## 关注
 
@@ -131,6 +141,6 @@ Controller：[HealthController.java](../../src/main/java/io/github/frewily/campu
 | GET | `/health/live` | [`live`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L13)；公开 | 无参数 | 原始 JSON `{"status":"UP"}` |
 | GET | `/health/ready` | [`ready`](../../src/main/java/io/github/frewily/campushub/controller/HealthController.java#L14)；公开 | 无参数 | 原始 JSON status；MySQL `SELECT 1` 与 Redis `PING` 都成功为 HTTP 200/UP，否则 HTTP 503/DOWN |
 
-## 独立管理端（不计入 44 条）
+## 独立管理端（不计入 45 条）
 
 `SecurityConfig.managementSecurityFilterChain` 与 `application.yaml` 暴露两个 Actuator GET：`GET /actuator/health`、`GET /actuator/prometheus`。它们不属于业务 Controller 清单；管理监听地址默认 `127.0.0.1:8082`（端口可由配置替换），管理链对这两个 GET 公开并拒绝其他 Actuator 请求。Actuator 路由由 Spring Boot 管理端框架提供。

@@ -193,6 +193,7 @@
 - Phase 7D：本人直接回复逻辑撤回，所有角色仅本人；保留原文、状态 0→3 与计数同事务、重复不扣计数，先锁动态后当前读复核回复归属。无一级评论撤回、级联/物理删除、管理员审核或历史修复。记录见 `docs/refactor/26-phase-7d-reply-withdrawal.md`。
 - Phase 7E：本人一级评论逻辑撤回，复用状态 3，保留全部回复行/状态，不级联扣数；根撤回后新请求的回复列表/创建关闭，回复作者仍可独立撤回。所有角色仅本人，当前读复核与计数同事务。记录见 `docs/refactor/27-phase-7e-comment-withdrawal.md`；不扩展恢复、审核或通知。
 - Phase 7F：增加 ADMIN 隐藏正常一级评论的应用端接口；按动态→评论锁定并当前读复核，评论状态 0→2、动态计数递减和 V008 审计记录同事务，审计保留首次成功的操作人/原因，匹配的重复请求不重复扣数。实现与本轮验证完成：65 项定向检查、Java 8 clean package 351 项（4 项设计跳过）、显式 MySQL IT 38 项、目标 Compose 21 组通过；四类测试资源清理已独立确认。按流程提交后独立复审，最终状态在交付对话报告。范围、回退和并发边界见 `docs/refactor/28-phase-7f-comment-moderation.md`。
+- Phase 7G：ADMIN 单条隐藏审计只读查询 `GET /admin/blog-comments/{commentId}/hide-audit` 已实现；正 Java Long 参数，审计行独立读取，八字段 DTO 白名单；普通参数绑定 SELECT、5 秒超时、只读 REPEATABLE READ 事务，不加锁、不关联当前评论/动态/操作者状态，不推断历史。复用 V008，不新增迁移。26 项定向检查、360 项 Java 8 默认统计（0 失败/错误、4 设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 通过，测试资源清理独立复核完成；按流程提交后审查，最终状态在交付对话报告。无列表、导出、状态/计数写入、恢复、UI 或完整管理后台，记录见 `docs/refactor/29-phase-7g-comment-audit-query.md`。
 
 每个小阶段仍执行验证、提交、提交后审查；6A 不进入实际压测，也不宣称 Phase 6 全部完成。
 
@@ -248,7 +249,8 @@
 - Phase 7C：一层直接回复闭环和 41 个应用端映射目录完成；314 项默认回归/打包（4 设计跳过）、14 项显式评论/回复 MySQL IT、15 组目标 Compose 验收通过，资源清理复核完成，见 `docs/refactor/25-phase-7c-comment-replies.md`。按流程提交后独立复审，不自动开发多级回复或审核。
 - Phase 7D：本人直接回复撤回和 42 个应用端映射目录完成；326 项默认回归/打包（4 设计跳过）、21 项显式评论/回复/撤回 MySQL IT、17 组目标 Compose 验收通过，资源清理复核完成，见 `docs/refactor/26-phase-7d-reply-withdrawal.md`。保留原文、不扣重复计数；按流程提交后独立复审，不自动开发一级评论撤回/审核。
 - Phase 7E：本人一级评论撤回及 43 个应用端映射目录完成；338 项默认回归/打包（4 设计跳过）、28 项显式评论/回复/撤回 MySQL IT、19 组目标 Compose 验收通过。保留回复行/状态、关闭根下新请求的回复读写、回复作者可独立撤回；按流程提交后独立复审，不自动开发恢复/审核/通知。见 `docs/refactor/27-phase-7e-comment-withdrawal.md`。
-- Phase 7F：管理员隐藏一级评论及 V008 审计实现与本轮验证完成；65 项定向检查、Java 8 clean package 351 项（0 失败/错误、4 项设计跳过）、显式 BlogCommentsMySqlIT 38 项、目标 Compose 21 组通过，四类测试资源清理经独立确认。记录见 `docs/refactor/28-phase-7f-comment-moderation.md`；按流程提交后独立复审，最终状态在交付对话报告。
+- Phase 7F：管理员隐藏一级评论及 V008 审计实现与本轮验证完成；65 项定向检查、Java 8 clean package 351 项（0 失败/错误、4 项设计跳过）、显式 BlogCommentsMySqlIT 38 项、目标 Compose 21 组通过，四类测试资源清理经独立确认。记录见 `docs/refactor/28-phase-7f-comment-moderation.md`；按流程提交后独立复审，最终状态在交付对话报告。此处为 7F 历史证据，不代表 7G 已验证。
+- Phase 7G：ADMIN 单条隐藏审计查询及 45 个应用映射目录实现与本轮选定验证完成；26 项定向、360 项 Java 8 默认统计（4 设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 通过，隔离资源清理独立确认。时间断言的红/对照/绿根因记录保留，不改业务时区语义；记录见 `docs/refactor/29-phase-7g-comment-audit-query.md`。按流程提交后独立复审，最终状态在交付对话报告。
 - 实际性能数据：本机合成正缓存详情/MySQL 搜索的 1/10 VU 短时闭环基线见 `docs/performance/README.md`，限量活动有限批次及三类客户端耗时见 `docs/performance/flash-sale.md`；均保留原始汇总、参数、环境、哈希与逐轮统计。没有持续活动 QPS、订单 TPS、生产容量、优化提升或 SLO 结论；未覆盖范围保持显式待验。
 
 ## 5 原始目标的剩余范围

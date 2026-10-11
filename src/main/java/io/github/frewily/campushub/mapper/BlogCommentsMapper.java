@@ -2,6 +2,7 @@ package io.github.frewily.campushub.mapper;
 
 import io.github.frewily.campushub.entity.BlogComments;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
 import org.apache.ibatis.annotations.Param;
 import java.util.List;
 
@@ -28,6 +29,7 @@ public interface BlogCommentsMapper extends BaseMapper<BlogComments> {
     BlogComments lockModeratableFirstLevelComment(@Param("commentId") Long commentId, @Param("blogId") Long blogId);
     int hideFirstLevelComment(@Param("commentId") Long commentId, @Param("blogId") Long blogId);
     Long findFirstLevelHideAudit(@Param("commentId") Long commentId, @Param("blogId") Long blogId);
+    BlogCommentHideAuditResponse findFirstLevelHideAuditDetails(@Param("commentId") Long commentId);
     int insertFirstLevelHideAudit(@Param("commentId") Long commentId, @Param("blogId") Long blogId,
                                  @Param("operatorUserId") Long operatorUserId, @Param("reason") String reason);
     List<BlogComments> findFirstLevelComments(@Param("blogId") Long blogId,

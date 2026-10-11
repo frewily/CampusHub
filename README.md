@@ -2,7 +2,7 @@
 
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
 
-目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；6E1/6E2 补选定的有限抢购批次实测，6F 补当前接口目录与源码漂移检查；7A 支持不关联门店的校园动态并完成选定读写/Feed 验收；7B/7C 增加一级评论与一层直接回复的创建/游标读取，7D/7E 分别增加本人直接回复/一级评论撤回；7F 增加 ADMIN 隐藏一级评论及事务审计。本阶段实现与本轮验证完成；按流程提交后独立复审，最终状态在交付对话报告。以上不代表原始业务目标全部落地、生产容量或性能优化提升。
+目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；6E1/6E2 补选定的有限抢购批次实测，6F 补当前接口目录与源码漂移检查；7A 支持不关联门店的校园动态并完成选定读写/Feed 验收；7B/7C 增加一级评论与一层直接回复的创建/游标读取，7D/7E 分别增加本人直接回复/一级评论撤回；7F 增加 ADMIN 隐藏一级评论及事务审计；7G 增加 ADMIN 单条隐藏审计只读查询。本轮验证完成：26 项定向检查、360 项默认统计（4 项设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 通过；按流程提交后独立复审，最终状态在交付对话报告。见[7G 阶段记录](docs/refactor/29-phase-7g-comment-audit-query.md)。以上不代表原始业务目标全部落地、生产容量或性能优化提升。
 
 ## 架构与业务
 
@@ -171,13 +171,14 @@ python3 scripts/verify-business-diagnostics.py
 
 ## API 与设计文档
 
-- [当前 API 目录](docs/api/README.md)、[44 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：另列两个 Actuator GET 管理路由；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
+- [当前 API 目录](docs/api/README.md)、[45 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：另列两个 Actuator GET 管理路由；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
 - [Phase 7A 校园动态](docs/refactor/23-phase-7a-campus-posts.md)、[可选门店关联与发布/回退](docs/learning/campus-post-store-association.md)。
 - [Phase 7B 一级评论](docs/refactor/24-phase-7b-comments.md)、[一级评论与游标分页学习笔记](docs/learning/first-level-comments-and-cursors.md)。
 - [Phase 7C 直接回复](docs/refactor/25-phase-7c-comment-replies.md)、[关系派生、锁顺序与可见性](docs/learning/direct-comment-replies.md)。
 - [Phase 7D 本人回复撤回](docs/refactor/26-phase-7d-reply-withdrawal.md)、[权限、幂等与事务计数](docs/learning/direct-reply-withdrawal.md)。
 - [Phase 7E 本人一级评论撤回](docs/refactor/27-phase-7e-comment-withdrawal.md)、[根可见性与回复生命周期](docs/learning/first-level-comment-withdrawal.md)。
 - [Phase 7F 管理员隐藏一级评论](docs/refactor/28-phase-7f-comment-moderation.md)、[事务审计、锁与可见性学习笔记](docs/learning/first-level-comment-moderation.md)。
+- [Phase 7G 单条隐藏审计查询](docs/refactor/29-phase-7g-comment-audit-query.md)、[查询隔离与快照语义学习笔记](docs/learning/comment-hide-audit-query.md)：实现与选定本轮验证完成，最终提交/审查状态在交付对话报告。
 - [领域模型](docs/domain-model.md)、[迁移计划](docs/refactor/02-migration-plan.md)、[遗留兼容说明](docs/learning/legacy-compatibility.md)。
 - [请求/响应契约](docs/refactor/09-phase-2d-api-models.md)、[权限](docs/refactor/08-phase-2c-authorization.md)。
 - [活动准入](docs/refactor/10-phase-3a-flash-sale-admission.md)、[消费恢复](docs/refactor/11-phase-3b-reliable-order-consumption.md)、[订单取消](docs/refactor/12-phase-3c-order-lifecycle.md)。

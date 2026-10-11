@@ -9,6 +9,7 @@ import io.github.frewily.campushub.dto.request.BlogCommentReplyRequest;
 import io.github.frewily.campushub.dto.request.BlogCommentHideRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
+import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogCommentsMapper;
@@ -87,6 +88,7 @@ class BlogCommentsMySqlIT {
     private static final AtomicReference<Runnable> AFTER_OWNED_REPLY_QUERY = new AtomicReference<>();
     private static final AtomicReference<Runnable> AFTER_OWNED_COMMENT_QUERY = new AtomicReference<>();
     private static final AtomicReference<Runnable> AFTER_MODERATABLE_COMMENT_QUERY = new AtomicReference<>();
+    private static final AtomicReference<Callable<Integer>> AFTER_HIDE_AUDIT_INSERT = new AtomicReference<>();
     private static final ThreadLocal<Boolean> EXPECT_READ_ONLY_REPLY_LIST =
             ThreadLocal.withInitial(() -> Boolean.FALSE);
 
@@ -214,9 +216,9 @@ class BlogCommentsMySqlIT {
         }
     }
 
-    @Intercepts(@Signature(type = Executor.class, method = "query", args = {
+    @Intercepts({@Signature(type = Executor.class, method = "query", args = {
             MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class
-    }))
+    }), @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class})})
     static class ReadTransactionContractInterceptor implements Interceptor {
         @Override
         public Object intercept(Invocation invocation) throws Throwable {
@@ -224,6 +226,7 @@ class BlogCommentsMySqlIT {
             String id = statement.getId();
             if (id.endsWith(".findBlog") || id.endsWith(".findFirstLevelComments")
                     || id.endsWith(".findDirectReplies")
+                    || id.endsWith(".findFirstLevelHideAuditDetails")
                     || (id.endsWith(".findVisibleRoot") && EXPECT_READ_ONLY_REPLY_LIST.get())) {
                 assertTrue(TransactionSynchronizationManager.isActualTransactionActive(),
                         "comment listing must run inside a Spring transaction");
@@ -255,6 +258,15 @@ class BlogCommentsMySqlIT {
                 assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
                 Runnable hook = AFTER_MODERATABLE_COMMENT_QUERY.getAndSet(null);
                 if (hook != null) hook.run();
+            }
+            if (id.endsWith(".insertFirstLevelHideAudit")) {
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                Callable<Integer> hook = AFTER_HIDE_AUDIT_INSERT.getAndSet(null);
+                if (hook != null) {
+                    assertEquals(Integer.valueOf(1), result, "hook requires a successful real audit INSERT");
+                    return hook.call();
+                }
             }
             return result;
         }
@@ -288,6 +300,7 @@ class BlogCommentsMySqlIT {
         AFTER_OWNED_REPLY_QUERY.set(null);
         AFTER_OWNED_COMMENT_QUERY.set(null);
         AFTER_MODERATABLE_COMMENT_QUERY.set(null);
+        AFTER_HIDE_AUDIT_INSERT.set(null);
         EXPECT_READ_ONLY_REPLY_LIST.remove();
         UserHolder.removeUser();
         dropTrigger("fail_comment_insert");
@@ -1333,6 +1346,126 @@ class BlogCommentsMySqlIT {
             assertEquals(0, auditCount(root));
             assertNull(AFTER_MODERATABLE_COMMENT_QUERY.get());
         } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void queryHideAuditMapsAllLargeIdsAndRetainsFirstSuccessfulMetadataWithoutWrites() {
+        long blogId = blog(LARGE_ID + 2, AUTHOR_ID, 1);
+        jdbc.execute("ALTER TABLE tb_blog_comments AUTO_INCREMENT=" + (LARGE_ID + 4));
+        jdbc.execute("ALTER TABLE tb_blog_comment_hide_audit AUTO_INCREMENT=" + (LARGE_ID + 6));
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "private original content");
+        UserHolder.saveUser(user(LARGE_ID + 8));
+        String reason = "synthetic ' bound reason 合成";
+        service.hideComment(root, hideRequest(reason));
+        BlogCommentHideAuditResponse first = service.queryHideAudit(root);
+        assertEquals(Long.toString(LARGE_ID + 6), first.getId());
+        assertEquals(Long.toString(root), first.getCommentId());
+        assertEquals(Long.toString(blogId), first.getBlogId());
+        assertEquals(Long.toString(LARGE_ID + 8), first.getOperatorUserId());
+        assertEquals(reason, first.getReason());
+        assertEquals(Integer.valueOf(0), first.getFromStatus());
+        assertEquals(Integer.valueOf(2), first.getToStatus());
+        // This fixture pins the JDBC session to UTC. Timestamp.toLocalDateTime() uses the JVM zone instead.
+        assertEquals(jdbc.queryForObject("SELECT create_time FROM tb_blog_comment_hide_audit WHERE comment_id=?",
+                java.sql.Timestamp.class, root).toInstant().atOffset(java.time.ZoneOffset.UTC).toLocalDateTime(),
+                first.getCreateTime());
+        UserHolder.saveUser(user(AUTHOR_ID + 10));
+        service.hideComment(root, hideRequest("different repeat reason"));
+        assertEquals(first, service.queryHideAudit(root));
+        assertEquals(first, service.queryHideAudit(root));
+        assertEquals(1, auditCount(root));
+        assertEquals(Integer.valueOf(0), blogCounter(blogId));
+        assertEquals(Integer.valueOf(2), mapper.selectById(root).getStatus());
+        assertEquals("private original content", mapper.selectById(root).getContent());
+    }
+
+    @Test
+    void queryHideAuditDoesNotInferAuditFromLegacyHiddenWithdrawnOrMissingComment() {
+        long blogId = blog(AUTHOR_ID, 1);
+        long legacy = comment(blogId, AUTHOR_ID, 0, 0, 2, "legacy no audit");
+        long withdrawn = comment(blogId, AUTHOR_ID, 0, 0, 0, "author withdrawal no audit");
+        service.withdrawComment(withdrawn);
+        for (long id : new long[]{legacy, withdrawn, Long.MAX_VALUE}) {
+            assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                    () -> service.queryHideAudit(id)).getErrorCode());
+        }
+        assertEquals(Integer.valueOf(0), jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog_comment_hide_audit", Integer.class));
+        assertEquals(Integer.valueOf(0), blogCounter(blogId));
+        assertEquals(Integer.valueOf(2), mapper.selectById(legacy).getStatus());
+        assertEquals(Integer.valueOf(3), mapper.selectById(withdrawn).getStatus());
+    }
+
+    @Test
+    void queryRetainedAuditDoesNotDependOnCurrentCommentBlogOrOperatorRows() {
+        long operator = AUTHOR_ID + 20;
+        jdbc.update("INSERT INTO tb_user(id,phone,nick_name) VALUES(?,'00000000721','synthetic audit operator')", operator);
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "synthetic root");
+        UserHolder.saveUser(user(operator));
+        service.hideComment(root, hideRequest("retained metadata"));
+        BlogCommentHideAuditResponse audit = service.queryHideAudit(root);
+        // Only fixture-owned rows in this private MySQL instance; no production deletion use case.
+        jdbc.update("DELETE FROM tb_blog_comments WHERE id=?", root);
+        jdbc.update("DELETE FROM tb_blog WHERE id=?", blogId);
+        jdbc.update("DELETE FROM tb_user WHERE id=?", operator);
+        UserHolder.saveUser(user(AUTHOR_ID));
+        assertEquals(audit, service.queryHideAudit(root));
+        assertEquals(1, auditCount(root));
+    }
+
+    @Test
+    void queryDoesNotBlockOrExposeUncommittedHideAuditAndSeesItAfterCommit() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "commit boundary root");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            AFTER_HIDE_AUDIT_INSERT.set(() -> {
+                runIndependent(executor, AUTHOR_ID + 10,
+                        () -> assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                                () -> service.queryHideAudit(root)).getErrorCode()));
+                return 1;
+            });
+            service.hideComment(root, hideRequest("committed audit"));
+            assertNull(AFTER_HIDE_AUDIT_INSERT.get(), "hook must run after the real audit INSERT");
+            runIndependent(executor, AUTHOR_ID + 10,
+                    () -> assertEquals("committed audit", service.queryHideAudit(root).getReason()));
+            assertEquals(1, auditCount(root));
+            assertEquals(Integer.valueOf(0), blogCounter(blogId));
+        } finally {
+            AFTER_HIDE_AUDIT_INSERT.set(null);
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void queryNeverExposesHideAuditWhenWriterRollsBackAfterAuditInsert() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "rollback boundary root");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            AFTER_HIDE_AUDIT_INSERT.set(() -> {
+                runIndependent(executor, AUTHOR_ID + 10,
+                        () -> assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                                () -> service.queryHideAudit(root)).getErrorCode()));
+                // Test-only zero affected-row result AFTER the real INSERT: production row-count guard aborts.
+                return 0;
+            });
+            assertEquals(ErrorCode.OPERATION_FAILED, assertThrows(BusinessException.class,
+                    () -> service.hideComment(root, hideRequest("must roll back"))).getErrorCode());
+            assertNull(AFTER_HIDE_AUDIT_INSERT.get());
+            runIndependent(executor, AUTHOR_ID + 10,
+                    () -> assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                            () -> service.queryHideAudit(root)).getErrorCode()));
+            assertEquals(0, auditCount(root));
+            assertEquals(Integer.valueOf(1), blogCounter(blogId));
+            assertEquals(Integer.valueOf(0), mapper.selectById(root).getStatus());
+            assertEquals("rollback boundary root", mapper.selectById(root).getContent());
+        } finally {
+            AFTER_HIDE_AUDIT_INSERT.set(null);
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
         }

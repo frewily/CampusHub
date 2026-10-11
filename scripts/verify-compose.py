@@ -735,6 +735,86 @@ def verify_first_level_moderation(base, tokens):
     check("root hide NULL/zero floor and status/counter/audit/zero-row faults atomically preserve original content, descendants and count")
 
 
+def verify_comment_hide_audit_query(base, tokens):
+    """Single-record metadata query, role isolation and retained-record semantics on target MySQL."""
+    blog_id, root_id, operator_id, audit_id = (9007199254745001, 9007199254745003,
+                                             9007199254745005, 9007199254745007)
+    sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(%d,'00000000011','synthetic-audit-operator');"
+        "INSERT INTO tb_user_role(user_id,role) VALUES(%d,'ADMIN');"
+        "INSERT INTO tb_blog(id,shop_id,user_id,title,images,content,liked,comments) "
+        "VALUES(%d,NULL,900001,'synthetic audit post','/synthetic.png','private post text',0,1);"
+        "INSERT INTO tb_blog_comments(id,user_id,blog_id,parent_id,answer_id,content,liked,status) "
+        "VALUES(%d,900001,%d,0,0,'private comment text',0,0);"
+        "ALTER TABLE tb_blog_comment_hide_audit AUTO_INCREMENT=%d;" %
+        (operator_id, operator_id, blog_id, root_id, blog_id, audit_id))
+    headers_by_user = {}
+    for user_id in (operator_id, 900007, 900008, 900009, 900010):
+        token = "synthetic-audit-query-" + uuid.uuid4().hex
+        redis("HSET", "login:token:" + token, "id", str(user_id), "nickName", "synthetic")
+        redis("EXPIRE", "login:token:" + token, "600")
+        headers_by_user[user_id] = {"authorization": token, "Content-Type": "application/json"}
+    admin_headers = {"authorization": tokens[1], "Content-Type": "application/json"}
+    user_headers = {"authorization": tokens[0]}
+    hide_route = "/admin/blog-comments/%d/hide" % root_id
+    route = "/admin/blog-comments/%d/hide-audit" % root_id
+    request(base, hide_route, 200, "POST", b'{"reason":"stored synthetic audit reason"}',
+            headers_by_user[operator_id])
+    request(base, route, 401)
+    # A comment author or merchant has no audit-query permission.
+    for headers in (user_headers, headers_by_user[900007]):
+        request(base, route, 403, headers=headers)
+    for user_id in (900009, 900010):
+        request(base, route, 401, headers=headers_by_user[user_id])
+    # Even the original operator loses query access when its current role becomes USER.
+    sql("UPDATE tb_user_role SET role='USER' WHERE user_id=%d;" % operator_id)
+    request(base, route, 403, headers=headers_by_user[operator_id])
+    sql("UPDATE tb_user_role SET role='ADMIN' WHERE user_id=%d;" % operator_id)
+    for invalid in ("0", "-1", "bad", "9223372036854775808"):
+        request(base, "/admin/blog-comments/" + invalid + "/hide-audit", 400, headers=admin_headers)
+
+    def read_audit(headers):
+        body, _ = request(base, route, headers=headers)
+        result = json.loads(body)
+        assert set(result) == {"success", "data"} and result["success"] is True
+        data = result["data"]
+        assert set(data) == {"id", "commentId", "blogId", "operatorUserId", "reason",
+                             "fromStatus", "toStatus", "createTime"}
+        for field, expected in (("id", audit_id), ("commentId", root_id), ("blogId", blog_id),
+                                ("operatorUserId", operator_id)):
+            assert isinstance(data[field], str) and data[field] == str(expected)
+        assert data["reason"] == "stored synthetic audit reason"
+        assert data["fromStatus"] == 0 and data["toStatus"] == 2
+        stored_time = sql("SELECT DATE_FORMAT(create_time,'%Y-%m-%dT%H:%i:%s') "
+                          "FROM tb_blog_comment_hide_audit WHERE comment_id=" + str(root_id) + ";")
+        assert data["createTime"] == stored_time
+        return data
+
+    first = read_audit(admin_headers)
+    request(base, hide_route, 200, "POST", b'{"reason":"different repeat reason"}', headers_by_user[900008])
+    for headers in (admin_headers, headers_by_user[operator_id], headers_by_user[900008]):
+        assert read_audit(headers) == first
+    assert sql("SELECT comments FROM tb_blog WHERE id=%d;" % blog_id) == "0"
+    assert sql("SELECT CONCAT(status,':',content) FROM tb_blog_comments WHERE id=%d;" % root_id) == \
+        "2:private comment text"
+    assert sql("SELECT COUNT(*) FROM tb_blog_comment_hide_audit WHERE comment_id=%d;" % root_id) == "1"
+    check("ADMIN-only audit query: exact metadata whitelist, four lossless large string IDs, current roles, original operator and repeated reads without mutations")
+
+    sql("INSERT INTO tb_blog_comments(id,user_id,blog_id,parent_id,answer_id,content,status) "
+        "VALUES(%d,900001,%d,0,0,'legacy hidden without audit',2),"
+        "(%d,900001,%d,0,0,'author withdrawn without audit',3);" %
+        (root_id + 10, blog_id, root_id + 11, blog_id))
+    for missing in (root_id + 10, root_id + 11, 9223372036854775807):
+        body, _ = request(base, "/admin/blog-comments/%d/hide-audit" % missing, 404, headers=admin_headers)
+        assert json.loads(body)["errorCode"] == "NOT_FOUND"
+    # Dedicated synthetic fixture rows only: retained audit is not a current-state or profile query.
+    sql("DELETE FROM tb_blog_comments WHERE blog_id=%d; DELETE FROM tb_blog WHERE id=%d;"
+        "DELETE FROM tb_user_role WHERE user_id=%d; DELETE FROM tb_user WHERE id=%d;" %
+        (blog_id, blog_id, operator_id, operator_id))
+    assert read_audit(admin_headers) == first
+    assert sql("SELECT COUNT(*) FROM tb_blog_comment_hide_audit WHERE comment_id=%d;" % root_id) == "1"
+    check("audit query returns no inferred history for legacy/missing/withdrawn rows and retains stored metadata independently of removed comment, post and operator fixtures")
+
+
 def cleanup():
     try:
         compose("--profile", "app", "logs", "--no-color", timeout=30)
@@ -796,6 +876,7 @@ def main():
         verify_reply_withdrawal(base, tokens)
         verify_first_level_withdrawal(base, tokens)
         verify_first_level_moderation(base, tokens)
+        verify_comment_hide_audit_query(base, tokens)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

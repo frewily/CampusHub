@@ -97,6 +97,8 @@ Store 保存名称、分类、图片、地址、坐标、营业时间和展示�
 
 7F 的 `POST /admin/blog-comments/{commentId}/hide` 是独立于 Actuator 管理监听器的 ADMIN 应用端能力。只接受正 Java Long 评论 ID 和非空白 `reason`（最多 255 个 Java UTF-16 单元）；未知 JSON 字段忽略，操作人取登录会话。隐藏只针对存在动态下的正常一级评论，作者不限制；普通 USER/MERCHANT 即使是作者也返回 403。先锁动态，再当前读锁根评论；状态 0→2、动态评论数递减（NULL/0 下限为 0）和写入 V008 审计行在同一事务。任一写入影响行数不是 1 即回滚并返回 422，数据访问异常映射为不含原因的通用 500。只有 status=2 且存在 comment/blog/from=0/to=2 匹配审计行时重复请求才成功，不修改首次操作人/原因、不再次扣数；无匹配审计、status 1/3/NULL、回复、无效关系或缺失动态均为 404。保留根评论原文与全部回复行/状态，不级联或修改回复计数；根从一级列表排除，其下新回复读取/创建为 404，回复作者仍可独立撤回，根作者不能撤回 status=2。V008 不回填旧 status=2 记录；回退应用不恢复状态/计数，保留审计表和数据。审计不是防篡改证据，也没有受保护的导出 API、内容快照、外键或恢复流程。并发 RR 普通读可能看到旧快照；回复创建若先拿到动态锁可能先完成。范围和迁移边界见[7F 阶段记录](refactor/28-phase-7f-comment-moderation.md)。
 
+7G 增加单条审计查询 `GET /admin/blog-comments/{commentId}/hide-audit`，由应用端 ADMIN guard 保护，正 Java Long 参数；匿名、停用或未知角色身份为 401，USER/MERCHANT（包括评论作者或操作人）为 403，非法参数 400，缺失审计 404，数据库错误通用 500。成功返回 `Result.ok` 与八字段白名单 DTO（字符串 ID、reason、Integer 状态和 `LocalDateTime createTime`）。按 V008 审计行独立读取，不关联当前评论/动态/用户，不从当前状态推断历史；参数绑定的普通 SELECT 在 5 秒超时的只读 REPEATABLE READ 事务中执行，不加 `FOR UPDATE`。新事务读取已提交快照，既有 RR 事务可能看到更早快照；不回填历史记录，审计仍非防篡改证据。无状态写、计数变化、列表/导出、恢复、UI 或新迁移。26 项定向、360 项默认统计（4 设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 验证通过；最终提交/审查状态在交付对话报告，见[7G 阶段记录](refactor/29-phase-7g-comment-audit-query.md)。
+
 `Follow` 只表示账号关注账号，禁止自己关注自己；同一 `(follower_id, followee_id)` 只能存在一次。MySQL 保存关系事实，Redis 集合或有序集合只能作为查询加速，结构必须统一。
 
 `PostLike` 规定同一账号对同一 Post 最多存在一条有效点赞关系。`liked` 计数是派生值，不能在关系丢失时仍被视为可靠事实。Redis ZSet 可以保留点赞时间排序，但后续需要持久化关系或明确可恢复的数据策略。
