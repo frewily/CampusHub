@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 45 条，来自 13 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。7B 增加一级评论，7C 增加直接回复，7D/7E 分别增加本人直接回复/一级评论撤回，7F 增加管理员一级评论隐藏，7G 文档化单条隐藏审计查询；边界见[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)、[7D](../refactor/26-phase-7d-reply-withdrawal.md)、[7E](../refactor/27-phase-7e-comment-withdrawal.md)、[7F](../refactor/28-phase-7f-comment-moderation.md)和[7G](../refactor/29-phase-7g-comment-audit-query.md)。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 46 条，来自 13 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。评论相关路由为原 6 条评论/回复/撤回，加 3 条 ADMIN 隐藏和审计路由。7B 增加一级评论，7C 增加直接回复，7D/7E 分别增加本人直接回复/一级评论撤回，7F 增加管理员一级评论隐藏，7G 单条审计查询，7H 按动态分页查询；边界见相邻 7B–7H 阶段记录。
 
 ## 通用约定
 
@@ -100,7 +100,7 @@ Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/fr
 |---|---|---|---|---|
 | POST | `/admin/blog-comments/{commentId}/hide` | [`hideComment`](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；需认证；方法 guard 为 `hasRole('ADMIN')`，可隐藏他人或本人正常一级评论，USER/MERCHANT 即使是作者也不允许 | Path commentId 为 Java Long 正数；JSON reason 非空白且最多 255 个 Java 字符单元，未知字段忽略。动态存在、parentId=answerId=0、状态 0；已隐藏 2 仅有同动态 0→2 审核记录时允许重复成功 | HTTP 200、`{"success":true}`，无 data。0→2、comments 减一（NULL/0 下限 0）、首次 operator/reason/from/to/时间审核记录同事务；保留原文和回复。重复不扣数、不改首次记录；未审计的旧 2、1/3/NULL、回复、关系不符或目标/动态缺失 404。参数 400、无效会话 401、非管理员 403、数据库异常通用 500、影响行数异常 422 |
 
-先锁动态，再当前读锁根和重复分支的审核记录，避免旧 RR 快照误判并发重复。首次成功原因不可覆盖，审核记录不会由本用例更新/删除；不承诺防数据库管理员篡改。根隐藏后新请求回复列表/创建为 404，回复作者仍可独立撤回；根作者不能把隐藏改成作者撤回。作者撤回先完成则管理员隐藏为 404。7F 没有审核读取接口，7G 的单条查询见下节；仍未提供审核列表、恢复、举报工作流或完整管理后台，见[7F 记录](../refactor/28-phase-7f-comment-moderation.md)和[审核笔记](../learning/first-level-comment-moderation.md)。
+先锁动态，再当前读锁根和重复分支的审核记录，避免旧 RR 快照误判并发重复。首次成功原因不可覆盖，审核记录不会由本用例更新/删除；不承诺防数据库管理员篡改。根隐藏后新请求回复列表/创建为 404，回复作者仍可独立撤回；根作者不能把隐藏改成作者撤回。作者撤回先完成则管理员隐藏为 404。7F 本身没有审核读取接口，7G 的单条查询与 7H 的按动态分页见后续两节；仍未提供全局审核列表、恢复、举报工作流或完整管理后台，见[7F 记录](../refactor/28-phase-7f-comment-moderation.md)和[审核笔记](../learning/first-level-comment-moderation.md)。
 
 ## 单条隐藏审计查询（Phase 7G 文档契约）
 
@@ -110,7 +110,17 @@ Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/fr
 |---|---|---|---|---|
 | GET | `/admin/blog-comments/{commentId}/hide-audit` | [`queryHideAudit`](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；需认证；`hasRole('ADMIN')`。匿名、停用账号和无效/未知角色为 401；USER/MERCHANT 为 403，包括评论作者或原操作人 | Path `commentId` 必须是正 Java Long；无 body。使用普通参数绑定、参数化 SELECT；5 秒查询超时；只读 REPEATABLE READ 事务 | `Result.ok(dto)`；DTO 字段白名单：`String id`、`commentId`、`blogId`、`operatorUserId`，`String reason`，`Integer fromStatus`、`toStatus`，`LocalDateTime createTime`。按审计记录独立读取，不连接当前评论、动态或用户，不推断当前状态；没有对应审计行为 404。非法/溢出 ID 为 400，数据库内部错误为通用 500 |
 
-查询只读取已提交且对本事务快照可见的审计行，不读取脏数据或其他事务未提交的记录；在查询前已建立的 REPEATABLE READ 事务可能继续看到旧快照。普通一致性 SELECT 不使用 `FOR UPDATE`。记录只是 V008 的状态转换元数据，不是防篡改证据；不回填历史隐藏记录。该接口不修改评论状态或动态计数，也不提供审计列表、导出、恢复、审核 UI 或完整管理后台，见[7G 学习笔记](../learning/comment-hide-audit-query.md)。
+查询只读取已提交且对本事务快照可见的审计行，不读取脏数据或其他事务未提交的记录；在查询前已建立的 REPEATABLE READ 事务可能继续看到旧快照。普通一致性 SELECT 不使用 `FOR UPDATE`。记录只是 V008 的状态转换元数据，不是防篡改证据；不回填历史隐藏记录。该单条接口不修改评论状态或动态计数，也不负责列表；按动态分页由下节 7H 提供。仍无导出、恢复、审核 UI 或完整管理后台，见[7G 学习笔记](../learning/comment-hide-audit-query.md)。
+
+## 按动态分页读取隐藏审计（Phase 7H 文档契约）
+
+本节定义已实现的应用端 ADMIN 按动态读取隐藏审计分页契约；本轮验证与边界见[7H 记录](../refactor/30-phase-7h-comment-audit-pages.md)。只读取已有 V008 审计，不加入评论列表、全局列表或导出。处理器为 `AdminBlogCommentsController.listHideAudits`；候选索引迁移为 `V009__add_blog_comment_hide_audit_page_index.sql`，已在隔离数据库验证 DDL，不据此宣称性能改善。
+
+| Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
+|---|---|---|---|---|
+| GET | `/admin/blog-comments/hide-audits/of/blog/{blogId}` | `listHideAudits`；`hasRole('ADMIN')`。匿名、停用账号、无效/未知角色为 401；已认证 USER/MERCHANT 为 403 | `blogId` 为正 Java Long；可选 `beforeId` 为正 Java Long，表示审计行 ID（不是评论 ID）；`size` 默认 20，范围 1..50；忽略未知 query 参数。只读 RR 普通 SELECT：按 blog_id 和可选 `id < beforeId` 筛选，`ORDER BY id DESC LIMIT size+1`，5 秒超时 | HTTP 200 `Result.ok(page)`：`items`、`hasNext`、`nextBeforeId`。`items` 复用八字段审计 DTO。多取一行确定 `hasNext` 后裁剪；仅 `hasNext=true` 时返回最后一条已返回审计 ID 的字符串 `nextBeforeId`，否则因 NON_NULL 配置省略 null。动态缺失、无审计或结果为空均为 `items:[]`、`hasNext:false`，不做 blog join |
+
+每页在自己的 RR 只读事务读取，不提供跨页冻结快照。审计 ID 分配顺序不等于事务提交顺序；新记录通常排在首屏，但提交乱序时，后提交的较小 ID 可能落在已翻过的游标之后而被漏看。此接口不承诺跨页无遗漏、全量一致快照、性能 SLA 或延迟指标。保留的审计行不依赖当前评论、动态或操作人行；不查总量、不 COUNT、不改状态或计数，不提供全局列表、导出、恢复、UI、修复或对账。非法参数为 400，数据库访问异常映射为不带 cause 的通用 500。
 
 ## 关注
 

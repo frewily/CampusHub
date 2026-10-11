@@ -34,6 +34,7 @@
     {"method":"DELETE","path":"/blog-comments/{commentId}","controller":"BlogCommentsController","handler":"withdrawComment","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
     {"method":"POST","path":"/admin/blog-comments/{commentId}/hide","controller":"AdminBlogCommentsController","handler":"hideComment","preAuthorize":"hasRole('ADMIN')"},
     {"method":"GET","path":"/admin/blog-comments/{commentId}/hide-audit","controller":"AdminBlogCommentsController","handler":"queryHideAudit","preAuthorize":"hasRole('ADMIN')"},
+    {"method":"GET","path":"/admin/blog-comments/hide-audits/of/blog/{blogId}","controller":"AdminBlogCommentsController","handler":"listHideAudits","preAuthorize":"hasRole('ADMIN')"},
     {"method":"PUT","path":"/follow/{id}/{isFollow}","controller":"FollowController","handler":"follow","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
     {"method":"GET","path":"/follow/or/not/{id}","controller":"FollowController","handler":"isFollow","preAuthorize":""},
     {"method":"GET","path":"/follow/common/{id}","controller":"FollowController","handler":"common","preAuthorize":""},

@@ -1,6 +1,6 @@
 # CampusHub 当前 API 目录
 
-机器清单在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 建立；这是目录初建来源，不表示该提交包含后续路由。参数/响应说明随业务阶段更新：7A 校园动态，7B 一级评论，7C 直接回复，7D/7E 本人回复/一级评论撤回，7F 管理员隐藏一级评论，7G 单条隐藏审计查询，见[7A](../refactor/23-phase-7a-campus-posts.md)、[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)、[7D](../refactor/26-phase-7d-reply-withdrawal.md)、[7E](../refactor/27-phase-7e-comment-withdrawal.md)、[7F](../refactor/28-phase-7f-comment-moderation.md)和[7G](../refactor/29-phase-7g-comment-audit-query.md)。机器清单当前记录 **45 个显式 method/path 映射**（含健康和图片），来自 13 个 Controller。两个 Actuator GET 管理路由另列，不混入应用端数量；原 44 条为 7F 阶段历史基数。
+机器清单在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 建立；这是目录初建来源，不表示该提交包含后续路由。参数/响应说明随业务阶段更新：7A 校园动态，7B 一级评论，7C 直接回复，7D/7E 本人回复/一级评论撤回，7F 管理员隐藏一级评论，7G 单条隐藏审计查询，7H 按动态分页读取隐藏审计，见[7A](../refactor/23-phase-7a-campus-posts.md)、[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)、[7D](../refactor/26-phase-7d-reply-withdrawal.md)、[7E](../refactor/27-phase-7e-comment-withdrawal.md)、[7F](../refactor/28-phase-7f-comment-moderation.md)、[7G](../refactor/29-phase-7g-comment-audit-query.md)和[7H](../refactor/30-phase-7h-comment-audit-pages.md)。机器清单当前记录 **46 个显式 method/path 映射**（含健康和图片），来自 13 个 Controller。两个 Actuator GET 管理路由另列，不混入应用端数量；原 44 条为 7F 阶段历史基数。
 
 - [逐接口目录](endpoints.md)：方法、路径、身份/资源限制、参数、响应与缺失资源语义，链接 Controller、Service 和模型。
 - [机器清单](routes.json)：method/path、Controller、handler 与声明的 `preAuthorize` 原文，用于回归。空字符串仅表示没有该注解，**不代表匿名可访问**；仍受 SecurityConfig 和服务层授权约束。
@@ -67,4 +67,6 @@ Java 8，使用当前已有 Maven 依赖：
 
 [ApiInventoryContractTest](../../src/test/java/io/github/frewily/campushub/controller/ApiInventoryContractTest.java) 自动扫描主源码产物中的 Controller（排除测试探针），注册到 standalone Spring MVC，将实际 method/path、handler 与方法级授权声明逐项对照 routes.json，再检查逐接口表格没有缺失、多写或重复。此前的门禁明确断言六条评论/回复/撤回映射；7F 新增管理员映射及目录同步由 7F 阶段验证覆盖。7G 门禁明确断言 45 个应用路由、13 个 Controller、原评论 6 条加管理员 2 条，其 4 项检查及本轮 26 项定向/360 项默认统计通过（默认有 4 项设计跳过）。该测试不发请求、不启用安全过滤链、不连接 DB/Redis、不启动 worker。
 
-它不能自动核验文档中的字段语义、真实角色/归属执行、Service/Mapper 成功路径、数据库状态或管理面暴露；这些仍需源码审查及阶段明确范围内的 HTTP/隔离验收，不能把映射一致等同于 45 个完整端到端接口都已验收。7G 选定范围内的真实 MySQL、目标 Compose、完整构建和源码目录门禁已验证，不外推全部接口或生产负载。6E2 性能原始证据本阶段不重跑/改写。
+7H 门禁明确断言 46 个应用路由、13 个 Controller、原评论 6 条加管理员 3 条；本轮 40 项定向检查及 374 项默认统计通过（默认有 4 项设计跳过）。上述 7G 数字是历史记录，不用于外推 7H。
+
+它不能自动核验文档中的字段语义、真实角色/归属执行、Service/Mapper 成功路径、数据库状态或管理面暴露；这些仍需源码审查及阶段明确范围内的 HTTP/隔离验收，不能把映射一致等同于 46 个完整端到端接口都已验收。7H 的接口、分页和迁移已在选定本轮范围内实现与验证，真实 MySQL 49 项与目标 Compose 25 组证据见[7H 阶段记录](../refactor/30-phase-7h-comment-audit-pages.md)。6E2 性能原始证据本阶段不重跑/改写。

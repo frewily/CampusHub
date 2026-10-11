@@ -2,11 +2,13 @@ package io.github.frewily.campushub.controller;
 
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.request.BlogCommentHideRequest;
+import io.github.frewily.campushub.dto.request.BlogCommentHideAuditPageRequest;
 import io.github.frewily.campushub.service.IBlogCommentsService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,6 +31,13 @@ public class AdminBlogCommentsController {
     @PreAuthorize("hasRole('ADMIN')")
     public Result queryHideAudit(@Positive @PathVariable("commentId") Long commentId) {
         return Result.ok(blogCommentsService.queryHideAudit(commentId));
+    }
+
+    @GetMapping("/hide-audits/of/blog/{blogId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result listHideAudits(@Positive @PathVariable("blogId") Long blogId,
+                                 @Valid @ModelAttribute BlogCommentHideAuditPageRequest request) {
+        return Result.ok(blogCommentsService.listHideAudits(blogId, request));
     }
 
     @PostMapping("/{commentId}/hide")

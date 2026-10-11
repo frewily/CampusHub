@@ -26,9 +26,9 @@ Compose 为 MySQL 设置 `--default-time-zone=+00:00`，数据库 JDBC URL 同�
 
 ## Fresh bootstrap 不是旧库迁移
 
-MySQL 服务把 `schema.sql`、`seed.sql`、V001–V006 迁移文件只读挂入 `/opt/campushub/db`，把 `00-bootstrap.sh` 单独挂入官方初始化目录。MySQL 官方镜像的初始化目录仅在数据目录为空的首次初始化流程中执行。脚本还自行检查 `campushub` 中现有表数，非空时拒绝继续，然后按顺序建 fresh schema、应用六个迁移并载入种子数据。7A 新增 V006 允许动态门店关联为空，既有卷必须另行审查并先应用迁移后升级应用，见[发布/回退顺序](campus-post-store-association.md)。
+MySQL 服务把 `schema.sql`、`seed.sql` 和版本化迁移只读挂入 `/opt/campushub/db`，把 `00-bootstrap.sh` 单独挂入官方初始化目录。MySQL 官方镜像的初始化目录仅在数据目录为空的首次初始化流程中执行。脚本还自行检查 `campushub` 中现有表数，非空时拒绝继续，然后按顺序建 fresh schema、应用 V001…V009 并载入种子数据。V009 是 `V009__add_blog_comment_hide_audit_page_index.sql` 候选迁移，为 V008 审计表增加 `(blog_id,id)` 分页索引；要求 V008 表先存在。7A 的 V006 放宽动态门店关联，既有卷升级需另审并先迁移后升级应用，见[发布/回退顺序](campus-post-store-association.md)。7H 的 V009 不会自动应用于已有卷，也不是共享数据库自动 DDL：先做备份、核对索引形状，再由维护者审查并人工应用；按索引名跳过重复创建不等于会修复同名错误索引。旧应用回退可保留该索引，不自动删除索引或恢复评论状态/计数，详见[7H 阶段记录](../refactor/30-phase-7h-comment-audit-pages.md)。
 
-因此这是一条针对全新 `mysql-data` 卷的 CampusHub 引导路径，不是把旧 `hmdp` 数据自动搬迁、改名或兼容升级的工具。已有非空库不会因重新启动容器而重放这些文件；对旧数据需要另行制定备份、结构差异核对、数据转换、迁移顺序与回滚方案。不要把“初始化脚本可重复挂载”表述成“初始化会在每次启动重跑”。
+因此这是一条针对全新 `mysql-data` 卷的 CampusHub 引导路径，不是把旧 `hmdp` 数据自动搬迁、改名或兼容升级的工具。已有非空库不会因重新启动容器而重放这些文件；对旧数据需要另行制定备份、结构差异核对、数据转换、迁移顺序与回滚方案。不要把“初始化脚本可重复挂载”表述成“初始化会在每次启动重跑”。V009 的候选文件与既有卷升级步骤由 7H 阶段记录约束；fresh bootstrap 序列包含它，不代表已有共享卷自动升级。
 
 ## 图片本地适配器的契约与限制
 

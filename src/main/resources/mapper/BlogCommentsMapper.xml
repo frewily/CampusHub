@@ -83,6 +83,13 @@
         SELECT id, comment_id, blog_id, operator_user_id, reason, from_status, to_status, create_time
         FROM tb_blog_comment_hide_audit WHERE comment_id = #{commentId}
     </select>
+    <select id="findHideAuditsByBlog"
+            resultType="io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse" timeout="5">
+        SELECT id, comment_id, blog_id, operator_user_id, reason, from_status, to_status, create_time
+        FROM tb_blog_comment_hide_audit WHERE blog_id = #{blogId}
+        <if test="beforeId != null">AND id &lt; #{beforeId}</if>
+        ORDER BY id DESC LIMIT #{limit}
+    </select>
     <select id="findDirectReplies" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
         SELECT id, blog_id, user_id, content, create_time FROM tb_blog_comments
         WHERE blog_id = #{blogId} AND parent_id = #{commentId} AND answer_id = #{commentId} AND status = 0

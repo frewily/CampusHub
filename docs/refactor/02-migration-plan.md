@@ -194,6 +194,7 @@
 - Phase 7E：本人一级评论逻辑撤回，复用状态 3，保留全部回复行/状态，不级联扣数；根撤回后新请求的回复列表/创建关闭，回复作者仍可独立撤回。所有角色仅本人，当前读复核与计数同事务。记录见 `docs/refactor/27-phase-7e-comment-withdrawal.md`；不扩展恢复、审核或通知。
 - Phase 7F：增加 ADMIN 隐藏正常一级评论的应用端接口；按动态→评论锁定并当前读复核，评论状态 0→2、动态计数递减和 V008 审计记录同事务，审计保留首次成功的操作人/原因，匹配的重复请求不重复扣数。实现与本轮验证完成：65 项定向检查、Java 8 clean package 351 项（4 项设计跳过）、显式 MySQL IT 38 项、目标 Compose 21 组通过；四类测试资源清理已独立确认。按流程提交后独立复审，最终状态在交付对话报告。范围、回退和并发边界见 `docs/refactor/28-phase-7f-comment-moderation.md`。
 - Phase 7G：ADMIN 单条隐藏审计只读查询 `GET /admin/blog-comments/{commentId}/hide-audit` 已实现；正 Java Long 参数，审计行独立读取，八字段 DTO 白名单；普通参数绑定 SELECT、5 秒超时、只读 REPEATABLE READ 事务，不加锁、不关联当前评论/动态/操作者状态，不推断历史。复用 V008，不新增迁移。26 项定向检查、360 项 Java 8 默认统计（0 失败/错误、4 设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 通过，测试资源清理独立复核完成；按流程提交后审查，最终状态在交付对话报告。无列表、导出、状态/计数写入、恢复、UI 或完整管理后台，记录见 `docs/refactor/29-phase-7g-comment-audit-query.md`。
+- Phase 7H：已实现 ADMIN 按动态分页读取隐藏审计 `GET /admin/blog-comments/hide-audits/of/blog/{blogId}`；正 Java Long blogId/beforeId、size 1..50 默认 20、忽略未知 query、每页只读 RR 有界查询及 `size+1` lookahead。V009 增加候选 `blog_id,id` 复合索引，要求 V008 表先存在；fresh bootstrap 顺序纳入 V001…V009，已有卷必须备份并审查索引定义后人工应用，旧应用回退可保留索引。40 项定向检查、374 项 Java 8 默认统计（0 失败/错误、4 设计跳过）、49 项显式 MySQL IT、25 组目标 Compose 通过；测试资源清理独立复核完成，按流程提交后审查，最终状态在交付对话报告。每页快照不冻结后续页面，ID 分配不代表提交顺序，不承诺跨页无遗漏或性能 SLA；索引 DDL 验证不是性能证明。无全局列表、COUNT、导出、写入、恢复、UI 或完整后台；见 `docs/refactor/30-phase-7h-comment-audit-pages.md`。
 
 每个小阶段仍执行验证、提交、提交后审查；6A 不进入实际压测，也不宣称 Phase 6 全部完成。
 

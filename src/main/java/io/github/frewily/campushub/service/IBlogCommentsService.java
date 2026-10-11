@@ -9,6 +9,8 @@ import io.github.frewily.campushub.dto.request.BlogCommentHideRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
+import io.github.frewily.campushub.dto.request.BlogCommentHideAuditPageRequest;
+import io.github.frewily.campushub.dto.response.BlogCommentHideAuditPage;
 
 public interface IBlogCommentsService extends IService<BlogComments> {
     BlogCommentItem createComment(BlogCommentCreateRequest request);
@@ -26,4 +28,6 @@ public interface IBlogCommentsService extends IService<BlogComments> {
     void hideComment(Long commentId, BlogCommentHideRequest request);
 
     BlogCommentHideAuditResponse queryHideAudit(Long commentId);
+
+    BlogCommentHideAuditPage listHideAudits(Long blogId, BlogCommentHideAuditPageRequest request);
 }

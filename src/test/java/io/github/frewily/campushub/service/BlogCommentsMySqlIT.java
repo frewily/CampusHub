@@ -10,6 +10,8 @@ import io.github.frewily.campushub.dto.request.BlogCommentHideRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
+import io.github.frewily.campushub.dto.request.BlogCommentHideAuditPageRequest;
+import io.github.frewily.campushub.dto.response.BlogCommentHideAuditPage;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogCommentsMapper;
@@ -165,6 +167,10 @@ class BlogCommentsMySqlIT {
             ClassPathResource hideAudit = new ClassPathResource("db/migration/V008__add_blog_comment_hide_audit.sql");
             ScriptUtils.executeSqlScript(connection, hideAudit);
             ScriptUtils.executeSqlScript(connection, hideAudit);
+            ClassPathResource auditPageIndex = new ClassPathResource(
+                    "db/migration/V009__add_blog_comment_hide_audit_page_index.sql");
+            ScriptUtils.executeSqlScript(connection, auditPageIndex);
+            ScriptUtils.executeSqlScript(connection, auditPageIndex);
         }
     }
 
@@ -227,6 +233,7 @@ class BlogCommentsMySqlIT {
             if (id.endsWith(".findBlog") || id.endsWith(".findFirstLevelComments")
                     || id.endsWith(".findDirectReplies")
                     || id.endsWith(".findFirstLevelHideAuditDetails")
+                    || id.endsWith(".findHideAuditsByBlog")
                     || (id.endsWith(".findVisibleRoot") && EXPECT_READ_ONLY_REPLY_LIST.get())) {
                 assertTrue(TransactionSynchronizationManager.isActualTransactionActive(),
                         "comment listing must run inside a Spring transaction");
@@ -1469,6 +1476,205 @@ class BlogCommentsMySqlIT {
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
         }
+    }
+
+    @Test
+    void auditPageIndexRepeatsPreservesRowsAndDoesNotRepairSameNameWrongShape() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "index fixture root");
+        service.hideComment(root, hideRequest("index fixture audit"));
+        BlogCommentHideAuditResponse before = service.queryHideAudit(root);
+        ClassPathResource migration = new ClassPathResource("db/migration/V009__add_blog_comment_hide_audit_page_index.sql");
+        try (Connection connection = datasource.getConnection()) {
+            ScriptUtils.executeSqlScript(connection, migration);
+            ScriptUtils.executeSqlScript(connection, migration);
+        }
+        assertEquals(Arrays.asList("blog_id", "id"), auditPageIndexColumns());
+        assertEquals(before, service.queryHideAudit(root));
+        // An empty second database belongs to this private mysqld; V009 must not silently pass without V008.
+        try (Connection connection = datasource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE DATABASE audit_page_missing_table_test");
+            try {
+                statement.execute("USE audit_page_missing_table_test");
+                assertThrows(org.springframework.jdbc.datasource.init.ScriptStatementFailedException.class,
+                        () -> ScriptUtils.executeSqlScript(connection, migration));
+            } finally {
+                statement.execute("DROP DATABASE audit_page_missing_table_test");
+            }
+        }
+        // Private fixture-only DDL verifies the migration's documented name-only idempotence boundary.
+        jdbc.execute("DROP INDEX idx_blog_comment_hide_audit_page ON tb_blog_comment_hide_audit");
+        try {
+            jdbc.execute("CREATE INDEX idx_blog_comment_hide_audit_page ON tb_blog_comment_hide_audit(id)");
+            try (Connection connection = datasource.getConnection()) {
+                ScriptUtils.executeSqlScript(connection, migration);
+            }
+            assertEquals(Collections.singletonList("id"), auditPageIndexColumns());
+            assertEquals(before, service.queryHideAudit(root));
+        } finally {
+            jdbc.execute("DROP INDEX idx_blog_comment_hide_audit_page ON tb_blog_comment_hide_audit");
+            jdbc.execute("CREATE INDEX idx_blog_comment_hide_audit_page ON tb_blog_comment_hide_audit(blog_id,id)");
+        }
+    }
+
+    @Test
+    void auditPagesUseAuditIdCursorAndPostFilterWithLosslessMetadataAndNoWrites() {
+        long blogId = blog(LARGE_ID + 20, AUTHOR_ID, 3);
+        long otherBlog = blog(LARGE_ID + 21, AUTHOR_ID, 1);
+        jdbc.execute("ALTER TABLE tb_blog_comments AUTO_INCREMENT=" + (LARGE_ID + 200));
+        jdbc.execute("ALTER TABLE tb_blog_comment_hide_audit AUTO_INCREMENT=" + (LARGE_ID + 100));
+        long firstRoot = comment(blogId, AUTHOR_ID, 0, 0, 0, "first root original");
+        long secondRoot = comment(blogId, AUTHOR_ID, 0, 0, 0, "second root original");
+        long thirdRoot = comment(blogId, AUTHOR_ID, 0, 0, 0, "third root original");
+        long otherRoot = comment(otherBlog, AUTHOR_ID, 0, 0, 0, "other post root");
+        UserHolder.saveUser(user(LARGE_ID + 30));
+        service.hideComment(thirdRoot, hideRequest("third root hidden first"));
+        BlogCommentHideAuditResponse oldest = service.queryHideAudit(thirdRoot);
+        service.hideComment(otherRoot, hideRequest("other post excluded"));
+        service.hideComment(firstRoot, hideRequest("first root hidden second"));
+        BlogCommentHideAuditResponse middle = service.queryHideAudit(firstRoot);
+        service.hideComment(secondRoot, hideRequest("second root hidden last"));
+        BlogCommentHideAuditResponse newest = service.queryHideAudit(secondRoot);
+
+        BlogCommentHideAuditPage first = service.listHideAudits(blogId, hideAuditPageRequest(null, 2));
+        assertEquals(Arrays.asList(newest, middle), first.getItems());
+        assertTrue(first.isHasNext());
+        assertEquals(middle.getId(), first.getNextBeforeId(), "cursor is last returned AUDIT id, not comment/lookahead id");
+        assertNotEquals(middle.getCommentId(), first.getNextBeforeId());
+        BlogCommentHideAuditPage second = service.listHideAudits(blogId,
+                hideAuditPageRequest(Long.valueOf(first.getNextBeforeId()), 2));
+        assertEquals(Collections.singletonList(oldest), second.getItems());
+        assertFalse(second.isHasNext());
+        assertNull(second.getNextBeforeId());
+        assertEquals(Arrays.asList(newest, middle, oldest),
+                service.listHideAudits(blogId, hideAuditPageRequest(null, 3)).getItems());
+        assertEquals(Long.toString(blogId), newest.getBlogId());
+        assertEquals(Long.toString(LARGE_ID + 30), newest.getOperatorUserId());
+        assertEquals(first.getItems(), service.listHideAudits(blogId, hideAuditPageRequest(null, 2)).getItems());
+        assertEquals(Integer.valueOf(0), blogCounter(blogId));
+        assertEquals(Integer.valueOf(0), blogCounter(otherBlog));
+        assertEquals(Integer.valueOf(4), jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog_comment_hide_audit", Integer.class));
+        assertEquals("first root original", mapper.selectById(firstRoot).getContent());
+        assertEquals(Integer.valueOf(2), mapper.selectById(firstRoot).getStatus());
+    }
+
+    @Test
+    void auditPagesReturnEmptyOrRetainedRecordsWithoutCurrentPostCommentOrActorLookup() {
+        long blogId = blog(AUTHOR_ID, 2);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "retained list root");
+        long legacy = comment(blogId, AUTHOR_ID, 0, 0, 2, "no invented audit");
+        long operator = AUTHOR_ID + 31;
+        jdbc.update("INSERT INTO tb_user(id,phone,nick_name) VALUES(?,'00000000732','synthetic page operator')", operator);
+        UserHolder.saveUser(user(operator));
+        service.hideComment(root, hideRequest("retained list metadata"));
+        BlogCommentHideAuditResponse audit = service.queryHideAudit(root);
+        assertEquals(Collections.singletonList(audit), service.listHideAudits(blogId, hideAuditPageRequest(null, 50)).getItems());
+        assertEquals(0, auditCount(legacy));
+        for (long missing : new long[]{Long.MAX_VALUE, blogId + 9999}) {
+            BlogCommentHideAuditPage empty = service.listHideAudits(missing, hideAuditPageRequest(null, 20));
+            assertTrue(empty.getItems().isEmpty());
+            assertFalse(empty.isHasNext());
+            assertNull(empty.getNextBeforeId());
+        }
+        assertTrue(service.listHideAudits(blogId, hideAuditPageRequest(1L, 20)).getItems().isEmpty());
+        // Only this test's synthetic rows, not an application deletion API.
+        jdbc.update("DELETE FROM tb_blog_comments WHERE blog_id=?", blogId);
+        jdbc.update("DELETE FROM tb_blog WHERE id=?", blogId);
+        jdbc.update("DELETE FROM tb_user WHERE id=?", operator);
+        UserHolder.saveUser(user(AUTHOR_ID));
+        assertEquals(Collections.singletonList(audit), service.listHideAudits(blogId, hideAuditPageRequest(null, 50)).getItems());
+    }
+
+    @Test
+    void auditPageDoesNotWaitForOrExposeUncommittedHideAndReadsItAfterCommit() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "page commit boundary root");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            AFTER_HIDE_AUDIT_INSERT.set(() -> {
+                runIndependent(executor, AUTHOR_ID + 10, () -> {
+                    BlogCommentHideAuditPage page = service.listHideAudits(blogId, hideAuditPageRequest(null, 50));
+                    assertTrue(page.getItems().isEmpty());
+                    assertFalse(page.isHasNext());
+                });
+                return 1;
+            });
+            service.hideComment(root, hideRequest("page committed metadata"));
+            assertNull(AFTER_HIDE_AUDIT_INSERT.get());
+            runIndependent(executor, AUTHOR_ID + 10, () -> {
+                BlogCommentHideAuditPage page = service.listHideAudits(blogId, hideAuditPageRequest(null, 50));
+                assertEquals(1, page.getItems().size());
+                assertEquals(Long.toString(root), page.getItems().get(0).getCommentId());
+                assertEquals("page committed metadata", page.getItems().get(0).getReason());
+            });
+        } finally {
+            AFTER_HIDE_AUDIT_INSERT.set(null);
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void auditPageNeverExposesHideThatRollsBackAfterRealAuditInsert() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "page rollback boundary root");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            AFTER_HIDE_AUDIT_INSERT.set(() -> {
+                runIndependent(executor, AUTHOR_ID + 10,
+                        () -> assertTrue(service.listHideAudits(blogId, hideAuditPageRequest(null, 50)).getItems().isEmpty()));
+                return 0;
+            });
+            assertEquals(ErrorCode.OPERATION_FAILED, assertThrows(BusinessException.class,
+                    () -> service.hideComment(root, hideRequest("page must not appear"))).getErrorCode());
+            assertNull(AFTER_HIDE_AUDIT_INSERT.get());
+            runIndependent(executor, AUTHOR_ID + 10,
+                    () -> assertTrue(service.listHideAudits(blogId, hideAuditPageRequest(null, 50)).getItems().isEmpty()));
+            assertEquals(0, auditCount(root));
+            assertEquals(Integer.valueOf(1), blogCounter(blogId));
+            assertEquals(Integer.valueOf(0), mapper.selectById(root).getStatus());
+        } finally {
+            AFTER_HIDE_AUDIT_INSERT.set(null);
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void auditPagesBoundRealMySqlRowsAtFiftyAndReturnOneRemainingFixture() {
+        long blogId = LARGE_ID + 700;
+        // Synthetic imported metadata, not 51 claims of executing the application hide transaction.
+        for (int index = 0; index < 51; index++) {
+            jdbc.update("INSERT INTO tb_blog_comment_hide_audit(id,comment_id,blog_id,operator_user_id,reason,from_status,to_status) "
+                            + "VALUES(?,?,?,?,'synthetic bounded audit fixture',0,2)",
+                    LARGE_ID + 900 + index, LARGE_ID + 800 + index, blogId, LARGE_ID + 600);
+        }
+        BlogCommentHideAuditPage first = service.listHideAudits(blogId, hideAuditPageRequest(Long.MAX_VALUE, 50));
+        assertEquals(50, first.getItems().size());
+        assertTrue(first.isHasNext());
+        assertEquals(Long.toString(LARGE_ID + 950), first.getItems().get(0).getId());
+        assertEquals(Long.toString(LARGE_ID + 901), first.getNextBeforeId());
+        BlogCommentHideAuditPage last = service.listHideAudits(blogId,
+                hideAuditPageRequest(Long.valueOf(first.getNextBeforeId()), 50));
+        assertEquals(1, last.getItems().size());
+        assertEquals(Long.toString(LARGE_ID + 900), last.getItems().get(0).getId());
+        assertFalse(last.isHasNext());
+        assertNull(last.getNextBeforeId());
+        assertEquals(Integer.valueOf(51), jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tb_blog_comment_hide_audit WHERE blog_id=?", Integer.class, blogId));
+    }
+
+    private static List<String> auditPageIndexColumns() {
+        return jdbc.queryForList("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=DATABASE() "
+                + "AND TABLE_NAME='tb_blog_comment_hide_audit' AND INDEX_NAME='idx_blog_comment_hide_audit_page' "
+                + "ORDER BY SEQ_IN_INDEX", String.class);
+    }
+
+    private static BlogCommentHideAuditPageRequest hideAuditPageRequest(Long beforeId, int size) {
+        BlogCommentHideAuditPageRequest request = new BlogCommentHideAuditPageRequest();
+        request.setBeforeId(beforeId);
+        request.setSize(size);
+        return request;
     }
 
     private static void runIndependent(ExecutorService executor, long userId, Runnable action) {

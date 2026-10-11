@@ -13,6 +13,8 @@ import io.github.frewily.campushub.dto.request.BlogCommentHideRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
+import io.github.frewily.campushub.dto.request.BlogCommentHideAuditPageRequest;
+import io.github.frewily.campushub.dto.response.BlogCommentHideAuditPage;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.utils.UserHolder;
@@ -232,6 +234,29 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
             BlogCommentHideAuditResponse audit = baseMapper.findFirstLevelHideAuditDetails(commentId);
             if (audit == null) throw new BusinessException(ErrorCode.NOT_FOUND);
             return audit;
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public BlogCommentHideAuditPage listHideAudits(Long blogId, BlogCommentHideAuditPageRequest request) {
+        if (blogId == null || blogId <= 0) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        validate(request);
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null || user.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        try {
+            // Read stored audit metadata only; no current post/comment/profile lookup or total-count query.
+            int size = request.getSize();
+            List<BlogCommentHideAuditResponse> rows = baseMapper.findHideAuditsByBlog(
+                    blogId, request.getBeforeId(), size + 1);
+            boolean hasNext = rows.size() > size;
+            List<BlogCommentHideAuditResponse> items = new ArrayList<>(rows.subList(0, Math.min(size, rows.size())));
+            String nextBeforeId = hasNext ? items.get(items.size() - 1).getId() : null;
+            return new BlogCommentHideAuditPage(items, hasNext, nextBeforeId);
         } catch (DataAccessException error) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }

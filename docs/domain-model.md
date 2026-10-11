@@ -4,7 +4,7 @@
 
 本文定义 CampusHub 从点评教学项目演进为校园生活与商户服务平台时采用的统一业务语言、实体关系、核心规则、权限边界和旧数据映射。它是 Phase 1A 的设计结论，不在本阶段修改 Java 类、数据库表、接口或运行行为。
 
-后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog）。Phase 7B 已按[阶段记录](refactor/24-phase-7b-comments.md)落地一级评论（V007），Phase 7C 增加[一层直接回复](refactor/25-phase-7c-comment-replies.md)，7D/7E 增加作者本人逻辑撤回，7F 增加[ADMIN 隐藏一级评论及审计](refactor/28-phase-7f-comment-moderation.md)（V008）。仍未实现多级回复、恢复、回复审核、举报工作流、通知、点赞持久化和完整管理后台。
+后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog）。Phase 7B 已按[阶段记录](refactor/24-phase-7b-comments.md)落地一级评论（V007），Phase 7C 增加[一层直接回复](refactor/25-phase-7c-comment-replies.md)，7D/7E 增加作者本人逻辑撤回，7F 增加[ADMIN 隐藏一级评论及审计](refactor/28-phase-7f-comment-moderation.md)（V008），7G 单条读取，7H 按动态分页读取（V009）；7H 实现与选定本轮验证完成。仍未实现多级回复、恢复、回复审核、举报工作流、通知、点赞持久化和完整管理后台。
 
 CampusHub 继续采用模块化单体。第一版按单校园场景设计，不引入多租户或 `Campus` 表；当系统出现跨校数据隔离、不同校区运营或独立管理员等真实需求时，再增加校园维度。当前重点是把“账号、商户主体、门店、内容、活动和订单”分清，而不是机械替换 `Shop`、`Blog`、`Voucher` 等名称。
 
@@ -99,6 +99,8 @@ Store 保存名称、分类、图片、地址、坐标、营业时间和展示�
 
 7G 增加单条审计查询 `GET /admin/blog-comments/{commentId}/hide-audit`，由应用端 ADMIN guard 保护，正 Java Long 参数；匿名、停用或未知角色身份为 401，USER/MERCHANT（包括评论作者或操作人）为 403，非法参数 400，缺失审计 404，数据库错误通用 500。成功返回 `Result.ok` 与八字段白名单 DTO（字符串 ID、reason、Integer 状态和 `LocalDateTime createTime`）。按 V008 审计行独立读取，不关联当前评论/动态/用户，不从当前状态推断历史；参数绑定的普通 SELECT 在 5 秒超时的只读 REPEATABLE READ 事务中执行，不加 `FOR UPDATE`。新事务读取已提交快照，既有 RR 事务可能看到更早快照；不回填历史记录，审计仍非防篡改证据。无状态写、计数变化、列表/导出、恢复、UI 或新迁移。26 项定向、360 项默认统计（4 设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 验证通过；最终提交/审查状态在交付对话报告，见[7G 阶段记录](refactor/29-phase-7g-comment-audit-query.md)。
 
+7H 已增加 `GET /admin/blog-comments/hide-audits/of/blog/{blogId}`，仅 ADMIN 可读，按一个 blog 过滤并使用 `id < beforeId`、`id DESC` 游标及默认 20/最大 50 条分页。每页在只读 REPEATABLE READ 事务中执行参数化普通 SELECT，5 秒查询超时，以 `size+1` lookahead 得到 hasNext；nextBeforeId 仅在还有下一页时取最后返回审计 ID 字符串。审计 DTO 仍为 8 个字段；空/缺失 blog 与无审计统一成功返回空页，不 join 当前业务行。V009 增加候选 `(blog_id,id)` 索引，名字检查可重复执行但不修复同名错误形状，依赖 V008 表先创建；DDL 与行保留已在隔离 MySQL 验证，不代表生产迁移或性能提升。ID 分配次序不是提交顺序，因此各页独立快照，不保证跨页无遗漏/冻结视图，不作 SLA 或性能结论。范围、验证证据与部署约束见[7H 阶段记录](refactor/30-phase-7h-comment-audit-pages.md)。
+
 `Follow` 只表示账号关注账号，禁止自己关注自己；同一 `(follower_id, followee_id)` 只能存在一次。MySQL 保存关系事实，Redis 集合或有序集合只能作为查询加速，结构必须统一。
 
 `PostLike` 规定同一账号对同一 Post 最多存在一条有效点赞关系。`liked` 计数是派生值，不能在关系丢失时仍被视为可靠事实。Redis ZSet 可以保留点赞时间排序，但后续需要持久化关系或明确可恢复的数据策略。
@@ -123,7 +125,7 @@ Notification 只定义为未来独立模块。只有在订单状态、活动结�
 
 ## 4 角色与资源权限
 
-下表是目标权限边界，并非全部已实现 API。当前 7D/7E 回复/一级评论逻辑撤回对 USER/MERCHANT/ADMIN 一律仅本人，无商户内容或管理员覆盖；7F 只增加 ADMIN 隐藏正常一级评论。动态编辑、级联/物理删除、恢复、回复审核、举报工作流和完整审核后台仍未实现。
+下表是目标权限边界，并非全部已实现 API。当前 7D/7E 回复/一级评论逻辑撤回对 USER/MERCHANT/ADMIN 一律仅本人，无商户内容或管理员覆盖；7F 增加 ADMIN 隐藏正常一级评论，7G/7H 已实现 ADMIN 审计单条/按动态分页读取。动态编辑、级联/物理删除、恢复、回复审核、举报工作流和完整审核后台仍未实现。
 
 | 操作 | 匿名用户 | USER | MERCHANT | ADMIN |
 | --- | --- | --- | --- | --- |
@@ -132,6 +134,7 @@ Notification 只定义为未来独立模块。只有在订单状态、活动结�
 | 发布普通校园动态、评论、关注和点赞 | 不允许 | 允许 | 允许 | 允许 |
 | 修改或删除动态、评论 | 不允许 | 仅本人 | 仅本人或所属商户内容 | 可按审核规则处理 |
 | 隐藏正常一级评论（7F） | 不允许 | 不允许 | 不允许 | 允许；作者身份不影响管理权限 |
+| 读取隐藏审计（7G 单条/7H 按动态分页） | 不允许 | 不允许 | 不允许 | 只读；不受原操作人身份影响 |
 | 签到、参与活动、查看订单 | 不允许 | 仅本人 | 以用户身份仅本人 | 仅管理接口，不能冒充用户下单 |
 | 创建或修改门店 | 不允许 | 不允许 | 仅有效成员所属 Merchant 的 Store | 允许审核和平台管理 |
 | 创建、上下架活动 | 不允许 | 不允许 | 仅所属 Store | 允许审核和平台管理 |
