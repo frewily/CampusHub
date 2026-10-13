@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.ScrollResult;
 import io.github.frewily.campushub.dto.UserDTO;
+import io.github.frewily.campushub.dto.request.BlogEditRequest;
 import io.github.frewily.campushub.entity.Blog;
 import io.github.frewily.campushub.entity.Follow;
 import io.github.frewily.campushub.entity.User;
@@ -23,8 +24,11 @@ import io.github.frewily.campushub.utils.UserHolder;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
+import javax.validation.Validator;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -41,6 +45,43 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Resource
     private IFollowService followService;
+
+    @Resource
+    private Validator validator;
+
+    @Override
+    @Transactional
+    public void editBlog(Long id, BlogEditRequest request) {
+        if (id == null || id <= 0 || request == null || !validator.validate(request).isEmpty()) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null || user.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        try {
+            // Current row lock also follows the existing comment writer's post-first lock order.
+            Blog stored = baseMapper.findBlogForAuthorEdit(id);
+            if (stored == null) throw new BusinessException(ErrorCode.NOT_FOUND);
+            if (!user.getId().equals(stored.getUserId())) {
+                throw new BusinessException(ErrorCode.AUTHORIZATION_FAILED);
+            }
+            String images = request.getImages();
+            if (images == null || images.trim().isEmpty()) images = "";
+            if (stored.getShopId() != null && images.isEmpty()) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "关联门店的动态图片不能为空");
+            }
+            // Exact repeat is a no-op, independent of the driver's changed/found row mode.
+            if (Objects.equals(stored.getTitle(), request.getTitle())
+                    && Objects.equals(stored.getImages(), images)
+                    && Objects.equals(stored.getContent(), request.getContent())) return;
+            if (baseMapper.editBlogFields(id, user.getId(), request.getTitle(), images, request.getContent()) != 1) {
+                throw new BusinessException(ErrorCode.OPERATION_FAILED);
+            }
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
 
     @Override
     public Result queryHotBlog(Integer current) {

@@ -998,6 +998,120 @@ def verify_comment_hide_audit_pages(base, tokens):
     check("audit pages: empty/missing post 200, retained orphan metadata, default20 and maximum50 lookahead pages, immutable rows and V009 repeat preservation")
 
 
+def verify_post_author_edit(base, tokens):
+    """Author-only edits against real HTTP/SQL/Redis; fixtures belong to this fresh project."""
+    actors = [(900040, 'USER'), (900041, 'MERCHANT'), (900042, 'ADMIN'),
+              (900043, 'USER'), (900044, 'USER'), (900045, 'MERCHANT'),
+              (900046, None), (900047, 'AUDITOR'), (900048, 'ADMIN')]
+    headers = {}
+    for user_id, role in actors:
+        sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'000000000%02d',"
+            "'synthetic-edit-actor','%s');" % (user_id, user_id - 900000,
+                                               'DISABLED' if user_id == 900048 else 'ACTIVE'))
+        if role:
+            sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (user_id, role))
+        token = 'synthetic-post-edit-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[user_id] = {'authorization': token, 'Content-Type': 'application/json'}
+    sql("INSERT INTO tb_follow(user_id,follow_user_id) VALUES(900043,900040),(900043,900041),(900043,900042);")
+    posts = []
+    for user_id in (900040, 900041, 900042):
+        body, _ = request(base, '/blog', 200, 'POST', json.dumps(
+            {'title': 'synthetic old edit title', 'content': 'synthetic old edit content'}).encode(), headers[user_id])
+        posts.append((json.loads(body)['data'], user_id))
+    body, _ = request(base, '/blog', 200, 'POST', json.dumps(
+        {'shopId': 1, 'title': 'synthetic store edit', 'images': '/synthetic-store.png',
+         'content': 'synthetic old store content'}).encode(), headers[900040])
+    store_id = json.loads(body)['data']
+    first = posts[0][0]
+    body, _ = request(base, '/blog-comments', 200, 'POST', json.dumps(
+        {'blogId': first, 'content': 'synthetic retained edit root'}).encode(), headers[900040])
+    root_id = json.loads(body)['data']['id']
+    body, _ = request(base, '/blog-comments/%s/replies' % root_id, 200, 'POST', json.dumps(
+        {'content': 'synthetic retained edit reply'}).encode(), headers[900041])
+    reply_id = json.loads(body)['data']['id']
+    request(base, '/admin/blog-comments/%s/hide' % root_id, 200, 'POST', json.dumps(
+        {'reason': 'synthetic retained edit audit'}).encode(), headers[900042])
+    request(base, '/blog/like/%d' % first, 200, 'PUT', headers=headers[900041])
+    assert sql("SELECT CONCAT(liked,':',comments) FROM tb_blog WHERE id=%d;" % first) == '1:1'
+    audit_before = sql("SELECT CONCAT(id,':',comment_id,':',operator_user_id,':',reason) "
+                       "FROM tb_blog_comment_hide_audit WHERE comment_id=%s;" % root_id)
+    feed_before = redis('ZRANGE', 'feed:900043', '0', '-1', 'WITHSCORES')
+    likes_before = redis('ZRANGE', 'blog:liked:%d' % first, '0', '-1', 'WITHSCORES')
+    payload = {'title': 'synthetic edited title', 'images': None,
+               'content': "synthetic edited <script>text</script> ' ; --",
+               'id': 999999, 'userId': 900044, 'shopId': 999999, 'liked': 999, 'comments': 888,
+               'createTime': '2000-01-01T00:00:00', 'updateTime': '2000-01-01T00:00:00'}
+    for post_id, user_id in posts:
+        route = '/blog/%d' % post_id
+        create_time = sql("SELECT create_time FROM tb_blog WHERE id=%d;" % post_id)
+        request(base, route, 401, 'PUT', json.dumps(payload).encode(), {'Content-Type': 'application/json'})
+        for invalid_user in (900046, 900047, 900048):
+            request(base, route, 401, 'PUT', json.dumps(payload).encode(), headers[invalid_user])
+        for other in (headers[900044], headers[900045], {'authorization': tokens[1], 'Content-Type': 'application/json'}):
+            request(base, route, 403, 'PUT', json.dumps(payload).encode(), other)
+        body, _ = request(base, route, 200, 'PUT', json.dumps(payload).encode(), headers[user_id])
+        assert json.loads(body) == {'success': True}
+        assert sql("SELECT COUNT(*) FROM tb_blog WHERE id=%d AND user_id=%d AND shop_id IS NULL "
+                   "AND images='' AND title='synthetic edited title';" % (post_id, user_id)) == '1'
+        assert sql("SELECT create_time FROM tb_blog WHERE id=%d;" % post_id) == create_time
+        detail, _ = request(base, route, headers=headers[user_id])
+        detail = json.loads(detail)['data']
+        assert detail['images'] == '' and detail['content'] == payload['content']
+        assert detail['userId'] == user_id and 'shopId' not in detail
+    assert sql("SELECT CONCAT(liked,':',comments) FROM tb_blog WHERE id=%d;" % first) == '1:1'
+    assert sql("SELECT CONCAT(status,':',content) FROM tb_blog_comments WHERE id=%s;" % root_id) == '2:synthetic retained edit root'
+    assert sql("SELECT CONCAT(status,':',content) FROM tb_blog_comments WHERE id=%s;" % reply_id) == '0:synthetic retained edit reply'
+    assert sql("SELECT CONCAT(id,':',comment_id,':',operator_user_id,':',reason) "
+               "FROM tb_blog_comment_hide_audit WHERE comment_id=%s;" % root_id) == audit_before
+    assert redis('ZRANGE', 'feed:900043', '0', '-1', 'WITHSCORES') == feed_before
+    assert redis('ZRANGE', 'blog:liked:%d' % first, '0', '-1', 'WITHSCORES') == likes_before
+    body, _ = request(base, '/blog/of/follow?lastId=%d&offset=0' % (int(time.time() * 1000) + 60000), headers=headers[900043])
+    rows = json.loads(body)['data']['list']
+    assert len(rows) == 2 and all(row['id'] in [p[0] for p in posts] + [store_id] for row in rows)
+    for row in rows:
+        if row['id'] != store_id:
+            assert row['content'] == payload['content'] and row['images'] == ''
+    check('post edits: author-only three roles, no ADMIN override, immutable ownership/association/counters/comments/audit/Feed score and current content reads')
+
+    store_payload = {'title': 'synthetic updated store', 'content': 'synthetic updated store content', 'shopId': None}
+    for images in (None, '', ' \t'):
+        store_payload['images'] = images
+        request(base, '/blog/%d' % store_id, 400, 'PUT', json.dumps(store_payload).encode(), headers[900040])
+    store_payload['images'] = '  /synthetic-new-store.png  '
+    request(base, '/blog/%d' % store_id, 200, 'PUT', json.dumps(store_payload).encode(), headers[900040])
+    assert sql("SELECT shop_id FROM tb_blog WHERE id=%d;" % store_id) == '1'
+    assert sql("SELECT images FROM tb_blog WHERE id=%d;" % store_id) == store_payload['images'].strip()  # CLI strips output; HTTP below preserves it.
+    body, _ = request(base, '/blog/%d' % store_id, headers=headers[900040])
+    assert json.loads(body)['data']['images'] == store_payload['images']
+    for invalid_id in ('0', '-1', 'bad', '9223372036854775808'):
+        request(base, '/blog/' + invalid_id, 400, 'PUT', json.dumps(payload).encode(), headers[900040])
+    request(base, '/blog/9223372036854775807', 404, 'PUT', json.dumps(payload).encode(), headers[900040])
+    invalids = [dict(payload, title=' '), dict(payload, title='t' * 256), dict(payload, content=' '),
+                dict(payload, content='c' * 2049), dict(payload, images=' ' * 2049), dict(payload, images='p' * 2049),
+                {'title': 'missing replacement body'}, {}]
+    for invalid in invalids:
+        request(base, '/blog/%d' % first, 400, 'PUT', json.dumps(invalid).encode(), headers[900040])
+    snapshot = sql("SELECT CONCAT(title,':',images,':',content,':',liked,':',comments,':',update_time) FROM tb_blog WHERE id=%d;" % first)
+    sql("DELIMITER $$\nCREATE TRIGGER fail_owned_post_edit BEFORE UPDATE ON tb_blog FOR EACH ROW BEGIN "
+        "IF OLD.id=%d THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private edit fault'; "
+        "END IF; END$$\nDELIMITER ;\n" % first)
+    try:
+        # Exact normalized replay must not issue an UPDATE, even while the trigger rejects one.
+        request(base, '/blog/%d' % first, 200, 'PUT', json.dumps(payload).encode(), headers[900040])
+        failure = dict(payload, title='synthetic changed edit should roll back')
+        body, _ = request(base, '/blog/%d' % first, 500, 'PUT', json.dumps(failure).encode(), headers[900040])
+        error = json.loads(body)
+        assert error['errorCode'] == 'INTERNAL_ERROR' and error['errorMsg'] == '服务器异常'
+        assert b'synthetic private edit fault' not in body and b'SIGNAL' not in body
+    finally:
+        sql('DROP TRIGGER IF EXISTS fail_owned_post_edit;')
+    assert sql("SELECT CONCAT(title,':',images,':',content,':',liked,':',comments,':',update_time) FROM tb_blog WHERE id=%d;" % first) == snapshot
+    assert redis('ZRANGE', 'feed:900043', '0', '-1', 'WITHSCORES') == feed_before
+    check('post edit boundaries: stored store association, full-replacement validation, exact no-op under UPDATE-rejecting trigger, generic SQL failure and rollback')
+
+
 def cleanup():
     try:
         compose("--profile", "app", "logs", "--no-color", timeout=30)
@@ -1065,6 +1179,7 @@ def main():
         verify_first_level_moderation(base, tokens)
         verify_comment_hide_audit_query(base, tokens)
         verify_comment_hide_audit_pages(base, tokens)
+        verify_post_author_edit(base, tokens)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

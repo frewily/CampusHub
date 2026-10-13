@@ -122,7 +122,8 @@ class ApiInventoryContractTest {
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
         assertEquals(13, controllerTypes.size());
-        assertEquals(46, actual.size());
+        assertEquals(47, actual.size());
+        assertBlogEditRoute();
         assertCommentRoute("POST", "/blog-comments", "createComment",
                 "hasAnyRole('USER', 'MERCHANT', 'ADMIN')");
         assertCommentRoute("GET", "/blog-comments/of/blog/{blogId}", "listComments", "");
@@ -175,6 +176,23 @@ class ApiInventoryContractTest {
             }
         }
         assertEquals(3, documentedAdminCommentRouteCount);
+    }
+
+    @Test
+    void blogEditRouteIsRegisteredAndDocumentedWithItsRoleGuard() {
+        assertBlogEditRoute();
+    }
+
+    private static void assertBlogEditRoute() {
+        ObjectNode expected = JSON.createObjectNode();
+        expected.put("method", "PUT"); expected.put("path", "/blog/{id}");
+        expected.put("controller", "BlogController"); expected.put("handler", "editBlog");
+        expected.put("preAuthorize", "hasAnyRole('USER', 'MERCHANT', 'ADMIN')");
+        assertTrue(actual.contains(canonical(expected)), "blog edit mapping/guard changed");
+        assertTrue(rows(documented).contains(canonical(expected)), "blog edit mapping/guard missing from inventory");
+        int controllerRouteCount = 0;
+        for (String route : actual) if (route.contains("\"BlogController\"")) controllerRouteCount++;
+        assertEquals(9, controllerRouteCount, "BlogController route count changed");
     }
 
     private static void assertCommentRoute(String method, String path, String handler, String guard) {

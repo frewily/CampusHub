@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.ApiModelMapper;
 import io.github.frewily.campushub.dto.request.BlogCreateRequest;
+import io.github.frewily.campushub.dto.request.BlogEditRequest;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.Blog;
 import io.github.frewily.campushub.service.IBlogService;
@@ -32,6 +33,14 @@ public class BlogController {
     @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
     public Result saveBlog(@Valid @NotNull @RequestBody BlogCreateRequest blog) {
         return blogService.saveBlog(ApiModelMapper.toBlog(blog));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
+    public Result editBlog(@Positive @PathVariable("id") Long id,
+                           @Valid @NotNull @RequestBody BlogEditRequest request) {
+        blogService.editBlog(id, request);
+        return Result.ok();
     }
 
     @PutMapping("/like/{id}")

@@ -19,6 +19,7 @@
     {"method":"GET","path":"/shop/search","controller":"ShopSearchController","handler":"search","preAuthorize":""},
     {"method":"GET","path":"/shop-type/list","controller":"ShopTypeController","handler":"queryTypeList","preAuthorize":""},
     {"method":"POST","path":"/blog","controller":"BlogController","handler":"saveBlog","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
+    {"method":"PUT","path":"/blog/{id}","controller":"BlogController","handler":"editBlog","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
     {"method":"PUT","path":"/blog/like/{id}","controller":"BlogController","handler":"likeBlog","preAuthorize":"hasAnyRole('USER', 'MERCHANT', 'ADMIN')"},
     {"method":"GET","path":"/blog/of/me","controller":"BlogController","handler":"queryMyBlog","preAuthorize":""},
     {"method":"GET","path":"/blog/hot","controller":"BlogController","handler":"queryHotBlog","preAuthorize":""},

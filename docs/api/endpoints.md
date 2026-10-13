@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 46 条，来自 13 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。评论相关路由为原 6 条评论/回复/撤回，加 3 条 ADMIN 隐藏和审计路由。7B 增加一级评论，7C 增加直接回复，7D/7E 分别增加本人直接回复/一级评论撤回，7F 增加管理员一级评论隐藏，7G 单条审计查询，7H 按动态分页查询；7I 只调整既有 POST /blog 的条件字段语义，不新增路由，实现与选定本轮验证完成，见[阶段记录](../refactor/31-phase-7i-text-only-campus-posts.md)。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 47 条，来自 13 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。评论相关路由为原 6 条评论/回复/撤回，加 3 条 ADMIN 隐藏和审计路由。7B 增加一级评论，7C 增加直接回复，7D/7E 分别增加本人直接回复/一级评论撤回，7F 增加管理员一级评论隐藏，7G 单条审计查询，7H 按动态分页查询；7I 调整既有 POST /blog 的条件字段语义；7J 增加作者编辑路由，实现与选定本轮验证完成，边界见 7J 阶段记录。
 
 ## 通用约定
 
@@ -66,6 +66,7 @@ Controller：[BlogController.java](../../src/main/java/io/github/frewily/campush
 | Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
 |---|---|---|---|---|
 | POST | `/blog` | [`saveBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L33)；需认证；允许 USER、MERCHANT、ADMIN；匿名、停用账号或无有效角色为 401 | JSON `BlogCreateRequest`：`shopId` 可省略/null 或正数；`title` 非空白且≤255，`content` 非空白且≤2048。无关联门店时 `images` 可省略/null/空串/`String.trim()` 后为空白，映射为非 null `""` 再保存；正数 `shopId` 时仍要求 `images` 非空白。原始 `images` 长度≤2048 个 Java UTF-16 单元，在归一化前校验，超限即拒绝；非空图片原串保留。未知字段忽略 | 返回新 Blog ID；作者从会话取得，客户端 id/userId/计数/时间等未知字段忽略；liked/comments 初始化为 0。空图片以 `""` 正常序列化，不因 NON_NULL 省略。旧带图/关联门店请求兼容；关联不证明商户身份，未新增门店存在性验证。语义见 7I 阶段记录，本轮实现与选定验证完成；不外推生产或客户端 UI 验收 |
+| PUT | `/blog/{id}` | [`editBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java)；需认证；允许 USER、MERCHANT、ADMIN，但三种角色均只能编辑存量动态作者本人；ADMIN 无覆盖权限。匿名、停用账号、未知/无角色身份为 401；他人动态为 403；动态不存在为 404 | Path `id` 必须是正 Java Long。JSON 完整替换 `title`（非空白且≤255）、`images`（可 null，原始长度≤2048；未知字段忽略）、`content`（非空白且≤2048）；未知 JSON 字段及客户端 id/userId/shopId/liked/comments/time 等不参与更新。门店关联从加锁读取的存量行取得且不可变：关联门店动态仍要求 `images` 非空白；无门店动态的 null/空串/trim 空白归一为非 null `""`，合法非空原串原样保留 | 成功 `Result.ok()`，无 data。参数错误或关联动态无图为 400；更新影响行数不是 1 为 422；数据访问异常映射为不带 cause 的通用 500。事务内对存量行执行当前读 `SELECT ... FOR UPDATE`，再只更新 title/images/content；5 秒语句超时不代表 SLA。字段值完全相同则不发 UPDATE，也不刷新 updateTime。详见[7J 阶段记录](../refactor/32-phase-7j-post-author-edit.md)；实现与选定本轮验证完成，不外推全部端点或生产验收 |
 | PUT | `/blog/like/{id}` | [`likeBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L39)；需认证；允许 USER、MERCHANT、ADMIN | Path `id` 动态 ID 正数；无 body | 成功无 data；点赞/取消点赞切换。服务未对不存在的 ID 单独报 404 |
 | GET | `/blog/of/me` | [`queryMyBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L44)；需认证 | Query `current` 默认 1 且 ≥1 | `List<Blog>` Entity，按当前用户分页（每页最多 10）；无记录为空数组 |
 | GET | `/blog/hot` | [`queryHotBlog`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java#L54)；公开 | Query `current` 默认 1 且 ≥1 | `List<Blog>` Entity，按 liked 倒序（每页最多 10），附用户昵称/头像和当前用户点赞标记；匿名标记为 false；无记录为空数组 |

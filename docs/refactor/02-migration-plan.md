@@ -196,6 +196,7 @@
 - Phase 7G：ADMIN 单条隐藏审计只读查询 `GET /admin/blog-comments/{commentId}/hide-audit` 已实现；正 Java Long 参数，审计行独立读取，八字段 DTO 白名单；普通参数绑定 SELECT、5 秒超时、只读 REPEATABLE READ 事务，不加锁、不关联当前评论/动态/操作者状态，不推断历史。复用 V008，不新增迁移。26 项定向检查、360 项 Java 8 默认统计（0 失败/错误、4 设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 通过，测试资源清理独立复核完成；按流程提交后审查，最终状态在交付对话报告。无列表、导出、状态/计数写入、恢复、UI 或完整管理后台，记录见 `docs/refactor/29-phase-7g-comment-audit-query.md`。
 - Phase 7H：已实现 ADMIN 按动态分页读取隐藏审计 `GET /admin/blog-comments/hide-audits/of/blog/{blogId}`；正 Java Long blogId/beforeId、size 1..50 默认 20、忽略未知 query、每页只读 RR 有界查询及 `size+1` lookahead。V009 增加候选 `blog_id,id` 复合索引，要求 V008 表先存在；fresh bootstrap 顺序纳入 V001…V009，已有卷必须备份并审查索引定义后人工应用，旧应用回退可保留索引。40 项定向检查、374 项 Java 8 默认统计（0 失败/错误、4 设计跳过）、49 项显式 MySQL IT、25 组目标 Compose 通过；测试资源清理独立复核完成，按流程提交后审查，最终状态在交付对话报告。每页快照不冻结后续页面，ID 分配不代表提交顺序，不承诺跨页无遗漏或性能 SLA；索引 DDL 验证不是性能证明。无全局列表、COUNT、导出、写入、恢复、UI 或完整后台；见 `docs/refactor/30-phase-7h-comment-audit-pages.md`。
 - Phase 7I：最小用例为无关联门店的 POST /blog 允许缺失/null/空白 images，归一化为非 null `""` 后保存；正数 shopId 仍要求非空白 images。title/content 非空白及长度限制、images 原始长度≤2048 Java UTF-16 单元（归一化前）、正 Long shopId、三种发布角色和作者会话来源保持。复用现有路由/表/列，不新增迁移，V001–V009 与 46 路由/13 Controllers 不变；详情、热门、本人及 Feed 响应仍为 Entity。实现与本轮验证完成：71 项定向、386 项 Java 8 默认统计（4 设计跳过）、53 项显式 MySQL IT、26 组目标 Compose 通过，资源清理独立确认。见 `docs/refactor/31-phase-7i-text-only-campus-posts.md`，按流程提交后独立审查，最终状态在交付对话报告。
+- Phase 7J：为既有动态增加 `PUT /blog/{id}` 作者编辑。仅 USER/MERCHANT/ADMIN 可访问且所有角色只可编辑存量作者本人；以事务内 `SELECT FOR UPDATE` 当前读锁定动态，`title/images/content` 完整替换，门店关联取自存量行并不可变；条件图片校验沿用 7I 语义。更新 SQL 只写内容字段，完全相同的请求不执行 UPDATE、不刷新 `updateTime`。不新增 schema/migration，V001–V009 不变；应用映射为 47 条/13 Controllers，BlogController 9 条映射，评论 Controller 6 个方法及 ADMIN Controller 3 个方法不变。实现与选定本轮验证完成：83 项定向、398 项默认统计（4 设计跳过）、60 项显式 MySQL IT、28 组目标 Compose 通过，资源清理独立确认。记录见 `docs/refactor/32-phase-7j-post-author-edit.md`。并发编辑按行锁串行但后写可覆盖先写；没有版本冲突检测、历史版本或编辑审计。
 
 每个小阶段仍执行验证、提交、提交后审查；6A 不进入实际压测，也不宣称 Phase 6 全部完成。
 
@@ -254,11 +255,12 @@
 - Phase 7F：管理员隐藏一级评论及 V008 审计实现与本轮验证完成；65 项定向检查、Java 8 clean package 351 项（0 失败/错误、4 项设计跳过）、显式 BlogCommentsMySqlIT 38 项、目标 Compose 21 组通过，四类测试资源清理经独立确认。记录见 `docs/refactor/28-phase-7f-comment-moderation.md`；按流程提交后独立复审，最终状态在交付对话报告。此处为 7F 历史证据，不代表 7G 已验证。
 - Phase 7G：ADMIN 单条隐藏审计查询及 45 个应用映射目录实现与本轮选定验证完成；26 项定向、360 项 Java 8 默认统计（4 设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 通过，隔离资源清理独立确认。时间断言的红/对照/绿根因记录保留，不改业务时区语义；记录见 `docs/refactor/29-phase-7g-comment-audit-query.md`。按流程提交后独立复审，最终状态在交付对话报告。
 - Phase 7I：纯文字校园动态实现与本轮选定验证完成；71 项定向、386 项 Java 8 默认统计（0 失败/错误、4 设计跳过）、53 项显式 MySQL IT、26 组目标 Compose 通过；应用路由仍为 46，表/迁移不变。已有图片字段以空串表示无图，门店关联动态保留图片要求；资源清理独立确认，提交后独立审查，最终状态在交付对话报告。见 `docs/refactor/31-phase-7i-text-only-campus-posts.md`。
+- Phase 7J：动态作者编辑及 47 个应用映射实现与本轮选定验证完成；83 项定向、398 项 Java 8 默认统计（4 设计跳过）、60 项显式 MySQL IT、28 组目标 Compose 通过。仅更新标题/图片/正文，所有角色仅本人，相同内容不写；保护作者/关联/计数/评论/审核与 Feed 排序，不新增迁移。资源清理独立确认，按流程提交后独立复审，最终状态在交付对话报告。见 `docs/refactor/32-phase-7j-post-author-edit.md`。
 - 实际性能数据：本机合成正缓存详情/MySQL 搜索的 1/10 VU 短时闭环基线见 `docs/performance/README.md`，限量活动有限批次及三类客户端耗时见 `docs/performance/flash-sale.md`；均保留原始汇总、参数、环境、哈希与逐轮统计。没有持续活动 QPS、订单 TPS、生产容量、优化提升或 SLO 结论；未覆盖范围保持显式待验。
 
 ## 5 原始目标的剩余范围
 
-完成以上选定阶段不等于原始 Prompt 的全部目标完成。以下盘点是截至 2026-10-11、补记 7D/7E 后的历史状态；后续进展分别见 7F/7H/7I 阶段记录。该历史盘点保留当时的图片必填限制；7I 已补无关联门店的纯文字发布，未补编辑/删除或可靠投递：
+完成以上选定阶段不等于原始 Prompt 的全部目标完成。以下盘点是截至 2026-10-11、补记 7D/7E 后的历史状态；后续进展分别见 7F/7H/7I/7J 阶段记录。该历史盘点保留当时的图片必填限制；7I 已补纯文字发布，7J 已补作者本人编辑，仍未补动态删除或可靠投递：
 
 - 限量活动验证进展：6D 时尚缺的实际负载已由 6E1/6E2 补选定有限批次。合成身份/半库存、分类、唯一订单、收敛与资源限额均有实测；逐单落库延迟、持续到达率/容量、支付取消竞争与负载下故障恢复仍没有验证，不能把后台完成观察区间当逐单延迟。
 - 文档覆盖进展：6F 已补当前显式应用路由的统一目录、两个管理端 GET 和漂移检查；不是完整 OpenAPI schema 或全部接口的真实依赖端到端验收。没有验收过的 UI 或系统截图，不虚构截图。
