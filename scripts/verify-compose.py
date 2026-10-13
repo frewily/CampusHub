@@ -206,6 +206,83 @@ def verify_campus_posts(base, tokens):
     check("campus posts omit/null store, legacy store publication, author whitelist, reads/Feed and invalid IDs")
 
 
+def verify_text_only_campus_posts(base, tokens):
+    """Optional campus images only; keep legacy store images required and old read shapes."""
+    sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES"
+        "(900020,'00000000020','synthetic-text-merchant','ACTIVE'),"
+        "(900021,'00000000021','synthetic-text-follower','ACTIVE'),"
+        "(900022,'00000000022','synthetic-text-disabled','DISABLED'),"
+        "(900023,'00000000023','synthetic-text-roleless','ACTIVE'),"
+        "(900024,'00000000024','synthetic-text-unknown','ACTIVE');"
+        "INSERT INTO tb_user_role(user_id,role) VALUES(900020,'MERCHANT'),(900021,'USER'),"
+        "(900022,'USER'),(900024,'AUDITOR');"
+        "INSERT INTO tb_follow(user_id,follow_user_id) VALUES"
+        "(900021,900001),(900021,900002),(900021,900020);")
+    headers_by_user = {900001: {"authorization": tokens[0], "Content-Type": "application/json"},
+                       900002: {"authorization": tokens[1], "Content-Type": "application/json"}}
+    for user_id in (900020, 900021, 900022, 900023, 900024):
+        token = "synthetic-text-post-" + uuid.uuid4().hex
+        redis("HSET", "login:token:" + token, "id", str(user_id), "nickName", "synthetic")
+        redis("EXPIRE", "login:token:" + token, "600")
+        headers_by_user[user_id] = {"authorization": token, "Content-Type": "application/json"}
+    base_payload = {"title": "synthetic text-only campus post", "content": "synthetic plain campus content",
+                    "id": 999999, "userId": 900021, "liked": 99, "comments": 88,
+                    "createTime": "2000-01-01T00:00:00", "name": "untrusted display name"}
+    count_before = int(sql("SELECT COUNT(*) FROM tb_blog;"))
+    request(base, "/blog", 401, "POST", json.dumps(base_payload).encode(), {"Content-Type": "application/json"})
+    for user_id in (900022, 900023, 900024):
+        request(base, "/blog", 401, "POST", json.dumps(base_payload).encode(), headers_by_user[user_id])
+    assert int(sql("SELECT COUNT(*) FROM tb_blog;")) == count_before
+    cases = [(900001, {}), (900001, {"shopId": None, "images": None}),
+             (900020, {"images": ""}), (900002, {"shopId": None, "images": " \t\r\n"})]
+    ids = []
+    for user_id, fields in cases:
+        payload = dict(base_payload, **fields)
+        body, _ = request(base, "/blog", 200, "POST", json.dumps(payload).encode(), headers_by_user[user_id])
+        post_id = json.loads(body)["data"]
+        assert type(post_id) is int and post_id > 0 and post_id != 999999
+        ids.append(post_id)
+        assert sql("SELECT COUNT(*) FROM tb_blog WHERE id=%d AND shop_id IS NULL AND images='' "
+                   "AND user_id=%d AND liked=0 AND comments=0;" % (post_id, user_id)) == "1"
+        detail, _ = request(base, "/blog/%d" % post_id, headers=headers_by_user[900001])
+        detail = json.loads(detail)["data"]
+        assert detail["images"] == "" and "shopId" not in detail
+        assert detail["userId"] == user_id and detail["content"] == base_payload["content"]
+        assert detail["name"] != "untrusted display name"
+        assert redis("ZSCORE", "feed:900021", str(post_id)) != ""
+    for user_id in (900001, 900002, 900020):
+        for route in ("/blog/of/me", "/blog/of/user?id=%d" % user_id):
+            body, _ = request(base, route, headers=headers_by_user[user_id])
+            rows = {row["id"]: row for row in json.loads(body)["data"]}
+            for post_id in ids:
+                if post_id in rows:
+                    assert rows[post_id]["images"] == ""
+            assert any(post_id in rows for post_id in ids)
+    body, _ = request(base, "/blog/hot", headers=headers_by_user[900001])
+    rows = {row["id"]: row for row in json.loads(body)["data"]}
+    assert all(post_id in rows and rows[post_id]["images"] == "" for post_id in ids)
+    body, _ = request(base, "/blog/of/follow?lastId=%d&offset=0" % (int(time.time() * 1000) + 60000),
+                      headers=headers_by_user[900021])
+    feed_rows = json.loads(body)["data"]["list"]
+    assert len(feed_rows) == 2 and all(row["id"] in ids and row["images"] == "" for row in feed_rows)
+    maximum = dict(base_payload, images="p" * 2048)
+    body, _ = request(base, "/blog", 200, "POST", json.dumps(maximum).encode(), headers_by_user[900001])
+    maximum_id = json.loads(body)["data"]
+    body, _ = request(base, "/blog/%d" % maximum_id, headers=headers_by_user[900001])
+    assert json.loads(body)["data"]["images"] == maximum["images"]
+    invalids = [dict(base_payload, shopId=1, storeImageValid=True),
+                dict(base_payload, shopId=1, images=None), dict(base_payload, shopId=1, images=""),
+                dict(base_payload, shopId=1, images=" \t"), dict(base_payload, shopId=0),
+                dict(base_payload, images=" " * 2049), dict(base_payload, images="p" * 2049),
+                dict(base_payload, title=" "), dict(base_payload, title="t" * 256),
+                dict(base_payload, content=" "), dict(base_payload, content="c" * 2049)]
+    for payload in invalids:
+        body, _ = request(base, "/blog", 400, "POST", json.dumps(payload).encode(), headers_by_user[900001])
+        assert json.loads(body)["errorCode"] == "VALIDATION_FAILED"
+    assert int(sql("SELECT COUNT(*) FROM tb_blog;")) == count_before + 5
+    check("text-only campus posts: omitted/null/empty/trim-blank images, three roles, session-author whitelist, legacy store rejection, length bounds, empty-string DB/read/Feed compatibility")
+
+
 def verify_first_level_comments(base, tokens):
     """Own synthetic rows/triggers only; SQL injection and transaction failure are deliberate test inputs."""
     blog_id = int(sql("SELECT MIN(id) FROM tb_blog;"))
@@ -980,6 +1057,7 @@ def main():
             redis("HSET", "login:token:" + token, "id", str(user), "nickName", "synthetic")
             redis("EXPIRE", "login:token:" + token, "600")
         verify_campus_posts(base, tokens)
+        verify_text_only_campus_posts(base, tokens)
         verify_first_level_comments(base, tokens)
         verify_direct_comment_replies(base, tokens)
         verify_reply_withdrawal(base, tokens)

@@ -30,6 +30,7 @@ import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.DefaultTypedTuple;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -44,6 +45,8 @@ import java.sql.SQLException;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import javax.validation.Validation;
+import javax.validation.ValidatorFactory;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -274,6 +277,90 @@ class BlogPublicationMySqlIT {
         assertEquals("nullable detail", ownNullShop.getTitle());
         Blog ownPositiveShop = ownPage.getRecords().stream().filter(blog -> shopBlog.getId().equals(blog.getId())).findFirst().orElseThrow(AssertionError::new);
         assertEquals(789L, ownPositiveShop.getShopId());
+    }
+
+    @Test
+    void textOnlyImagesPersistAsEmptyStringsWithoutChangingSchemaOrLegacyImageRows() {
+        try (ValidatorFactory validation = Validation.buildDefaultValidatorFactory()) {
+            for (String images : new String[]{null, "", " \t\r\n"}) {
+                BlogCreateRequest request = request(null, "text-only post", "plain campus content");
+                request.setImages(images);
+                assertTrue(validation.getValidator().validate(request).isEmpty());
+                Blog post = ApiModelMapper.toBlog(request);
+                Result result = blogService.saveBlog(post);
+                assertTrue(result.getSuccess());
+                assertEquals(post.getId(), result.getData());
+                Blog stored = mapper.selectById(post.getId());
+                assertEquals("", stored.getImages());
+                assertNull(stored.getShopId());
+                assertEquals(AUTHOR_ID, stored.getUserId());
+                assertEquals(0, stored.getLiked());
+                assertEquals(0, stored.getComments());
+                assertEquals("plain campus content", stored.getContent());
+            }
+            BlogCreateRequest maximum = request(null, "image length boundary", "legacy image string");
+            maximum.setImages(String.join("", Collections.nCopies(2048, "p")));
+            assertTrue(validation.getValidator().validate(maximum).isEmpty());
+            Blog post = ApiModelMapper.toBlog(maximum);
+            blogService.saveBlog(post);
+            assertEquals(maximum.getImages(), mapper.selectById(post.getId()).getImages());
+            int count = jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class);
+            for (String images : new String[]{String.join("", Collections.nCopies(2049, "p")),
+                    String.join("", Collections.nCopies(2049, " "))}) {
+                maximum.setImages(images);
+                assertFalse(validation.getValidator().validate(maximum).isEmpty());
+            }
+            for (String images : new String[]{null, "", " \t"}) {
+                BlogCreateRequest legacyInvalid = request(321L, "store post", "store content");
+                legacyInvalid.setImages(images);
+                assertFalse(validation.getValidator().validate(legacyInvalid).isEmpty());
+            }
+            assertEquals(count, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        }
+        assertEquals("NO", jdbc.queryForObject(
+                "SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() "
+                        + "AND TABLE_NAME='tb_blog' AND COLUMN_NAME='images'", String.class));
+        assertEquals("/legacy.png", mapper.selectById(1L).getImages());
+    }
+
+    @Test
+    void emptyImagesReadThroughDetailHotOwnAndProjectedFeedWithoutPlaceholderOrMutation() {
+        Follow followerRelation = new Follow().setUserId(702L).setFollowUserId(AUTHOR_ID);
+        when(followQuery.list()).thenReturn(Collections.singletonList(followerRelation));
+        BlogCreateRequest request = request(null, "text-only reads", "plain text without a picture");
+        request.setImages(null);
+        Blog post = ApiModelMapper.toBlog(request);
+        blogService.saveBlog(post);
+        verify(zset).add(eq("feed:702"), eq(post.getId().toString()), anyDouble());
+        Blog detail = (Blog) blogService.queryBlogById(post.getId()).getData();
+        assertEquals("", detail.getImages());
+        assertEquals("Synthetic author", detail.getName());
+        @SuppressWarnings("unchecked")
+        List<Blog> hot = (List<Blog>) blogService.queryHotBlog(1).getData();
+        Blog hotPost = hot.stream().filter(row -> post.getId().equals(row.getId()))
+                .findFirst().orElseThrow(AssertionError::new);
+        assertEquals("", hotPost.getImages());
+        IPage<Blog> own = blogService.query().eq("user_id", AUTHOR_ID)
+                .page(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 10));
+        assertEquals("", own.getRecords().stream().filter(row -> post.getId().equals(row.getId()))
+                .findFirst().orElseThrow(AssertionError::new).getImages());
+        when(zset.reverseRangeByScoreWithScores("feed:702", 0, 9999, 0, 2))
+                .thenReturn(Collections.singleton(new DefaultTypedTuple<>(post.getId().toString(), 123D)));
+        UserDTO follower = new UserDTO();
+        follower.setId(702L);
+        UserHolder.saveUser(follower);
+        io.github.frewily.campushub.dto.ScrollResult scroll =
+                (io.github.frewily.campushub.dto.ScrollResult) blogService.queryBlogOfFollow(9999L, 0).getData();
+        @SuppressWarnings("unchecked")
+        List<Blog> feedRows = (List<Blog>) scroll.getList();
+        assertEquals(1, feedRows.size());
+        assertEquals(post.getId(), feedRows.get(0).getId());
+        assertEquals("", feedRows.get(0).getImages());
+        Blog stored = mapper.selectById(post.getId());
+        assertEquals("", stored.getImages());
+        assertEquals(0, stored.getLiked());
+        assertEquals(0, stored.getComments());
+        assertEquals("/legacy.png", mapper.selectById(1L).getImages());
     }
 
     private static BlogCreateRequest request(Long shopId, String title, String content) {

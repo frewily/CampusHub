@@ -228,7 +228,7 @@ class ApiModelHttpContractTest {
                 Arguments.of("POST", "/blog", "{\"shopId\":-1," + validBlogFields + "}"),
                 Arguments.of("POST", "/blog", "{\"title\":\" \",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"}"),
                 Arguments.of("POST", "/blog", "{\"title\":\"" + tooLongTitle + "\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"}"),
-                Arguments.of("POST", "/blog", "{\"title\":\"Lunch\",\"images\":\" \",\"content\":\"Good\"}"),
+                Arguments.of("POST", "/blog", "{\"shopId\":11,\"title\":\"Lunch\",\"images\":\" \",\"content\":\"Good\"}"),
                 Arguments.of("POST", "/blog", "{\"title\":\"Lunch\",\"images\":\"" + tooLongText + "\",\"content\":\"Good\"}"),
                 Arguments.of("POST", "/blog", "{\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\" \"}"),
                 Arguments.of("POST", "/blog", "{\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"" + tooLongText + "\"}"),

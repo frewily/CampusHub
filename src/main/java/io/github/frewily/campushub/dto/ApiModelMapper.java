@@ -31,8 +31,11 @@ public final class ApiModelMapper {
     }
 
     public static Blog toBlog(BlogCreateRequest request) {
+        // The legacy column is NOT NULL: represent no image explicitly, not as SQL NULL.
+        String images = request.getImages();
+        if (images == null || images.trim().isEmpty()) images = "";
         return new Blog().setShopId(request.getShopId()).setTitle(request.getTitle())
-                .setImages(request.getImages()).setContent(request.getContent())
+                .setImages(images).setContent(request.getContent())
                 .setLiked(0).setComments(0);
     }
 

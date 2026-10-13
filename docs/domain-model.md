@@ -4,7 +4,7 @@
 
 本文定义 CampusHub 从点评教学项目演进为校园生活与商户服务平台时采用的统一业务语言、实体关系、核心规则、权限边界和旧数据映射。它是 Phase 1A 的设计结论，不在本阶段修改 Java 类、数据库表、接口或运行行为。
 
-后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog）。Phase 7B 已按[阶段记录](refactor/24-phase-7b-comments.md)落地一级评论（V007），Phase 7C 增加[一层直接回复](refactor/25-phase-7c-comment-replies.md)，7D/7E 增加作者本人逻辑撤回，7F 增加[ADMIN 隐藏一级评论及审计](refactor/28-phase-7f-comment-moderation.md)（V008），7G 单条读取，7H 按动态分页读取（V009）；7H 实现与选定本轮验证完成。仍未实现多级回复、恢复、回复审核、举报工作流、通知、点赞持久化和完整管理后台。
+后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog）。Phase 7B 已按[阶段记录](refactor/24-phase-7b-comments.md)落地一级评论（V007），Phase 7C 增加[一层直接回复](refactor/25-phase-7c-comment-replies.md)，7D/7E 增加作者本人逻辑撤回，7F 增加[ADMIN 隐藏一级评论及审计](refactor/28-phase-7f-comment-moderation.md)（V008），7G 单条读取，7H 按动态分页读取（V009）；7H 实现与选定本轮验证完成。Phase 7I 已实现 POST /blog 对无关联门店纯文字动态的 images 归一化语义，不新增结构；选定本轮验证完成，见[阶段记录](refactor/31-phase-7i-text-only-campus-posts.md)。仍未实现多级回复、恢复、回复审核、举报工作流、通知、点赞持久化和完整管理后台。
 
 CampusHub 继续采用模块化单体。第一版按单校园场景设计，不引入多租户或 `Campus` 表；当系统出现跨校数据隔离、不同校区运营或独立管理员等真实需求时，再增加校园维度。当前重点是把“账号、商户主体、门店、内容、活动和订单”分清，而不是机械替换 `Shop`、`Blog`、`Voucher` 等名称。
 
@@ -83,7 +83,7 @@ Store 保存名称、分类、图片、地址、坐标、营业时间和展示�
 
 ### 3.3 内容与社交
 
-`Post` 必须有作者。用户动态可以不关联门店；探店内容和商户内容可以关联一个 Store。迁移当前 `tb_blog.shop_id NOT NULL` 前，旧接口仍要求门店标识；放宽为空必须通过版本化数据库迁移和兼容代码完成。
+`Post` 必须有作者。用户动态可以不关联门店；探店内容和商户内容可以关联一个 Store。当前 `tb_blog.images` 用既有字符串列承载图片引用；Phase 7I 语义中，无关联门店的纯文字动态把缺失或 `String.trim()` 后为空白的图片值归一化为非 null 空字符串 `""`，关联门店内容仍须有非空白图片。该语义不引入新字段或迁移，且归一化前仍检查原始值最多 2048 个 Java UTF-16 单元。兼容验证及应用实现已在选定本轮范围完成，见[阶段记录](refactor/31-phase-7i-text-only-campus-posts.md)。Phase 1A 当时的 `tb_blog.shop_id NOT NULL` 约束已由 7A 的 V006 放宽；既有部署仍须按其备份、迁移和兼容说明处理。
 
 第一版把校园动态和门店体验统一为 Post，通过是否关联 Store 和内容类型区分，不立即增加独立 Review 聚合。当前没有结构化星级评价、消费凭证或“一次订单一次评价”的实现；若这些规则成为真实需求，再从 Post 中拆出 Review，不能仅凭 `tb_shop.score` 宣称已经具备评价系统。
 

@@ -1,6 +1,7 @@
 package io.github.frewily.campushub.dto.request;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import javax.validation.constraints.*;
@@ -14,10 +15,16 @@ public class BlogCreateRequest {
     @NotBlank(message = "标题不能为空")
     @Size(max = 255)
     private String title;
-    @NotBlank(message = "动态图片不能为空")
+    // Campus posts may omit images; store-associated posts retain the legacy requirement.
     @Size(max = 2048)
     private String images;
     @NotBlank(message = "动态内容不能为空")
     @Size(max = 2048)
     private String content;
+
+    @JsonIgnore
+    @AssertTrue(message = "关联门店的动态图片不能为空")
+    public boolean isStoreImageValid() {
+        return shopId == null || (images != null && !images.trim().isEmpty());
+    }
 }
