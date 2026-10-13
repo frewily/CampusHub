@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableLogic;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
@@ -72,6 +74,11 @@ public class Blog implements Serializable {
      * 评论数量
      */
     private Integer comments;
+
+    /** Author withdrawal retains content; generated reads/writes exclude withdrawn rows. */
+    @TableLogic(value = "0", delval = "1")
+    @JsonIgnore
+    private Integer withdrawn;
 
     /**
      * 创建时间

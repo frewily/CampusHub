@@ -43,6 +43,13 @@ public class BlogController {
         return Result.ok();
     }
 
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
+    public Result withdrawBlog(@Positive @PathVariable("id") Long id) {
+        blogService.withdrawBlog(id);
+        return Result.ok();
+    }
+
     @PutMapping("/like/{id}")
     @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
     public Result likeBlog(@Positive(message = "动态ID必须为正数") @PathVariable("id") Long id) {

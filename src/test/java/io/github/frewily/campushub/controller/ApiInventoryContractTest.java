@@ -122,7 +122,7 @@ class ApiInventoryContractTest {
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
         assertEquals(13, controllerTypes.size());
-        assertEquals(47, actual.size());
+        assertEquals(48, actual.size());
         assertBlogEditRoute();
         assertCommentRoute("POST", "/blog-comments", "createComment",
                 "hasAnyRole('USER', 'MERCHANT', 'ADMIN')");
@@ -192,7 +192,10 @@ class ApiInventoryContractTest {
         assertTrue(rows(documented).contains(canonical(expected)), "blog edit mapping/guard missing from inventory");
         int controllerRouteCount = 0;
         for (String route : actual) if (route.contains("\"BlogController\"")) controllerRouteCount++;
-        assertEquals(9, controllerRouteCount, "BlogController route count changed");
+        assertEquals(10, controllerRouteCount, "BlogController route count changed");
+        expected.put("method", "DELETE"); expected.put("handler", "withdrawBlog");
+        assertTrue(actual.contains(canonical(expected)), "blog withdrawal mapping/guard changed");
+        assertTrue(rows(documented).contains(canonical(expected)), "withdrawal missing from inventory");
     }
 
     private static void assertCommentRoute(String method, String path, String handler, String guard) {

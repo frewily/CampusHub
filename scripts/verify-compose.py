@@ -1126,6 +1126,126 @@ def cleanup():
         print("Removed only test-owned containers, network, image and synthetic volumes: " + PROJECT, flush=True)
 
 
+def verify_post_author_withdrawal(base, tokens):
+    """Synthetic owned fixtures: retained data, closed visibility, raw Feed cursor and failures."""
+    actors = [(900060, 'USER'), (900061, 'MERCHANT'), (900062, 'ADMIN'), (900063, 'USER'),
+              (900064, None), (900065, 'AUDITOR'), (900066, 'ADMIN')]
+    headers = {}
+    for user_id, role in actors:
+        sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'000000000%02d',"
+            "'synthetic-withdraw-actor','%s');" % (user_id, user_id - 900000,
+                                                   'DISABLED' if user_id == 900066 else 'ACTIVE'))
+        if role:
+            sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (user_id, role))
+        token = 'synthetic-post-withdraw-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[user_id] = {'authorization': token, 'Content-Type': 'application/json'}
+    sql("INSERT INTO tb_follow(user_id,follow_user_id) VALUES(900063,900060),(900063,900061),(900063,900062);")
+    posts = []
+    for user_id in (900060, 900061, 900062):
+        payload = {'title': 'synthetic withdrawal post', 'content': 'synthetic retained body', 'withdrawn': 1}
+        if user_id == 900061:
+            payload.update(shopId=1, images='/synthetic-retained.png')
+        body, _ = request(base, '/blog', 200, 'POST', json.dumps(payload).encode(), headers[user_id])
+        posts.append(int(json.loads(body)['data']))
+    first = posts[0]
+    body, _ = request(base, '/blog-comments', 200, 'POST', json.dumps(
+        {'blogId': first, 'content': 'synthetic retained withdrawal root'}).encode(), headers[900061])
+    root = json.loads(body)['data']['id']
+    body, _ = request(base, '/blog-comments/%s/replies' % root, 200, 'POST', json.dumps(
+        {'content': 'synthetic retained withdrawal reply'}).encode(), headers[900061])
+    reply = json.loads(body)['data']['id']
+    body, _ = request(base, '/blog-comments', 200, 'POST', json.dumps(
+        {'blogId': first, 'content': 'synthetic retained hidden root'}).encode(), headers[900060])
+    hidden = json.loads(body)['data']['id']
+    request(base, '/admin/blog-comments/%s/hide' % hidden, 200, 'POST', json.dumps(
+        {'reason': 'synthetic retained withdrawal audit'}).encode(), headers[900062])
+    request(base, '/blog/like/%d' % first, 200, 'PUT', headers=headers[900061])
+    # Make hidden candidates rank first if the generated hot query loses its visibility predicate.
+    sql('UPDATE tb_blog SET liked=9000 WHERE id IN (%s);' % ','.join(map(str, posts)))
+    redis('ZADD', 'feed:900063', '3000', str(posts[0]), '2000', str(posts[1]), '1000', str(posts[2]))
+    retained = sql('SELECT id,user_id,shop_id,title,images,content,liked,comments,create_time FROM tb_blog '
+                   'WHERE id IN (%s) ORDER BY id;' % ','.join(map(str, posts)))
+    comments_before = sql('SELECT id,user_id,content,status FROM tb_blog_comments WHERE blog_id=%d ORDER BY id;' % first)
+    audit_before = sql('SELECT * FROM tb_blog_comment_hide_audit WHERE comment_id=%s;' % hidden)
+    feed_before = redis('ZRANGE', 'feed:900063', '0', '-1', 'WITHSCORES')
+    likes_before = redis('ZRANGE', 'blog:liked:%d' % first, '0', '-1', 'WITHSCORES')
+    for post_id, user_id in zip(posts, (900060, 900061, 900062)):
+        route = '/blog/%d' % post_id
+        request(base, route, 401, 'DELETE')
+        for invalid_actor in (900064, 900065, 900066):
+            request(base, route, 401, 'DELETE', headers=headers[invalid_actor])
+        request(base, route, 403, 'DELETE', headers={'authorization': tokens[1]})
+        for other in (900060, 900061, 900062):
+            if other != user_id:
+                request(base, route, 403, 'DELETE', headers=headers[other])
+        assert sql('SELECT withdrawn FROM tb_blog WHERE id=%d;' % post_id) == '0'
+        body, _ = request(base, route, 200, 'DELETE', headers=headers[user_id])
+        assert json.loads(body) == {'success': True}
+        request(base, route, 200, 'DELETE', headers=headers[user_id])
+        request(base, route, 403, 'DELETE', headers={'authorization': tokens[1]})
+        if post_id == posts[1]:
+            body, _ = request(base, '/blog/of/follow?lastId=3000&offset=0', headers=headers[900063])
+            page = json.loads(body)['data']
+            assert page['list'] == [] and page['minTime'] == 2000 and page['offset'] == 1
+            body, _ = request(base, '/blog/of/follow?lastId=2000&offset=1', headers=headers[900063])
+            page = json.loads(body)['data']
+            assert [row['id'] for row in page['list']] == [posts[2]] and 'withdrawn' not in page['list'][0]
+    assert sql('SELECT id,user_id,shop_id,title,images,content,liked,comments,create_time FROM tb_blog '
+               'WHERE id IN (%s) ORDER BY id;' % ','.join(map(str, posts))) == retained
+    assert sql('SELECT id,user_id,content,status FROM tb_blog_comments WHERE blog_id=%d ORDER BY id;' % first) == comments_before
+    assert sql('SELECT * FROM tb_blog_comment_hide_audit WHERE comment_id=%s;' % hidden) == audit_before
+    assert redis('ZRANGE', 'feed:900063', '0', '-1', 'WITHSCORES') == feed_before
+    assert redis('ZRANGE', 'blog:liked:%d' % first, '0', '-1', 'WITHSCORES') == likes_before
+    for post_id, user_id in zip(posts, (900060, 900061, 900062)):
+        for route in ('/blog/%d' % post_id, '/blog/likes/%d' % post_id):
+            request(base, route, 404, headers=headers[user_id])
+        request(base, '/blog/like/%d' % post_id, 404, 'PUT', headers=headers[user_id])
+        request(base, '/blog/%d' % post_id, 404, 'PUT', json.dumps(
+            {'title': 'must not edit', 'images': '/synthetic.png', 'content': 'must not edit'}).encode(), headers[user_id])
+        for route in ('/blog/of/me', '/blog/of/user?id=%d' % user_id):
+            body, _ = request(base, route, headers=headers[user_id])
+            assert json.loads(body)['data'] == []
+        request(base, '/blog-comments/of/blog/%d' % post_id, 404, headers=headers[user_id])
+        request(base, '/blog-comments', 404, 'POST', json.dumps(
+            {'blogId': post_id, 'content': 'must not insert'}).encode(), headers=headers[user_id])
+    body, _ = request(base, '/blog/hot')
+    assert all(row['id'] not in posts and 'withdrawn' not in row for row in json.loads(body)['data'])
+    request(base, '/blog-comments/%s/replies' % root, 404, headers=headers[900061])
+    request(base, '/blog-comments/%s/replies' % root, 404, 'POST', json.dumps(
+        {'content': 'must not reply'}).encode(), headers=headers[900061])
+    check('post withdrawal: three roles owner-only, retained data/Redis, closed reads/writes, filtered empty Feed page advances raw cursor')
+    for invalid_id in ('0', '-1', 'bad', '9223372036854775808'):
+        request(base, '/blog/' + invalid_id, 400, 'DELETE', headers=headers[900060])
+    request(base, '/blog/9223372036854775807', 404, 'DELETE', headers=headers[900060])
+    sql("CREATE TRIGGER reject_post_withdrawal BEFORE UPDATE ON tb_blog FOR EACH ROW "
+        "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private withdrawal fault';")
+    try:
+        timestamp = sql('SELECT update_time FROM tb_blog WHERE id=%d;' % first)
+        request(base, '/blog/%d' % first, 200, 'DELETE', headers=headers[900060])
+        assert sql('SELECT update_time FROM tb_blog WHERE id=%d;' % first) == timestamp
+        body, _ = request(base, '/blog', 200, 'POST', json.dumps(
+            {'title': 'synthetic failed withdrawal', 'content': 'must remain visible'}).encode(), headers=headers[900060])
+        fault_post = int(json.loads(body)['data'])
+        body, _ = request(base, '/blog/%d' % fault_post, 500, 'DELETE', headers=headers[900060])
+        assert json.loads(body)['errorCode'] == 'INTERNAL_ERROR' and b'synthetic private withdrawal fault' not in body
+        assert sql('SELECT withdrawn FROM tb_blog WHERE id=%d;' % fault_post) == '0'
+        request(base, '/blog/%d' % fault_post, headers=headers[900060])
+    finally:
+        sql('DROP TRIGGER IF EXISTS reject_post_withdrawal;')
+    request(base, '/blog-comments/replies/%s' % reply, 200, 'DELETE', headers=headers[900061])
+    request(base, '/admin/blog-comments/%s/hide' % root, 200, 'POST', json.dumps(
+        {'reason': 'synthetic hidden after post withdrawal'}).encode(), headers=headers[900062])
+    request(base, '/admin/blog-comments/%s/hide-audit' % hidden, headers=headers[900062])
+    body, _ = request(base, '/admin/blog-comments/hide-audits/of/blog/%d' % first, headers=headers[900062])
+    assert len(json.loads(body)['data']['items']) == 2
+    sql((ROOT / 'src/main/resources/db/migration/V010__add_blog_author_withdrawal.sql').read_text('utf-8'))
+    assert sql('SELECT SUM(withdrawn) FROM tb_blog WHERE id IN (%s);' % ','.join(map(str, posts))) == '3'
+    assert sql('SELECT * FROM tb_blog_comment_hide_audit WHERE comment_id=%s;' % hidden) == audit_before
+    check('post withdrawal boundaries: exact repeat without UPDATE, sanitized SQL rollback, independent comment actions/audits, V010 repeat preservation')
+
+
 def main():
     if ENV.get("DOCKER_HOST") and not ENV["DOCKER_HOST"].startswith("unix://"):
         raise RuntimeError("acceptance rejects non-local DOCKER_HOST overrides")
@@ -1163,7 +1283,9 @@ def main():
         assert sql("SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM INFORMATION_SCHEMA.STATISTICS "
                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog_comment_hide_audit' "
                    "AND INDEX_NAME='idx_blog_comment_hide_audit_page';") == "blog_id,id"
-        check("V001-V009 repeat, nullable post store, comment/hide audit cursor indexes, populated-database bootstrap refusal")
+        assert sql("SELECT CONCAT(IS_NULLABLE,':',COLUMN_DEFAULT) FROM INFORMATION_SCHEMA.COLUMNS "
+                   "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog' AND COLUMN_NAME='withdrawn';") == 'NO:0'
+        check("V001-V010 repeat, nullable post store, withdrawn flag, comment/hide audit cursor indexes, populated-database bootstrap refusal")
         sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(900001,'00000000001','synthetic-user'),(900002,'00000000002','synthetic-admin');"
             "INSERT INTO tb_user_role(user_id,role) VALUES(900001,'USER'),(900002,'ADMIN');")
         tokens = ["synthetic-phase5-" + uuid.uuid4().hex for _ in range(2)]
@@ -1180,6 +1302,7 @@ def main():
         verify_comment_hide_audit_query(base, tokens)
         verify_comment_hide_audit_pages(base, tokens)
         verify_post_author_edit(base, tokens)
+        verify_post_author_withdrawal(base, tokens)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

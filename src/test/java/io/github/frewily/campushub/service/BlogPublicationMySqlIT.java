@@ -122,6 +122,8 @@ class BlogPublicationMySqlIT {
                 String name = String.format("db/migration/V%03d__%s.sql", version, migrationName(version));
                 ScriptUtils.executeSqlScript(connection, new ClassPathResource(name));
             }
+            ScriptUtils.executeSqlScript(connection,
+                    new ClassPathResource("db/migration/V010__add_blog_author_withdrawal.sql"));
         }
     }
 

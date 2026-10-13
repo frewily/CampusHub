@@ -7,6 +7,10 @@ import org.apache.ibatis.annotations.Param;
 public interface BlogMapper extends BaseMapper<Blog> {
     Blog findBlogForAuthorEdit(@Param("id") Long id);
 
+    Blog findBlogForAuthorWithdrawal(@Param("id") Long id);
+
+    int withdrawOwnedBlog(@Param("id") Long id, @Param("userId") Long userId);
+
     int editBlogFields(@Param("id") Long id, @Param("userId") Long userId,
                        @Param("title") String title, @Param("images") String images,
                        @Param("content") String content);

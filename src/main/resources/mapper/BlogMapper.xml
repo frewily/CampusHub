@@ -3,10 +3,17 @@
 <mapper namespace="io.github.frewily.campushub.mapper.BlogMapper">
     <select id="findBlogForAuthorEdit" resultType="io.github.frewily.campushub.entity.Blog" timeout="5">
         SELECT id, user_id, shop_id, title, images, content FROM tb_blog
-        WHERE id = #{id} FOR UPDATE
+        WHERE id = #{id} AND withdrawn = 0 FOR UPDATE
     </select>
     <update id="editBlogFields" timeout="5">
         UPDATE tb_blog SET title = #{title}, images = #{images}, content = #{content}
-        WHERE id = #{id} AND user_id = #{userId}
+        WHERE id = #{id} AND user_id = #{userId} AND withdrawn = 0
+    </update>
+    <select id="findBlogForAuthorWithdrawal" resultType="io.github.frewily.campushub.entity.Blog" timeout="5">
+        SELECT id, user_id, withdrawn FROM tb_blog WHERE id = #{id} FOR UPDATE
+    </select>
+    <update id="withdrawOwnedBlog" timeout="5">
+        UPDATE tb_blog SET withdrawn = 1
+        WHERE id = #{id} AND user_id = #{userId} AND withdrawn = 0
     </update>
 </mapper>

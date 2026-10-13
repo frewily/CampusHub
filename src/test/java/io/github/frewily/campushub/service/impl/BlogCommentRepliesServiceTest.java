@@ -84,7 +84,7 @@ class BlogCommentRepliesServiceTest {
 
     private void prepareCreate() {
         when(mapper.findVisibleRoot(ROOT_ID)).thenReturn(root());
-        when(mapper.lockBlog(BLOG_ID)).thenReturn(BLOG_ID);
+        when(mapper.lockVisibleBlog(BLOG_ID)).thenReturn(BLOG_ID);
         when(mapper.lockVisibleRoot(ROOT_ID, BLOG_ID)).thenReturn(root());
         when(mapper.insert(any(BlogComments.class))).thenAnswer(call -> {
             BlogComments inserted = call.getArgument(0);
@@ -114,7 +114,7 @@ class BlogCommentRepliesServiceTest {
         assertEquals(String.valueOf(AUTHOR_ID), item.getUserId());
         org.mockito.InOrder order = inOrder(mapper);
         order.verify(mapper).findVisibleRoot(ROOT_ID);
-        order.verify(mapper).lockBlog(BLOG_ID);
+        order.verify(mapper).lockVisibleBlog(BLOG_ID);
         order.verify(mapper).lockVisibleRoot(ROOT_ID, BLOG_ID);
         order.verify(mapper).insert(any(BlogComments.class));
         order.verify(mapper).incrementCommentCount(BLOG_ID);
@@ -178,21 +178,21 @@ class BlogCommentRepliesServiceTest {
 
         reset(mapper);
         when(mapper.findVisibleRoot(ROOT_ID)).thenReturn(root());
-        when(mapper.lockBlog(BLOG_ID)).thenReturn(null);
+        when(mapper.lockVisibleBlog(BLOG_ID)).thenReturn(null);
         assertError(ErrorCode.NOT_FOUND, () -> service.createReply(ROOT_ID, reply("hello")));
         verify(mapper).findVisibleRoot(ROOT_ID);
-        verify(mapper).lockBlog(BLOG_ID);
+        verify(mapper).lockVisibleBlog(BLOG_ID);
         verifyNoMoreInteractions(mapper);
     }
 
     @Test
     void changedOrHiddenLockedRootReturnsNotFoundBeforeInsert() {
         when(mapper.findVisibleRoot(ROOT_ID)).thenReturn(root());
-        when(mapper.lockBlog(BLOG_ID)).thenReturn(BLOG_ID);
+        when(mapper.lockVisibleBlog(BLOG_ID)).thenReturn(BLOG_ID);
         when(mapper.lockVisibleRoot(ROOT_ID, BLOG_ID)).thenReturn(null);
         assertError(ErrorCode.NOT_FOUND, () -> service.createReply(ROOT_ID, reply("hello")));
         verify(mapper).findVisibleRoot(ROOT_ID);
-        verify(mapper).lockBlog(BLOG_ID);
+        verify(mapper).lockVisibleBlog(BLOG_ID);
         verify(mapper).lockVisibleRoot(ROOT_ID, BLOG_ID);
         verify(mapper, never()).insert(any(BlogComments.class));
 
@@ -203,7 +203,7 @@ class BlogCommentRepliesServiceTest {
     @Test
     void failedInsertCounterOrReadBackIsAnOperationFailure() {
         when(mapper.findVisibleRoot(ROOT_ID)).thenReturn(root());
-        when(mapper.lockBlog(BLOG_ID)).thenReturn(BLOG_ID);
+        when(mapper.lockVisibleBlog(BLOG_ID)).thenReturn(BLOG_ID);
         when(mapper.lockVisibleRoot(ROOT_ID, BLOG_ID)).thenReturn(root());
         when(mapper.insert(any(BlogComments.class))).thenReturn(0);
         assertError(ErrorCode.OPERATION_FAILED, () -> service.createReply(ROOT_ID, reply("hello")));
@@ -211,7 +211,7 @@ class BlogCommentRepliesServiceTest {
 
         reset(mapper);
         when(mapper.findVisibleRoot(ROOT_ID)).thenReturn(root());
-        when(mapper.lockBlog(BLOG_ID)).thenReturn(BLOG_ID);
+        when(mapper.lockVisibleBlog(BLOG_ID)).thenReturn(BLOG_ID);
         when(mapper.lockVisibleRoot(ROOT_ID, BLOG_ID)).thenReturn(root());
         when(mapper.insert(any(BlogComments.class))).thenAnswer(call -> {
             ((BlogComments) call.getArgument(0)).setId(810L);
@@ -223,7 +223,7 @@ class BlogCommentRepliesServiceTest {
 
         reset(mapper);
         when(mapper.findVisibleRoot(ROOT_ID)).thenReturn(root());
-        when(mapper.lockBlog(BLOG_ID)).thenReturn(BLOG_ID);
+        when(mapper.lockVisibleBlog(BLOG_ID)).thenReturn(BLOG_ID);
         when(mapper.lockVisibleRoot(ROOT_ID, BLOG_ID)).thenReturn(root());
         when(mapper.insert(any(BlogComments.class))).thenAnswer(call -> {
             ((BlogComments) call.getArgument(0)).setId(810L);

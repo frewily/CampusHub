@@ -39,7 +39,7 @@ class BlogCommentsServiceImplTest {
                 .setContent("synthetic").setCreateTime(LocalDateTime.of(2026, 1, 1, 0, 0));
     }
     private void insertSuccess() {
-        when(mapper.lockBlog(7L)).thenReturn(7L);
+        when(mapper.lockVisibleBlog(7L)).thenReturn(7L);
         when(mapper.insert(any(BlogComments.class))).thenAnswer(call -> {
             BlogComments entity = call.getArgument(0);
             assertEquals(9007199254740993L, entity.getUserId());
@@ -56,7 +56,7 @@ class BlogCommentsServiceImplTest {
         assertEquals("9007199254740995", item.getId());
         assertEquals("9007199254740993", item.getUserId());
         org.mockito.InOrder order = inOrder(mapper);
-        order.verify(mapper).lockBlog(7L); order.verify(mapper).insert(any(BlogComments.class));
+        order.verify(mapper).lockVisibleBlog(7L); order.verify(mapper).insert(any(BlogComments.class));
         order.verify(mapper).incrementCommentCount(7L); order.verify(mapper).selectById(9007199254740995L);
     }
     @Test void invalidCreateCannotReachDatabaseEvenThroughService() {
@@ -74,12 +74,12 @@ class BlogCommentsServiceImplTest {
         assertError(ErrorCode.AUTHENTICATION_FAILED, () -> service.createComment(create())); verifyNoInteractions(mapper);
     }
     @Test void missingBlogCannotInsertOrIncrement() {
-        when(mapper.lockBlog(7L)).thenReturn(null);
+        when(mapper.lockVisibleBlog(7L)).thenReturn(null);
         assertError(ErrorCode.NOT_FOUND, () -> service.createComment(create()));
-        verify(mapper).lockBlog(7L); verifyNoMoreInteractions(mapper);
+        verify(mapper).lockVisibleBlog(7L); verifyNoMoreInteractions(mapper);
     }
     @Test void zeroInsertCannotIncrement() {
-        when(mapper.lockBlog(7L)).thenReturn(7L);
+        when(mapper.lockVisibleBlog(7L)).thenReturn(7L);
         assertError(ErrorCode.OPERATION_FAILED, () -> service.createComment(create()));
         verify(mapper, never()).incrementCommentCount(anyLong());
     }
@@ -89,7 +89,7 @@ class BlogCommentsServiceImplTest {
         assertError(ErrorCode.OPERATION_FAILED, () -> service.createComment(create()));
     }
     @Test void databaseErrorDoesNotLeakPrivateDetails() {
-        when(mapper.lockBlog(7L)).thenThrow(new DataAccessResourceFailureException("private SQL/credential"));
+        when(mapper.lockVisibleBlog(7L)).thenThrow(new DataAccessResourceFailureException("private SQL/credential"));
         BusinessException error = assertThrows(BusinessException.class, () -> service.createComment(create()));
         assertEquals(ErrorCode.INTERNAL_ERROR, error.getErrorCode()); assertNull(error.getCause());
         assertFalse(error.getMessage().contains("private"));

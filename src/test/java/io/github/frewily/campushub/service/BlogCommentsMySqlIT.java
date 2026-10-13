@@ -171,6 +171,8 @@ class BlogCommentsMySqlIT {
                     "db/migration/V009__add_blog_comment_hide_audit_page_index.sql");
             ScriptUtils.executeSqlScript(connection, auditPageIndex);
             ScriptUtils.executeSqlScript(connection, auditPageIndex);
+            ScriptUtils.executeSqlScript(connection,
+                    new ClassPathResource("db/migration/V010__add_blog_author_withdrawal.sql"));
         }
     }
 
@@ -1675,6 +1677,54 @@ class BlogCommentsMySqlIT {
         request.setBeforeId(beforeId);
         request.setSize(size);
         return request;
+    }
+
+    @Test
+    void withdrawnPostClosesNewCommentReplyAndListsButRetainsIndependentWithdrawalAndModeration() {
+        long blogId = blog(AUTHOR_ID, 4);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "retained root");
+        long reply = comment(blogId, AUTHOR_ID, root, root, 0, "retained reply");
+        long moderatable = comment(blogId, AUTHOR_ID + 1, 0, 0, 0, "retained moderation");
+        jdbc.update("UPDATE tb_blog SET withdrawn=1 WHERE id=?", blogId);
+        assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                () -> service.createComment(createRequest(blogId, "must not insert"))).getErrorCode());
+        assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                () -> service.createReply(root, replyRequest("must not insert"))).getErrorCode());
+        assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                () -> service.listComments(blogId, pageRequest(null, 20))).getErrorCode());
+        assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                () -> service.listReplies(root, pageRequest(null, 20))).getErrorCode());
+        assertEquals(3, countComments(blogId));
+        service.withdrawReply(reply);
+        service.withdrawComment(root);
+        service.hideComment(moderatable, hideRequest("retained audit on withdrawn post"));
+        assertEquals(Integer.valueOf(1), blogCounter(blogId));
+        assertEquals("retained reply", mapper.selectById(reply).getContent());
+        assertEquals(Integer.valueOf(3), mapper.selectById(reply).getStatus());
+        assertEquals(Integer.valueOf(3), mapper.selectById(root).getStatus());
+        assertEquals("retained audit on withdrawn post", service.queryHideAudit(moderatable).getReason());
+        assertEquals(1, service.listHideAudits(blogId, hideAuditPageRequest(null, 20)).getItems().size());
+        assertEquals(1, jdbc.queryForObject("SELECT withdrawn FROM tb_blog WHERE id=?", Integer.class, blogId));
+    }
+
+    @Test
+    void replyCreateUsesCurrentPostLockAfterWithdrawalCommitsBehindEarlierRepeatableReadSnapshot() {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root stays normal");
+        // An explicitly independent connection commits behind the earlier RR root snapshot.
+        AFTER_VISIBLE_ROOT_QUERY.set(() -> {
+            try (Connection connection = datasource.getConnection();
+                 java.sql.PreparedStatement write = connection.prepareStatement("UPDATE tb_blog SET withdrawn=1 WHERE id=?")) {
+                write.setLong(1, blogId);
+                assertEquals(1, write.executeUpdate());
+            } catch (SQLException error) { throw new AssertionError(error); }
+        });
+        assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                () -> service.createReply(root, replyRequest("must not insert"))).getErrorCode());
+        assertNull(AFTER_VISIBLE_ROOT_QUERY.get());
+        assertEquals(1, countComments(blogId));
+        assertEquals(Integer.valueOf(1), blogCounter(blogId));
+        assertEquals(Integer.valueOf(0), mapper.selectById(root).getStatus());
     }
 
     private static void runIndependent(ExecutorService executor, long userId, Runnable action) {

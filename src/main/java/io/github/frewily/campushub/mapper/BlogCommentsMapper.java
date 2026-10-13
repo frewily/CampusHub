@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 
 public interface BlogCommentsMapper extends BaseMapper<BlogComments> {
+    Long lockVisibleBlog(@Param("blogId") Long blogId);
     Long lockBlog(@Param("blogId") Long blogId);
     Long findBlog(@Param("blogId") Long blogId);
     BlogComments findVisibleRoot(@Param("commentId") Long commentId);

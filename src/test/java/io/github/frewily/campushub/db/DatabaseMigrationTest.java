@@ -7,8 +7,22 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class DatabaseMigrationTest {
+    @Test
+    void authorWithdrawalMigrationAddsRetainedVisibleDefaultAndPreservesExistingFlagOnRepeat() throws IOException {
+        String migration = StreamUtils.copyToString(getClass().getResourceAsStream(
+                "/db/migration/V010__add_blog_author_withdrawal.sql"), StandardCharsets.UTF_8);
+        String normalized = migration.replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("ADD COLUMN withdrawn TINYINT UNSIGNED NOT NULL DEFAULT 0"));
+        assertTrue(normalized.contains("INFORMATION_SCHEMA.COLUMNS"));
+        assertTrue(normalized.contains("COLUMN_NAME = 'withdrawn'"));
+        assertTrue(normalized.contains("@blog_withdrawn_exists = 1, 'SELECT 1'"));
+        assertFalse(normalized.contains("DELETE FROM"));
+        assertFalse(normalized.contains("DROP TABLE"));
+        assertFalse(normalized.contains("UPDATE tb_blog"));
+    }
 
     @Test
     void shouldDefineFinalUniqueConstraintsForFollowAndVoucherOrder() throws IOException {

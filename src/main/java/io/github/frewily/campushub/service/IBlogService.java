@@ -19,5 +19,7 @@ public interface IBlogService extends IService<Blog> {
 
     void editBlog(Long id, BlogEditRequest request);
 
+    void withdrawBlog(Long id);
+
     Result queryBlogOfFollow(Long max, Integer offset);
 }

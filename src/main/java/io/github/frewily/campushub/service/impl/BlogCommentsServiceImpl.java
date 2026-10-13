@@ -41,7 +41,7 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
         }
         try {
             // All comment writers in this use case serialize on the parent post, including its counter.
-            if (baseMapper.lockBlog(request.getBlogId()) == null) {
+            if (baseMapper.lockVisibleBlog(request.getBlogId()) == null) {
                 throw new BusinessException(ErrorCode.NOT_FOUND);
             }
             BlogComments comment = new BlogComments().setBlogId(request.getBlogId()).setUserId(user.getId())
@@ -71,7 +71,7 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
         }
         try {
             BlogComments root = baseMapper.findVisibleRoot(commentId);
-            if (root == null || baseMapper.lockBlog(root.getBlogId()) == null) {
+            if (root == null || baseMapper.lockVisibleBlog(root.getBlogId()) == null) {
                 throw new BusinessException(ErrorCode.NOT_FOUND);
             }
             // Parent post first, root second: keep one lock order for this content write path.

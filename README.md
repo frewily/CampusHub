@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase 7K 增加[作者本人动态逻辑撤回](docs/refactor/33-phase-7k-post-author-withdrawal.md)：三角色均仅本人，不物理删除；撤回后关闭公开读写，保留评论/审核及Redis数据。API为48条应用映射；V010须先迁移再升级，**不能直接回退不识别撤回标记的旧应用**。验证与交付状态以阶段记录和本轮交付对话为准；[学习笔记](docs/learning/post-author-withdrawal.md)说明边界。
+
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
 
 目前完成 Phase 5、Phase 6A/6B/6C 的选定本机范围：认证与权限、请求/响应边界、限量活动准入与可靠消费、订单查询/取消、门店缓存治理、MySQL 搜索、可重复本地部署，以及请求编号、可观测性基线、固定标签业务诊断、核心 HTTP 故障补验和可追溯的只读性能基线。Phase 6D 补齐原文要求的三份面试材料并盘点交付边界；6E1/6E2 补选定的有限抢购批次实测，6F 补当前接口目录与源码漂移检查；7A 支持不关联门店的校园动态并完成选定读写/Feed 验收；7B/7C 增加一级评论与一层直接回复的创建/游标读取，7D/7E 分别增加本人直接回复/一级评论撤回；7F 增加 ADMIN 隐藏一级评论及事务审计；7G 增加 ADMIN 单条隐藏审计只读查询；7H 增加 ADMIN 按动态分页读取隐藏审计。Phase 7I 已支持不关联门店的纯文字动态：无关联动态可省略或提供空白 `images`，归一化为 `""`；7I 当时的 71 项定向检查、386 项 Java 8 默认统计（0 失败/错误、4 设计跳过）、53 项显式 MySQL IT、26 组目标 Compose 通过，隔离资源清理独立复核完成；按流程提交后独立审查，最终状态在交付对话报告，见[7I 阶段记录](docs/refactor/31-phase-7i-text-only-campus-posts.md)。7H 历史证据保留在其阶段记录，不计为本轮新增结果。7F/7G 历史记录保留在各自阶段。以上不代表原始业务目标全部落地、生产容量或性能优化提升。
@@ -88,10 +90,10 @@ smoke 检查 live、ready 和合成门店搜索，成功输出 `PASS`；它只�
 首次使用全新 MySQL 卷时，官方镜像运行 `deploy/mysql/init/00-bootstrap.sh`：
 
 ```text
-空库检查 → schema.sql → V001…V009 → seed.sql（合成类别与一间门店）
+空库检查 → schema.sql → V001…V010 → seed.sql（合成类别与一间门店）
 ```
 
-没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V009；不会自动修复脏数据或同名错误结构。7A 的 V006、7B 的 V007、7F 的 V008 及 7H 的 V009 必须在升级应用前具备，已有卷不会因重启自动迁移。Phase 7I 不新增迁移，复用现有 `tb_blog.images` 列；应用升级无需新增 DDL；回退旧应用会恢复原图片必填的发布校验，不删除已发布的纯文字行。V007 只按索引名判断是否存在；同名但定义错误的索引需人工核查，不会自动修复。V008 使用 `CREATE TABLE IF NOT EXISTS`，不会校验同名表的列/索引定义，也不回填历史审计；V009 依赖 V008 表，重复执行按索引名跳过但不会修复同名错误定义。已有卷需备份、核对索引形状并人工审查 V009；旧应用回退可保留该索引，不自动删除索引或恢复状态/计数。新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)；评论索引的现有库升级要求见[7B 阶段记录](docs/refactor/24-phase-7b-comments.md)，管理员隐藏与审计表见[7F 阶段记录](docs/refactor/28-phase-7f-comment-moderation.md)，分页审计索引见[7H 阶段记录](docs/refactor/30-phase-7h-comment-audit-pages.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
+没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V010；不会自动修复脏数据或同名错误结构。7A 的 V006、7B 的 V007、7F 的 V008 及 7H 的 V009 必须在升级应用前具备，已有卷不会因重启自动迁移。Phase 7I 不新增迁移，复用现有 `tb_blog.images` 列；应用升级无需新增 DDL；回退旧应用会恢复原图片必填的发布校验，不删除已发布的纯文字行。V007 只按索引名判断是否存在；同名但定义错误的索引需人工核查，不会自动修复。V008 使用 `CREATE TABLE IF NOT EXISTS`，不会校验同名表的列/索引定义，也不回填历史审计；V009 依赖 V008 表，重复执行按索引名跳过但不会修复同名错误定义。已有卷需备份、核对索引形状并人工审查 V009；旧应用回退可保留该索引，不自动删除索引或恢复状态/计数。新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)；评论索引的现有库升级要求见[7B 阶段记录](docs/refactor/24-phase-7b-comments.md)，管理员隐藏与审计表见[7F 阶段记录](docs/refactor/28-phase-7f-comment-moderation.md)，分页审计索引见[7H 阶段记录](docs/refactor/30-phase-7h-comment-audit-pages.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
 
 日常停止容器并保留数据：
 
@@ -198,6 +200,8 @@ python3 scripts/verify-business-diagnostics.py
 `GET /shop/search` 匿名可访问，支持 `keyword,typeId,minPrice,maxPrice,minScore,x,y,radiusMeters,sort,page,size`。详细取值/单位以搜索契约为准；`data` 为 `items,total,page,size,sort,hasNext`，ID 为字符串。HTTP routes、表名和大部分 Redis key 保留；门店详情缓存已切换 `cache:shop:v2:`，不支持新旧缓存写入程序混跑的一致性保证。
 
 ## 测试与证据边界
+
+Phase 7K 本轮：61项定向、409项Java8默认统计（0失败/错误、4设计跳过）、69项显式MySQL IT、30组目标Compose通过；独立复核隔离资源清理。撤回可见性、当前行锁、重复无UPDATE、实际失败回滚、原文/评论/审计/Redis保留已在选定本机范围验证，详见[7K记录](docs/refactor/33-phase-7k-post-author-withdrawal.md)。不表示浏览器、生产迁移、负载或可靠Feed验收。
 
 ```bash
 ./mvnw clean test

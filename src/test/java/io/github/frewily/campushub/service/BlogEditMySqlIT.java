@@ -1,6 +1,8 @@
 package io.github.frewily.campushub.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.dto.request.BlogEditRequest;
@@ -61,6 +63,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -149,6 +152,8 @@ class BlogEditMySqlIT {
             ScriptUtils.executeSqlScript(connection, new FileSystemResource("deploy/mysql/schema.sql"));
             ScriptUtils.executeSqlScript(connection,
                     new ClassPathResource("db/migration/V006__allow_campus_posts_without_shop.sql"));
+            ScriptUtils.executeSqlScript(connection,
+                    new ClassPathResource("db/migration/V010__add_blog_author_withdrawal.sql"));
         }
     }
 
@@ -228,8 +233,8 @@ class BlogEditMySqlIT {
         public Object intercept(Invocation invocation) throws Throwable {
             MappedStatement statement = (MappedStatement) invocation.getArgs()[0];
             String id = statement.getId();
-            boolean lockRead = id.endsWith(".findBlogForAuthorEdit");
-            boolean write = id.endsWith(".editBlogFields");
+            boolean lockRead = id.endsWith(".findBlogForAuthorEdit") || id.endsWith(".findBlogForAuthorWithdrawal");
+            boolean write = id.endsWith(".editBlogFields") || id.endsWith(".withdrawOwnedBlog");
             if (lockRead || write) {
                 assertTrue(TransactionSynchronizationManager.isActualTransactionActive(),
                         "author edit mapper call must run inside an actual Spring transaction");
@@ -438,6 +443,153 @@ class BlogEditMySqlIT {
             if (edit != null && !edit.isDone()) edit.cancel(true);
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS), "edit worker did not stop");
+        }
+    }
+
+    @Test
+    void withdrawalRetainsContentAndDescendantsAndRepeatDoesNotWrite() {
+        long id = blog(AUTHOR_ID, 31L, "title", "image", "content");
+        long commentId = comment(id, "retained original comment");
+        Map<String, Object> before = snapshot(id);
+        service.withdrawBlog(id);
+        Map<String, Object> after = snapshot(id);
+        Map<String, Object> protectedBefore = new java.util.HashMap<>(before);
+        Map<String, Object> protectedAfter = new java.util.HashMap<>(after);
+        protectedBefore.remove("update_time");
+        protectedAfter.remove("update_time");
+        assertEquals(protectedBefore, protectedAfter, "withdrawal must preserve original columns except update_time");
+        assertEquals(1, jdbc.queryForObject("SELECT withdrawn FROM tb_blog WHERE id=?", Integer.class, id));
+        assertEquals("retained original comment", jdbc.queryForObject(
+                "SELECT content FROM tb_blog_comments WHERE id=?", String.class, commentId));
+        jdbc.execute("CREATE TRIGGER fail_blog_edit BEFORE UPDATE ON tb_blog FOR EACH ROW "
+                + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='repeat must not update'");
+        service.withdrawBlog(id);
+        assertEquals(after, snapshot(id));
+        assertEquals(1, EDIT_UPDATE_CALLS.get());
+        UserHolder.saveUser(user(OTHER_AUTHOR_ID));
+        assertCode(ErrorCode.AUTHORIZATION_FAILED, () -> service.withdrawBlog(id));
+    }
+
+    @Test
+    void generatedReadsAndUpdatesExcludeWithdrawnPostAndCustomEditAndLikesReturn404() {
+        long id = blog(AUTHOR_ID, null, "hidden", "", "hidden body");
+        long visible = blog(AUTHOR_ID, null, "visible", "", "visible body");
+        service.withdrawBlog(id);
+        assertNull(mapper.selectById(id));
+        assertEquals(1, mapper.selectCount(new QueryWrapper<io.github.frewily.campushub.entity.Blog>()));
+        assertEquals(visible, mapper.selectList(new QueryWrapper<io.github.frewily.campushub.entity.Blog>()
+                .eq("user_id", AUTHOR_ID)).get(0).getId());
+        assertEquals(0, mapper.update(null, new UpdateWrapper<io.github.frewily.campushub.entity.Blog>()
+                .eq("id", id).set("title", "must not overwrite")));
+        assertCode(ErrorCode.NOT_FOUND, () -> service.editBlog(id, request("x", "", "x")));
+        assertCode(ErrorCode.NOT_FOUND, () -> service.queryBlogById(id));
+        assertCode(ErrorCode.NOT_FOUND, () -> service.queryBlogLikes(id));
+        assertCode(ErrorCode.NOT_FOUND, () -> service.likeBlog(id));
+        assertEquals("hidden", snapshot(id).get("title"));
+    }
+
+    @Test
+    void withdrawalAuthorizationMissingRowAndSqlFailureDoNotChangeStoredRows() {
+        long id = blog(AUTHOR_ID, null, "title", "", "body");
+        Map<String, Object> before = snapshot(id);
+        UserHolder.saveUser(user(OTHER_AUTHOR_ID));
+        assertCode(ErrorCode.AUTHORIZATION_FAILED, () -> service.withdrawBlog(id));
+        UserHolder.saveUser(user(AUTHOR_ID));
+        assertCode(ErrorCode.NOT_FOUND, () -> service.withdrawBlog(Long.MAX_VALUE));
+        jdbc.execute("CREATE TRIGGER fail_blog_edit BEFORE UPDATE ON tb_blog FOR EACH ROW "
+                + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic withdrawal failure'");
+        BusinessException failure = assertThrows(BusinessException.class, () -> service.withdrawBlog(id));
+        assertEquals(ErrorCode.INTERNAL_ERROR, failure.getErrorCode());
+        assertNull(failure.getCause());
+        assertEquals(before, snapshot(id));
+        assertEquals(0, jdbc.queryForObject("SELECT withdrawn FROM tb_blog WHERE id=?", Integer.class, id));
+    }
+
+    @Test
+    void zeroReportedAfterRealWithdrawalRollsBackFlagAndTimestamp() {
+        long id = blog(AUTHOR_ID, null, "title", "", "body");
+        Map<String, Object> before = snapshot(id);
+        RETURN_ZERO_AFTER_REAL_UPDATE.set(true);
+        assertCode(ErrorCode.OPERATION_FAILED, () -> service.withdrawBlog(id));
+        assertEquals(0, jdbc.queryForObject("SELECT withdrawn FROM tb_blog WHERE id=?", Integer.class, id));
+        assertEquals(before, snapshot(id));
+        assertFalse(RETURN_ZERO_AFTER_REAL_UPDATE.get());
+    }
+
+    @Test
+    void currentLockSerializesConcurrentRepeatAndEditBehindUncommittedWithdrawal() throws Exception {
+        long id = blog(AUTHOR_ID, null, "title", "", "body");
+        CountDownLatch reached = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        UPDATE_REACHED.set(reached);
+        ALLOW_UPDATE_TO_RETURN.set(release);
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        try {
+            Future<?> first = executor.submit(() -> asAuthor(() -> service.withdrawBlog(id)));
+            assertTrue(reached.await(10, TimeUnit.SECONDS));
+            assertNotNull(mapper.selectById(id), "ordinary independent read sees committed pre-withdrawal row");
+            Future<?> repeat = executor.submit(() -> asAuthor(() -> service.withdrawBlog(id)));
+            Future<?> edit = executor.submit(() -> asAuthor(() ->
+                    assertCode(ErrorCode.NOT_FOUND, () -> service.editBlog(id, request("x", "", "x")))));
+            assertThrows(TimeoutException.class, () -> repeat.get(200, TimeUnit.MILLISECONDS));
+            assertThrows(TimeoutException.class, () -> edit.get(200, TimeUnit.MILLISECONDS));
+            release.countDown();
+            first.get(10, TimeUnit.SECONDS);
+            repeat.get(10, TimeUnit.SECONDS);
+            edit.get(10, TimeUnit.SECONDS);
+            assertNull(mapper.selectById(id));
+            assertEquals(1, EDIT_UPDATE_CALLS.get());
+            assertEquals("title", snapshot(id).get("title"));
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void withdrawalMigrationRepeatPreservesExistingVisibleAndWithdrawnRows() throws Exception {
+        long visible = blog(AUTHOR_ID, null, "visible", "", "body");
+        long hidden = blog(AUTHOR_ID, null, "hidden", "", "body");
+        service.withdrawBlog(hidden);
+        try (Connection connection = datasource.getConnection()) {
+            ClassPathResource migration = new ClassPathResource("db/migration/V010__add_blog_author_withdrawal.sql");
+            ScriptUtils.executeSqlScript(connection, migration);
+            ScriptUtils.executeSqlScript(connection, migration);
+        }
+        assertEquals(0, jdbc.queryForObject("SELECT withdrawn FROM tb_blog WHERE id=?", Integer.class, visible));
+        assertEquals(1, jdbc.queryForObject("SELECT withdrawn FROM tb_blog WHERE id=?", Integer.class, hidden));
+        assertEquals("tinyint unsigned", jdbc.queryForObject("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+                + "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog' AND COLUMN_NAME='withdrawn'", String.class));
+    }
+
+    private static void asAuthor(Runnable action) {
+        UserHolder.saveUser(user(AUTHOR_ID));
+        try { action.run(); } finally { UserHolder.removeUser(); }
+    }
+
+    @Test
+    void withdrawalMigrationAddsVisibleDefaultToPopulatedLegacySchemaWithoutRewritingContent() throws Exception {
+        try (Connection connection = datasource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE DATABASE blog_withdrawal_legacy CHARACTER SET utf8mb4");
+            statement.execute("USE blog_withdrawal_legacy");
+            ScriptUtils.executeSqlScript(connection, new FileSystemResource("deploy/mysql/schema.sql"));
+            statement.execute("INSERT INTO tb_blog(id,shop_id,user_id,title,images,content,liked,comments) "
+                    + "VALUES (91,31,1701,'legacy title','legacy image','legacy content',7,3)");
+            ClassPathResource migration = new ClassPathResource("db/migration/V010__add_blog_author_withdrawal.sql");
+            ScriptUtils.executeSqlScript(connection, migration);
+            ScriptUtils.executeSqlScript(connection, migration);
+            try (java.sql.ResultSet row = statement.executeQuery("SELECT withdrawn,title,images,content,liked,comments "
+                    + "FROM tb_blog WHERE id=91")) {
+                assertTrue(row.next());
+                assertEquals(0, row.getInt("withdrawn"));
+                assertEquals("legacy title", row.getString("title"));
+                assertEquals("legacy image", row.getString("images"));
+                assertEquals("legacy content", row.getString("content"));
+                assertEquals(7, row.getInt("liked"));
+                assertEquals(3, row.getInt("comments"));
+                assertFalse(row.next());
+            }
         }
     }
 

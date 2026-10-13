@@ -51,6 +51,30 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Override
     @Transactional
+    public void withdrawBlog(Long id) {
+        if (id == null || id <= 0) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null || user.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        try {
+            // Retained row is needed for author-only idempotence; never call generated deleteById here.
+            Blog stored = baseMapper.findBlogForAuthorWithdrawal(id);
+            if (stored == null) throw new BusinessException(ErrorCode.NOT_FOUND);
+            if (!user.getId().equals(stored.getUserId())) {
+                throw new BusinessException(ErrorCode.AUTHORIZATION_FAILED);
+            }
+            if (Integer.valueOf(1).equals(stored.getWithdrawn())) return;
+            if (baseMapper.withdrawOwnedBlog(id, user.getId()) != 1) {
+                throw new BusinessException(ErrorCode.OPERATION_FAILED);
+            }
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    @Override
+    @Transactional
     public void editBlog(Long id, BlogEditRequest request) {
         if (id == null || id <= 0 || request == null || !validator.validate(request).isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
@@ -128,7 +152,10 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     }
 
     @Override
+    @Transactional
     public Result likeBlog(Long id) {
+        // Serialize new likes with withdrawal before Redis. Not a DB/Redis atomicity guarantee.
+        if (baseMapper.findBlogForAuthorEdit(id) == null) throw new BusinessException(ErrorCode.NOT_FOUND);
         Long userId = UserHolder.getUser().getId();
         String key = RedisConstants.BLOG_LIKED_KEY + id;
         Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
@@ -149,6 +176,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Override
     public Result queryBlogLikes(Long id) {
+        if (getById(id) == null) throw new BusinessException(ErrorCode.NOT_FOUND);
         String key = RedisConstants.BLOG_LIKED_KEY + id;
         Set<String> top5 = stringRedisTemplate.opsForZSet().range(key, 0, 4);
         if (top5 == null || top5.isEmpty()) {
@@ -196,6 +224,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         }
         UserDTO user = UserHolder.getUser();
         blog.setUserId(user.getId());
+        blog.setWithdrawn(0);
         boolean isSuccess = save(blog);
         if (!isSuccess) {
             throw new BusinessException(ErrorCode.OPERATION_FAILED, "动态发布失败");

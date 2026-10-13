@@ -79,12 +79,13 @@ class BlogServiceImplTest {
         when(followQuery.list()).thenReturn(Arrays.asList(firstFollower, secondFollower));
         when(stringRedisTemplate.opsForZSet()).thenReturn(zSetOperations);
 
-        Blog blog = new Blog().setShopId(1L).setTitle("Campus post").setUserId(999L);
+        Blog blog = new Blog().setShopId(1L).setTitle("Campus post").setUserId(999L).setWithdrawn(1);
         blogService.saveBlog(blog);
 
         verify(zSetOperations).add(eq("feed:42"), eq("100"), anyDouble());
         verify(zSetOperations).add(eq("feed:84"), eq("100"), anyDouble());
         assertEquals(7L, blog.getUserId());
+        assertEquals(0, blog.getWithdrawn());
     }
 
     @Test
