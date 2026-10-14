@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7L修正既有关注Feed的同时间组偏移累计，响应形状与48条映射/13个Controller不变；静态集合、过滤空页及跨页变动边界见[7L记录](../refactor/34-phase-7l-follow-feed-cursor.md)。
+
 Phase 7K 新增作者本人 `DELETE /blog/{id}` 逻辑撤回，当前48条应用映射、13个Controller；可见性、评论/审核保留及不可直接回退旧应用的要求见[7K记录](../refactor/33-phase-7k-post-author-withdrawal.md)。下段7J是目录演进历史。
 
 机器清单在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 建立；这是目录初建来源，不表示该提交包含后续路由。参数/响应说明随业务阶段更新：7A 校园动态，7B 一级评论，7C 直接回复，7D/7E 本人回复/一级评论撤回，7F 管理员隐藏一级评论，7G 单条隐藏审计查询，7H 按动态分页读取隐藏审计，7I 纯文字校园动态发布语义，7J 作者编辑（选定本轮实现与验证完成），见[7A](../refactor/23-phase-7a-campus-posts.md)、[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)、[7D](../refactor/26-phase-7d-reply-withdrawal.md)、[7E](../refactor/27-phase-7e-comment-withdrawal.md)、[7F](../refactor/28-phase-7f-comment-moderation.md)、[7G](../refactor/29-phase-7g-comment-audit-query.md)、[7H](../refactor/30-phase-7h-comment-audit-pages.md)、[7I](../refactor/31-phase-7i-text-only-campus-posts.md)和[7J](../refactor/32-phase-7j-post-author-edit.md)。机器清单当前记录 **48 个显式 method/path 映射**（含健康和图片），来自 13 个 Controller。两个 Actuator GET 管理路由另列，不混入应用端数量；原 44 条为 7F 阶段历史基数。

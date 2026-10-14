@@ -1246,6 +1246,91 @@ def verify_post_author_withdrawal(base, tokens):
     check('post withdrawal boundaries: exact repeat without UPDATE, sanitized SQL rollback, independent comment actions/audits, V010 repeat preservation')
 
 
+def verify_follow_feed_cursor(base):
+    """Frozen, project-owned Feed fixtures: real HTTP, Redis ordering and SQL visibility."""
+    author, follower, other = 900070, 900071, 900072
+    headers = {}
+    for user_id in (author, follower, other):
+        sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(%d,'000000000%02d','synthetic-feed-actor');"
+            "INSERT INTO tb_user_role(user_id,role) VALUES(%d,'USER');" % (user_id, user_id - 900000, user_id))
+        token = 'synthetic-feed-cursor-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[user_id] = {'authorization': token, 'Content-Type': 'application/json'}
+    posts = list(range(810001, 810008))
+    for post_id in posts + [810010]:
+        sql("INSERT INTO tb_blog(id,shop_id,user_id,title,images,content,liked,comments) "
+            "VALUES(%d,NULL,%d,'synthetic feed cursor','','synthetic feed content',0,0);" % (post_id, author))
+    key = 'feed:%d' % follower
+    for post_id in posts:
+        redis('ZADD', key, '1000', str(post_id))
+    redis('ZADD', 'feed:%d' % other, '1000', '810010')
+
+    def snapshot_feed():
+        return redis('ZRANGE', key, '0', '-1', 'WITHSCORES')
+
+    def snapshot_posts():
+        return sql('SELECT id,user_id,shop_id,title,images,content,liked,comments,withdrawn,create_time,update_time '
+                   'FROM tb_blog WHERE id IN (%s) ORDER BY id;' % ','.join(map(str, posts)))
+
+    def walk(last_id, cursor_plan):
+        offset = 0
+        seen = []
+        raw_pages = []
+        for expected_time, expected_offset in cursor_plan:
+            body, _ = request(base, '/blog/of/follow?lastId=%d&offset=%d' % (last_id, offset),
+                              headers=headers[follower])
+            page = json.loads(body)['data']
+            assert page['minTime'] == expected_time and page['offset'] == expected_offset
+            ids = [row['id'] for row in page['list']]
+            assert len(ids) <= 2 and not (set(ids) & set(seen))
+            assert all('withdrawn' not in row for row in page['list'])
+            seen.extend(ids)
+            raw_pages.append(ids)
+            last_id, offset = page['minTime'], page['offset']
+        body, _ = request(base, '/blog/of/follow?lastId=%d&offset=%d' % (last_id, offset),
+                          headers=headers[follower])
+        assert json.loads(body) == {'success': True}, 'terminal Redis batch is empty success without data'
+        return seen, raw_pages
+
+    before_feed, before_posts = snapshot_feed(), snapshot_posts()
+    expected = list(map(int, redis('ZREVRANGEBYSCORE', key, '1000', '0').splitlines()))
+    seen, pages = walk(1000, [(1000, 2), (1000, 4), (1000, 6), (1000, 7)])
+    assert seen == expected and [len(page) for page in pages] == [2, 2, 2, 1]
+    body, _ = request(base, '/blog/of/follow?lastId=1000', headers=headers[follower])
+    assert [row['id'] for row in json.loads(body)['data']['list']] == expected[:2]
+    assert snapshot_feed() == before_feed and snapshot_posts() == before_posts
+    body, _ = request(base, '/blog/of/follow?lastId=1000', headers=headers[other])
+    assert [row['id'] for row in json.loads(body)['data']['list']] == [810010]
+    request(base, '/blog/of/follow?lastId=1000', 401)
+    for query in ('lastId=0', 'lastId=-1', 'lastId=bad', 'lastId=9223372036854775808',
+                  'lastId=1000&offset=-1', 'lastId=1000&offset=bad', 'lastId=1000&offset=2147483648', 'offset=0'):
+        request(base, '/blog/of/follow?' + query, 400, headers=headers[follower])
+    check('Feed cursors: seven equal scores yield offsets 2/4/6/7, exact Redis order, one-item tail, terminal empty success and account isolation')
+
+    # Change only these fixtures between scenarios; each traversal itself has fixed membership/scores.
+    for index, post_id in enumerate(expected):
+        redis('ZADD', key, '2000' if index < 3 else '1000', str(post_id))
+    plan = [(2000, 2), (1000, 1), (1000, 3), (1000, 4)]
+    expected = list(map(int, redis('ZREVRANGEBYSCORE', key, '2000', '0').splitlines()))
+    before_feed, before_posts = snapshot_feed(), snapshot_posts()
+    seen, _ = walk(2000, plan)
+    assert seen == expected and snapshot_feed() == before_feed and snapshot_posts() == before_posts
+    body, _ = request(base, '/blog/of/follow?lastId=1000', headers=headers[follower])
+    older = list(map(int, redis('ZREVRANGEBYSCORE', key, '1000', '0').splitlines()))
+    assert [row['id'] for row in json.loads(body)['data']['list']] == older[:2]
+    for post_id in expected[:4]:
+        request(base, '/blog/%d' % post_id, 200, 'DELETE', headers=headers[author])
+    before_feed, before_posts = snapshot_feed(), snapshot_posts()
+    seen, pages = walk(2000, plan)
+    assert pages[0] == [] and pages[1] == [] and seen == expected[4:]
+    assert snapshot_feed() == before_feed and snapshot_posts() == before_posts
+    assert sql('SELECT COUNT(*) FROM tb_blog WHERE id IN (%s) AND withdrawn=1;' % ','.join(map(str, posts))) == '4'
+    body, _ = request(base, '/blog/of/follow?lastId=2000&offset=2147483647', headers=headers[follower])
+    assert json.loads(body) == {'success': True}
+    check('Feed cursors: score transitions reset offsets, smaller bound excludes future entries, withdrawn empty pages still advance raw cursor without writes')
+
+
 def main():
     if ENV.get("DOCKER_HOST") and not ENV["DOCKER_HOST"].startswith("unix://"):
         raise RuntimeError("acceptance rejects non-local DOCKER_HOST overrides")
@@ -1303,6 +1388,7 @@ def main():
         verify_comment_hide_audit_pages(base, tokens)
         verify_post_author_edit(base, tokens)
         verify_post_author_withdrawal(base, tokens)
+        verify_follow_feed_cursor(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

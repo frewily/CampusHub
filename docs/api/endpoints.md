@@ -74,7 +74,7 @@ Controller：[BlogController.java](../../src/main/java/io/github/frewily/campush
 | GET | `/blog/{id}` | [`queryBlogById`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java)；需认证 | Path `id` 正数 | `Blog` Entity，附用户昵称/头像和点赞标记；动态不存在抛 404 |
 | GET | `/blog/likes/{id}` | [`queryBlogLikes`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java)；需认证 | Path `id` 正数 | 最多 5 个点赞用户的 `List<UserDTO>`；无点赞为空数组 |
 | GET | `/blog/of/user` | [`queryBlogByUserId`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java)；需认证 | Query `current` 默认 1 且 ≥1；`id` 用户 ID 必填正数 | `List<Blog>` Entity，每页最多 10；无记录为空数组 |
-| GET | `/blog/of/follow` | [`queryBlogOfFollow`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java)；需认证 | Query `lastId` 必填正数（滚动时间上界）；`offset` 默认 0 且 ≥0 | 有记录时 `ScrollResult {list: Blog[], minTime, offset}`，当前每批最多 2 条；无动态时 `Result.ok()`，即成功且 data 为 null，不是 404 |
+| GET | `/blog/of/follow` | [`queryBlogOfFollow`](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java)；需认证；从当前会话用户的Feed取成员 | Query `lastId` 必填正Long（包含边界的时间上界）；`offset` 非负Integer，默认0 | 原Redis批次非空返回 `ScrollResult {list: Blog[], minTime, offset}`，每批最多2个成员。同时间组offset累计，进入较早组只算本页末尾同组数；无法表示的累加为422。DB过滤后list可空，仍须继续用返回游标；Redis无原成员返回无data成功，不是404。静态ZSet及并发变动边界见[7L记录](../refactor/34-phase-7l-follow-feed-cursor.md) |
 
 7K 可见性：详情、点赞列表、编辑、新点赞对已撤回动态返回 404；热门、本人、用户、Feed 列表自动过滤。Feed 保留旧 ID/分数，游标按原 Redis 批次推进，过滤后可为空页且不补齐；此前已开始的读取不保证被撤回追溯取消。现有点赞列表的缺失动态行为也调整为404。内部 withdrawn 字段不暴露在 Blog JSON，不支持恢复。
 

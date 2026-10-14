@@ -265,6 +265,14 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
                 os = 1;
             }
         }
+        // Continue the same score group cumulatively; a lower ending score starts its own offset.
+        // Count raw Redis members, including rows subsequently hidden/missing in the database.
+        if (minTime == max.longValue()) {
+            if (offset > Integer.MAX_VALUE - os) {
+                throw new BusinessException(ErrorCode.OPERATION_FAILED, "Feed分页偏移超出支持范围");
+            }
+            os += offset;
+        }
         String idStr = StrUtil.join(",", ids);
         List<Blog> blogs = query().in("id", ids)
                 .last("ORDER BY FIELD(id," + idStr + ")").list();

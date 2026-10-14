@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase7L修正[关注Feed同分值游标累计](docs/refactor/34-phase-7l-follow-feed-cursor.md)：静态ZSet连续分页和撤回过滤空页都按原成员推进，换时间组重置；不新增API/DDL，不等于可靠投递或跨页冻结快照。[学习笔记](docs/learning/follow-feed-cursor.md)说明旧失败和边界。
+
 Phase 7K 增加[作者本人动态逻辑撤回](docs/refactor/33-phase-7k-post-author-withdrawal.md)：三角色均仅本人，不物理删除；撤回后关闭公开读写，保留评论/审核及Redis数据。API为48条应用映射；V010须先迁移再升级，**不能直接回退不识别撤回标记的旧应用**。验证与交付状态以阶段记录和本轮交付对话为准；[学习笔记](docs/learning/post-author-withdrawal.md)说明边界。
 
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
@@ -200,6 +202,8 @@ python3 scripts/verify-business-diagnostics.py
 `GET /shop/search` 匿名可访问，支持 `keyword,typeId,minPrice,maxPrice,minScore,x,y,radiusMeters,sort,page,size`。详细取值/单位以搜索契约为准；`data` 为 `items,total,page,size,sort,hasNext`，ID 为字符串。HTTP routes、表名和大部分 Redis key 保留；门店详情缓存已切换 `cache:shop:v2:`，不支持新旧缓存写入程序混跑的一致性保证。
 
 ## 测试与证据边界
+
+Phase7L本轮：30项定向、417项Java8默认统计（0失败/错误、4设计跳过）、76项显式IT（Redis7+原MySQL69）、32组目标Compose通过；隔离资源清理已独立读回。只修静态关注Feed的同分值游标累计及边界，仍没有可靠投递/跨页冻结快照；详见[7L记录](docs/refactor/34-phase-7l-follow-feed-cursor.md)。
 
 Phase 7K 本轮：61项定向、409项Java8默认统计（0失败/错误、4设计跳过）、69项显式MySQL IT、30组目标Compose通过；独立复核隔离资源清理。撤回可见性、当前行锁、重复无UPDATE、实际失败回滚、原文/评论/审计/Redis保留已在选定本机范围验证，详见[7K记录](docs/refactor/33-phase-7k-post-author-withdrawal.md)。不表示浏览器、生产迁移、负载或可靠Feed验收。
 
