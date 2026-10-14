@@ -74,6 +74,8 @@ campushub:
     max-pixels: 16000000
   cache:
     invalidation-worker-enabled: ${SHOP_CACHE_INVALIDATION_WORKER_ENABLED:true}
+  feed:
+    delivery-worker-enabled: ${BLOG_FEED_DELIVERY_WORKER_ENABLED:true}
   order:
     stream-consumer-enabled: ${ORDER_STREAM_CONSUMER_ENABLED:true}
     claim-idle-ms: ${ORDER_CLAIM_IDLE_MS:60000}

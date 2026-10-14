@@ -12,6 +12,7 @@ import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.service.impl.BlogServiceImpl;
 import io.github.frewily.campushub.service.IFollowService;
 import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.service.BlogFeedDeliveryService;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.mapping.MappedStatement;
@@ -214,6 +215,11 @@ class BlogEditMySqlIT {
             BlogServiceImpl blogService = new BlogServiceImpl();
             ReflectionTestUtils.setField(blogService, "baseMapper", blogMapper);
             return blogService;
+        }
+
+        @Bean
+        BlogFeedDeliveryService blogFeedDeliveryService() {
+            return mock(BlogFeedDeliveryService.class);
         }
 
         @Bean

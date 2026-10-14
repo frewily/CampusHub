@@ -18,6 +18,7 @@ import io.github.frewily.campushub.service.IBlogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import io.github.frewily.campushub.service.IFollowService;
 import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.service.BlogFeedDeliveryService;
 import io.github.frewily.campushub.utils.RedisConstants;
 import io.github.frewily.campushub.utils.SystemConstants;
 import io.github.frewily.campushub.utils.UserHolder;
@@ -48,6 +49,9 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Resource
     private Validator validator;
+
+    @Resource
+    private BlogFeedDeliveryService blogFeedDeliveryService;
 
     @Override
     @Transactional
@@ -215,7 +219,9 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     }
 
     @Override
+    @Transactional
     public Result saveBlog(Blog blog) {
+        if (blog == null) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         if (blog.getShopId() != null && blog.getShopId() <= 0) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "门店ID必须为正数");
         }
@@ -223,18 +229,24 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "标题不能为空");
         }
         UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null || user.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
         blog.setUserId(user.getId());
+        // Fail before the first SQL write even if an internal caller bypasses the Spring proxy.
+        BlogFeedDeliveryService.requireWritableTransaction();
         blog.setWithdrawn(0);
-        boolean isSuccess = save(blog);
-        if (!isSuccess) {
-            throw new BusinessException(ErrorCode.OPERATION_FAILED, "动态发布失败");
+        try {
+            if (!save(blog) || blog.getId() == null || blog.getId() <= 0) {
+                throw new BusinessException(ErrorCode.OPERATION_FAILED, "动态发布失败");
+            }
+            List<Long> recipients = followService.query().eq("follow_user_id", user.getId()).list()
+                    .stream().map(Follow::getUserId).collect(Collectors.toList());
+            blogFeedDeliveryService.enqueue(blog.getId(), recipients, System.currentTimeMillis());
+            return Result.ok(blog.getId());
+        } catch (DataAccessException failure) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
-        List<Follow> follows = followService.query().eq("follow_user_id", user.getId()).list();
-        for (Follow follow : follows) {
-            Long userId = follow.getUserId();
-            stringRedisTemplate.opsForZSet().add(FEED_KEY + userId, blog.getId().toString(), System.currentTimeMillis());
-        }
-        return Result.ok(blog.getId());
     }
 
     @Override

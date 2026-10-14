@@ -1,5 +1,9 @@
 # CampusHub
 
+Phase7M补[动态发布与Feed可恢复投递](docs/refactor/35-phase-7m-blog-feed-delivery.md)：动态和本次收件意图同事务，提交后失败不改报发布失败，后台按原成员/分数恢复；POST成功不是全部关注者立即可见。新增V011，需先迁移再升级，待办不可删除来回退。[学习笔记](docs/learning/blog-feed-delivery.md)与[决策](docs/adr/0003-blog-feed-delivery.md)说明边界。
+
+本轮61项定向、442项Java8默认统计（0失败/错误、4设计跳过）、88项显式隔离IT、36组目标版本Compose验收通过，测试资源清理已独立复核；不是生产或容量证明。按阶段流程提交后独立审查，最终SHA与同步状态在交付对话报告。
+
 Phase7L修正[关注Feed同分值游标累计](docs/refactor/34-phase-7l-follow-feed-cursor.md)：静态ZSet连续分页和撤回过滤空页都按原成员推进，换时间组重置；不新增API/DDL，不等于可靠投递或跨页冻结快照。[学习笔记](docs/learning/follow-feed-cursor.md)说明旧失败和边界。
 
 Phase 7K 增加[作者本人动态逻辑撤回](docs/refactor/33-phase-7k-post-author-withdrawal.md)：三角色均仅本人，不物理删除；撤回后关闭公开读写，保留评论/审核及Redis数据。API为48条应用映射；V010须先迁移再升级，**不能直接回退不识别撤回标记的旧应用**。验证与交付状态以阶段记录和本轮交付对话为准；[学习笔记](docs/learning/post-author-withdrawal.md)说明边界。
@@ -92,10 +96,10 @@ smoke 检查 live、ready 和合成门店搜索，成功输出 `PASS`；它只�
 首次使用全新 MySQL 卷时，官方镜像运行 `deploy/mysql/init/00-bootstrap.sh`：
 
 ```text
-空库检查 → schema.sql → V001…V010 → seed.sql（合成类别与一间门店）
+空库检查 → schema.sql → V001…V011 → seed.sql（合成类别与一间门店）
 ```
 
-没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V010；不会自动修复脏数据或同名错误结构。7A 的 V006、7B 的 V007、7F 的 V008 及 7H 的 V009 必须在升级应用前具备，已有卷不会因重启自动迁移。Phase 7I 不新增迁移，复用现有 `tb_blog.images` 列；应用升级无需新增 DDL；回退旧应用会恢复原图片必填的发布校验，不删除已发布的纯文字行。V007 只按索引名判断是否存在；同名但定义错误的索引需人工核查，不会自动修复。V008 使用 `CREATE TABLE IF NOT EXISTS`，不会校验同名表的列/索引定义，也不回填历史审计；V009 依赖 V008 表，重复执行按索引名跳过但不会修复同名错误定义。已有卷需备份、核对索引形状并人工审查 V009；旧应用回退可保留该索引，不自动删除索引或恢复状态/计数。新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)；评论索引的现有库升级要求见[7B 阶段记录](docs/refactor/24-phase-7b-comments.md)，管理员隐藏与审计表见[7F 阶段记录](docs/refactor/28-phase-7f-comment-moderation.md)，分页审计索引见[7H 阶段记录](docs/refactor/30-phase-7h-comment-audit-pages.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
+没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V011；不会自动修复脏数据或同名错误结构。7A 的 V006、7B 的 V007、7F 的 V008 及 7H 的 V009 必须在升级应用前具备，已有卷不会因重启自动迁移。Phase 7I 不新增迁移，复用现有 `tb_blog.images` 列；应用升级无需新增 DDL；回退旧应用会恢复原图片必填的发布校验，不删除已发布的纯文字行。V007 只按索引名判断是否存在；同名但定义错误的索引需人工核查，不会自动修复。V008 使用 `CREATE TABLE IF NOT EXISTS`，不会校验同名表的列/索引定义，也不回填历史审计；V009 依赖 V008 表，重复执行按索引名跳过但不会修复同名错误定义。已有卷需备份、核对索引形状并人工审查 V009；旧应用回退可保留该索引，不自动删除索引或恢复状态/计数。新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)；评论索引的现有库升级要求见[7B 阶段记录](docs/refactor/24-phase-7b-comments.md)，管理员隐藏与审计表见[7F 阶段记录](docs/refactor/28-phase-7f-comment-moderation.md)，分页审计索引见[7H 阶段记录](docs/refactor/30-phase-7h-comment-audit-pages.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
 
 日常停止容器并保留数据：
 
@@ -111,7 +115,7 @@ Compose 是单机本地开发模板，不是生产高可用部署。AOF/数据�
 
 配置分为 `dev`（默认，本机连接/示例值）、`test`（不可用本机端口防误连、关闭 worker）和 `prod`（连接/凭据/目录无开发默认值）。生产模式要求 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD`、绝对非根目录的 `IMAGE_STORAGE_DIR`。启动守卫拒绝缺失/示例值和 root 数据库用户；不代表密码强度、TLS 或完整生产安全校验。
 
-JDBC URL 必须保留 `serverTimezone=UTC&forceConnectionTimeZoneToSession=true`，保持数据库会话和 outbox 时间基准一致。Lettuce 与 Redisson 共用 Spring Redis 配置。三个 worker 开关、claim idle 和重试预算见 `.env.example`；默认值未进行性能调优。claim idle 应大于正常事务耗时。
+JDBC URL 必须保留 `serverTimezone=UTC&forceConnectionTimeZoneToSession=true`，保持数据库会话和 outbox 时间基准一致。Lettuce 与 Redisson 共用 Spring Redis 配置。四个 worker 开关、claim idle 和重试预算见 `.env.example`；test profile 默认关闭全部 worker。默认值未进行性能调优。claim idle 应大于正常事务耗时。
 
 | 接口 | 含义 |
 | --- | --- |

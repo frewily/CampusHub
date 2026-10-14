@@ -1,5 +1,7 @@
 # CampusHub 领域模型
 
+Phase7M增加[动态Feed投递意图](refactor/35-phase-7m-blog-feed-delivery.md)：V011按post/recipient记录本次DB关注快照及固定score，与动态同事务；后台确认前保留，确认后删除。它不是永久投递历史、全Feed重建或读消息状态，不改变既有Post/Follow生命周期；以下Phase1A的“应可重建”仍是目标，不是本阶段已实现事实。
+
 Phase 7K 状态：[作者本人动态逻辑撤回](refactor/33-phase-7k-post-author-withdrawal.md)新增V010 `withdrawn`标记，保留原文/关联/评论/计数/审计和Redis；详情、互动新增与公开列表尊重可见性。无物理删除、恢复或动态审核；旧应用不可直接回退。以下Phase1A及各阶段段落是设计/演进历史。
 
 ## 1 文档目的与阶段结论

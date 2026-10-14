@@ -26,7 +26,8 @@ ENV.update(DB_USERNAME="campushub", DB_PASSWORD="synthetic-only-db-password",
            MYSQL_ROOT_PASSWORD="synthetic-only-root-password", REDIS_PASSWORD="synthetic-only-redis-password",
            MYSQL_PUBLISHED_PORT="0", REDIS_PUBLISHED_PORT="0", APP_PUBLISHED_PORT="0",
            ORDER_STREAM_CONSUMER_ENABLED="true", ORDER_CLAIM_IDLE_MS="60000", ORDER_MAX_ATTEMPTS="5",
-           ORDER_CANCELLATION_RECONCILER_ENABLED="true", SHOP_CACHE_INVALIDATION_WORKER_ENABLED="true")
+           ORDER_CANCELLATION_RECONCILER_ENABLED="true", SHOP_CACHE_INVALIDATION_WORKER_ENABLED="true",
+           BLOG_FEED_DELIVERY_WORKER_ENABLED="true")
 COMPOSE = ["docker", "compose", "--env-file", str(ROOT / ".env.example"), "-f", str(ROOT / "compose.yaml"), "-p", PROJECT]
 COUNTER = 0
 PASSED = []
@@ -1331,6 +1332,123 @@ def verify_follow_feed_cursor(base):
     check('Feed cursors: score transitions reset offsets, smaller bound excludes future entries, withdrawn empty pages still advance raw cursor without writes')
 
 
+def verify_blog_feed_delivery(base):
+    """Commit/Redis/ACK faults against project-owned recipients, durable intents and fixed score."""
+    author, bad, good, restart_recipient, restart_author = 900090, 900091, 900092, 900093, 900094
+    headers = {}
+    for user_id in (author, bad, good, restart_recipient, restart_author):
+        sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(%d,'000000000%02d','synthetic-outbox-actor');"
+            "INSERT INTO tb_user_role(user_id,role) VALUES(%d,'USER');" % (user_id, user_id - 900000, user_id))
+        token = 'synthetic-feed-delivery-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[user_id] = {'authorization': token, 'Content-Type': 'application/json'}
+
+    def wait_until(condition, label):
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            if condition():
+                return
+            time.sleep(.25)
+        raise AssertionError('isolated Feed recovery timed out: ' + label)
+
+    def publish(user_id, title):
+        body, _ = request(base, '/blog', 200, 'POST', json.dumps(
+            {'title': title, 'content': 'synthetic durable Feed body'}).encode(), headers[user_id])
+        return int(json.loads(body)['data'])
+
+    def pending(blog_id, recipient):
+        return sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE blog_id=%d AND recipient_user_id=%d;'
+                   % (blog_id, recipient)) == '1'
+
+    for follower in (bad, good):
+        request(base, '/follow/%d/true' % author, 200, 'PUT', headers=headers[follower])
+    bad_key, good_key = 'feed:%d' % bad, 'feed:%d' % good
+    redis('SET', bad_key, 'synthetic wrong-type blocker')
+    first = publish(author, 'synthetic accepted despite Feed failure')
+    assert sql('SELECT COUNT(*) FROM tb_blog WHERE id=%d AND user_id=%d;' % (first, author)) == '1'
+    assert pending(first, bad)
+    fixed_score = int(sql('SELECT score_millis FROM tb_blog_feed_delivery WHERE blog_id=%d AND recipient_user_id=%d;'
+                          % (first, bad)))
+    assert int(float(redis('ZSCORE', good_key, str(first)))) == fixed_score
+    wait_until(lambda: sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE blog_id=%d AND recipient_user_id=%d '
+                           'AND attempts>0 AND next_attempt_at>create_time AND last_error IS NOT NULL;'
+                           % (first, bad)) == '1', 'recorded retry')
+    reason = sql('SELECT last_error FROM tb_blog_feed_delivery WHERE blog_id=%d AND recipient_user_id=%d;' % (first, bad))
+    assert re.fullmatch(r'[A-Za-z0-9_$]{1,64}', reason) and 'synthetic' not in reason
+    # The durable audience is the DB follow snapshot, not a later re-query after unfollow.
+    request(base, '/follow/%d/false' % author, 200, 'PUT', headers=headers[bad])
+    assert pending(first, bad)
+    sql((ROOT / 'src/main/resources/db/migration/V011__add_blog_feed_delivery_outbox.sql').read_text('utf-8'))
+    assert pending(first, bad)
+    redis('DEL', bad_key)  # Only the synthetic blocker created above; no shared Feed data.
+    wait_until(lambda: not pending(first, bad) and not pending(first, good), 'fixed-score delivery and ACK')
+    assert int(float(redis('ZSCORE', bad_key, str(first)))) == fixed_score
+    assert int(float(redis('ZSCORE', good_key, str(first)))) == fixed_score
+    assert redis('ZCARD', bad_key) == '1'
+    check('Feed outbox: accepted DB post despite one recipient WRONGTYPE, full stable audience/score, safe retry metadata, repeat V011 and recovery after unfollow')
+
+    sql("DELIMITER $$\nCREATE TRIGGER reject_feed_ack BEFORE DELETE ON tb_blog_feed_delivery FOR EACH ROW BEGIN "
+        "IF OLD.recipient_user_id=%d THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private ACK fault'; "
+        "END IF; END$$\nDELIMITER ;" % good)
+    try:
+        ack_post = publish(author, 'synthetic Redis-success DB-ACK-failure')
+        ack_score = int(sql('SELECT score_millis FROM tb_blog_feed_delivery WHERE blog_id=%d AND recipient_user_id=%d;'
+                            % (ack_post, good)))
+        before = redis('ZRANGE', good_key, '0', '-1', 'WITHSCORES')
+        marker = 'blogId=%d, recipientId=%d, errorClass=' % (ack_post, good)
+        wait_until(lambda: marker in compose('--profile', 'app', 'logs', '--no-color', 'app'), 'actual failed ACK attempt')
+        assert pending(ack_post, good)
+        assert redis('ZRANGE', good_key, '0', '-1', 'WITHSCORES') == before
+        request(base, '/blog/%d' % ack_post, 200, 'DELETE', headers=headers[author])
+        assert pending(ack_post, good)
+    finally:
+        sql('DROP TRIGGER IF EXISTS reject_feed_ack;')
+    wait_until(lambda: not pending(ack_post, good), 'ACK replay on withdrawn post')
+    assert int(float(redis('ZSCORE', good_key, str(ack_post)))) == ack_score
+    assert redis('ZCARD', good_key) == '2'
+    request(base, '/blog/%d' % ack_post, 404, headers=headers[author])
+    check('Feed outbox: Redis-confirmed DB ACK failure retains intent, matching replay does not reorder/duplicate members, withdrawal does not erase pending intent')
+
+    request(base, '/follow/%d/true' % author, 200, 'PUT', headers=headers[bad])
+    sql("DELIMITER $$\nCREATE TRIGGER reject_second_feed_intent BEFORE INSERT ON tb_blog_feed_delivery "
+        "FOR EACH ROW BEGIN SET @campushub_7m_insert_count=COALESCE(@campushub_7m_insert_count,0)+1; "
+        "IF @campushub_7m_insert_count=2 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private intent fault'; "
+        "END IF; END$$\nDELIMITER ;")
+    before_count = sql('SELECT COUNT(*) FROM tb_blog;')
+    before_bad, before_good = redis('ZRANGE', bad_key, '0', '-1', 'WITHSCORES'), redis('ZRANGE', good_key, '0', '-1', 'WITHSCORES')
+    try:
+        body, _ = request(base, '/blog', 500, 'POST', json.dumps(
+            {'title': 'synthetic must roll back with second intent', 'content': 'synthetic rollback body'}).encode(), headers[author])
+        assert json.loads(body)['errorCode'] == 'INTERNAL_ERROR'
+        assert b'synthetic private intent fault' not in body and b'SIGNAL' not in body
+    finally:
+        sql('DROP TRIGGER IF EXISTS reject_second_feed_intent;')
+    assert sql('SELECT COUNT(*) FROM tb_blog;') == before_count
+    assert sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE recipient_user_id IN (%d,%d);' % (bad, good)) == '0'
+    assert redis('ZRANGE', bad_key, '0', '-1', 'WITHSCORES') == before_bad
+    assert redis('ZRANGE', good_key, '0', '-1', 'WITHSCORES') == before_good
+    check('Feed outbox: later intent INSERT fault rolls back both post and earlier intent, no pre-commit Redis side effects and sanitized HTTP failure')
+
+    request(base, '/follow/%d/true' % restart_author, 200, 'PUT', headers=headers[restart_recipient])
+    restart_key = 'feed:%d' % restart_recipient
+    redis('SET', restart_key, 'synthetic restart blocker')
+    restart_post = publish(restart_author, 'synthetic durable intent survives app restart')
+    restart_score = int(sql('SELECT score_millis FROM tb_blog_feed_delivery WHERE blog_id=%d AND recipient_user_id=%d;'
+                            % (restart_post, restart_recipient)))
+    compose('restart', 'app')
+    base = app_base()
+    wait_ready(base)
+    assert pending(restart_post, restart_recipient)
+    redis('DEL', restart_key)
+    wait_until(lambda: not pending(restart_post, restart_recipient), 'application restart recovery')
+    assert int(float(redis('ZSCORE', restart_key, str(restart_post)))) == restart_score
+    body, _ = request(base, '/blog/of/follow?lastId=%d' % (int(time.time() * 1000) + 60000), headers=headers[restart_recipient])
+    assert [row['id'] for row in json.loads(body)['data']['list']] == [restart_post]
+    check('Feed outbox: pending intent persists across actual app restart and background recovery confirms the original member/score')
+    return base
+
+
 def main():
     if ENV.get("DOCKER_HOST") and not ENV["DOCKER_HOST"].startswith("unix://"):
         raise RuntimeError("acceptance rejects non-local DOCKER_HOST overrides")
@@ -1370,7 +1488,9 @@ def main():
                    "AND INDEX_NAME='idx_blog_comment_hide_audit_page';") == "blog_id,id"
         assert sql("SELECT CONCAT(IS_NULLABLE,':',COLUMN_DEFAULT) FROM INFORMATION_SCHEMA.COLUMNS "
                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog' AND COLUMN_NAME='withdrawn';") == 'NO:0'
-        check("V001-V010 repeat, nullable post store, withdrawn flag, comment/hide audit cursor indexes, populated-database bootstrap refusal")
+        assert sql("SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM INFORMATION_SCHEMA.STATISTICS "
+                   "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog_feed_delivery' AND INDEX_NAME='PRIMARY';") == 'blog_id,recipient_user_id'
+        check("V001-V011 repeat, nullable post store, withdrawn flag, Feed delivery intents, comment/hide audit cursor indexes, populated-database bootstrap refusal")
         sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(900001,'00000000001','synthetic-user'),(900002,'00000000002','synthetic-admin');"
             "INSERT INTO tb_user_role(user_id,role) VALUES(900001,'USER'),(900002,'ADMIN');")
         tokens = ["synthetic-phase5-" + uuid.uuid4().hex for _ in range(2)]
@@ -1389,6 +1509,7 @@ def main():
         verify_post_author_edit(base, tokens)
         verify_post_author_withdrawal(base, tokens)
         verify_follow_feed_cursor(base)
+        base = verify_blog_feed_delivery(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

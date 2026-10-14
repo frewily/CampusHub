@@ -1,5 +1,7 @@
 # CampusHub 面试追问与验证路线
 
+7M追问：为什么内容保存和收件意图必须同事务？为什么事务门禁要早于第一条SQL？为何afterCommit不确认DB待办？Redis返回false与null有什么区别？为什么重试不能刷新score？为何不需要租约仍不等于恰好一次？客户端POST重试、Redis丢失、暂停后台或回退旧版会怎样？先独立复现再核对[7M证据](../refactor/35-phase-7m-blog-feed-delivery.md)。
+
 7K新增追问：动态逻辑撤回后，哪些入口404、哪些只过滤、哪些仍能操作？为什么 `@TableLogic` 不够覆盖XML？RR快照下为何还要当前读锁动态？Feed过滤成空页后游标为何要保留？为什么不能直接回退旧应用？证据与未覆盖范围见[7K记录](../refactor/33-phase-7k-post-author-withdrawal.md)，不等于已掌握。
 
 这不是可直接背诵的标准答案。先脱稿回答，再核对源码、测试与边界；能读到答案不等于已掌握。实现基线为 `4882a20`，原始目标的缺口见 [交付盘点](../refactor/19-phase-6d-delivery.md)。

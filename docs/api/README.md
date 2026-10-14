@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7M保留POST/blog和48条映射，成功代表动态及投递意图提交，不代表全部关注者已立即收到；V011与后台恢复/发布重试边界见[7M记录](../refactor/35-phase-7m-blog-feed-delivery.md)。
+
 Phase7L修正既有关注Feed的同时间组偏移累计，响应形状与48条映射/13个Controller不变；静态集合、过滤空页及跨页变动边界见[7L记录](../refactor/34-phase-7l-follow-feed-cursor.md)。
 
 Phase 7K 新增作者本人 `DELETE /blog/{id}` 逻辑撤回，当前48条应用映射、13个Controller；可见性、评论/审核保留及不可直接回退旧应用的要求见[7K记录](../refactor/33-phase-7k-post-author-withdrawal.md)。下段7J是目录演进历史。

@@ -16,6 +16,7 @@ import io.github.frewily.campushub.entity.Follow;
 import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.mapper.BlogMapper;
+import io.github.frewily.campushub.mapper.BlogFeedDeliveryMapper;
 import io.github.frewily.campushub.service.impl.BlogServiceImpl;
 import io.github.frewily.campushub.service.IFollowService;
 import io.github.frewily.campushub.service.IUserService;
@@ -34,6 +35,8 @@ import org.springframework.data.redis.core.DefaultTypedTuple;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -66,6 +69,7 @@ class BlogPublicationMySqlIT {
     private static QueryChainWrapper<Follow> followQuery;
     private static StringRedisTemplate redis;
     private static ZSetOperations<String, String> zset;
+    private static TransactionTemplate transactions;
 
     @BeforeAll
     static void startPrivateMySql() throws Exception {
@@ -124,6 +128,8 @@ class BlogPublicationMySqlIT {
             }
             ScriptUtils.executeSqlScript(connection,
                     new ClassPathResource("db/migration/V010__add_blog_author_withdrawal.sql"));
+            ScriptUtils.executeSqlScript(connection,
+                    new ClassPathResource("db/migration/V011__add_blog_feed_delivery_outbox.sql"));
         }
     }
 
@@ -144,12 +150,14 @@ class BlogPublicationMySqlIT {
         MybatisConfiguration configuration = new MybatisConfiguration();
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.addMapper(BlogMapper.class);
+        configuration.addMapper(BlogFeedDeliveryMapper.class);
         MybatisPlusInterceptor pagination = new MybatisPlusInterceptor();
         pagination.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
         factory.setConfiguration(configuration);
         factory.setPlugins(pagination);
         SqlSessionTemplate sessions = new SqlSessionTemplate(factory.getObject());
         mapper = sessions.getMapper(BlogMapper.class);
+        transactions = new TransactionTemplate(new DataSourceTransactionManager(datasource));
 
         blogService = new BlogServiceImpl();
         ReflectionTestUtils.setField(blogService, "baseMapper", mapper);
@@ -161,6 +169,8 @@ class BlogPublicationMySqlIT {
         ReflectionTestUtils.setField(blogService, "userService", userService);
         ReflectionTestUtils.setField(blogService, "followService", followService);
         ReflectionTestUtils.setField(blogService, "stringRedisTemplate", redis);
+        ReflectionTestUtils.setField(blogService, "blogFeedDeliveryService",
+                new BlogFeedDeliveryService(sessions.getMapper(BlogFeedDeliveryMapper.class), redis, false));
         when(followService.query()).thenReturn(followQuery);
         when(followQuery.eq("follow_user_id", AUTHOR_ID)).thenReturn(followQuery);
         when(followQuery.list()).thenReturn(Collections.emptyList());
@@ -173,6 +183,10 @@ class BlogPublicationMySqlIT {
 
     @BeforeEach
     void seedLegacyPostThenRunNullableMigrationTwice() throws Exception {
+        org.mockito.Mockito.reset(zset);
+        when(zset.score(anyString(), anyString())).thenReturn(null);
+        when(followQuery.list()).thenReturn(Collections.emptyList());
+        jdbc.execute("DELETE FROM tb_blog_feed_delivery");
         jdbc.execute("DELETE FROM tb_blog");
         jdbc.execute("ALTER TABLE tb_blog AUTO_INCREMENT=1");
         // Restore only this test-owned table so every case exercises the first migration too.
@@ -203,6 +217,11 @@ class BlogPublicationMySqlIT {
         stopProcess(mysql);
     }
 
+    private static Result publish(Blog post) {
+        // Legacy fixture uses real Spring TransactionTemplate; the new outbox IT also verifies the service AOP proxy.
+        return transactions.execute(status -> blogService.saveBlog(post));
+    }
+
     @Test
     void migrationKeepsSignedBigintAndLegacyDataAndServiceSavesNullAndPositiveShopIds() {
         assertEquals("bigint", jdbc.queryForObject(
@@ -218,13 +237,13 @@ class BlogPublicationMySqlIT {
         assertEquals("legacy content", legacy.getContent());
 
         assertThrows(BusinessException.class,
-                () -> blogService.saveBlog(ApiModelMapper.toBlog(request(0L, "zero shop", "invalid"))));
+                () -> publish(ApiModelMapper.toBlog(request(0L, "zero shop", "invalid"))));
         assertThrows(BusinessException.class,
-                () -> blogService.saveBlog(ApiModelMapper.toBlog(request(-1L, "negative shop", "invalid"))));
+                () -> publish(ApiModelMapper.toBlog(request(-1L, "negative shop", "invalid"))));
 
         BlogCreateRequest campusRequest = request(null, "campus post", "campus content");
         Blog campusPost = ApiModelMapper.toBlog(campusRequest);
-        Result campusResult = blogService.saveBlog(campusPost);
+        Result campusResult = publish(campusPost);
         assertTrue(campusResult.getSuccess());
         assertTrue(campusPost.getId() > 1L, "the inserted campus post should receive the MySQL auto ID");
         assertEquals(campusPost.getId(), campusResult.getData());
@@ -237,7 +256,7 @@ class BlogPublicationMySqlIT {
 
         BlogCreateRequest shopRequest = request(654L, "shop post", "shop content");
         Blog shopPost = ApiModelMapper.toBlog(shopRequest);
-        Result shopResult = blogService.saveBlog(shopPost);
+        Result shopResult = publish(shopPost);
         assertTrue(shopResult.getSuccess());
         assertTrue(shopPost.getId() > campusPost.getId());
         assertEquals(shopPost.getId(), shopResult.getData());
@@ -250,13 +269,32 @@ class BlogPublicationMySqlIT {
     }
 
     @Test
+    void committedPostIsNotMisreportedAsFailureWhenRecipientFeedWriteFails() {
+        when(followQuery.list()).thenReturn(Collections.singletonList(
+                new Follow().setUserId(702L).setFollowUserId(AUTHOR_ID)));
+        when(zset.add(eq("feed:702"), anyString(), anyDouble())).thenThrow(
+                new org.springframework.data.redis.RedisConnectionFailureException("synthetic feed write failure"));
+        Blog post = ApiModelMapper.toBlog(request(null, "durable post", "synthetic durable content"));
+        Result accepted = assertDoesNotThrow(() -> {
+            try { return publish(post); }
+            catch (RuntimeException failure) {
+                assertNotNull(mapper.selectById(post.getId()), "old implementation already committed the post");
+                throw failure;
+            }
+        });
+        assertTrue(accepted.getSuccess());
+        assertEquals(post.getId(), accepted.getData());
+        assertNotNull(mapper.selectById(post.getId()));
+    }
+
+    @Test
     void detailHotAndMyPostsReadNullableShopIdThroughMyBatis() {
         BlogCreateRequest nullShopRequest = request(null, "nullable detail", "nullable detail content");
         Blog nullShop = ApiModelMapper.toBlog(nullShopRequest);
-        blogService.saveBlog(nullShop);
+        publish(nullShop);
         BlogCreateRequest shopRequest = request(789L, "shop detail", "shop detail content");
         Blog shopBlog = ApiModelMapper.toBlog(shopRequest);
-        blogService.saveBlog(shopBlog);
+        publish(shopBlog);
 
         Result detailResult = blogService.queryBlogById(nullShop.getId());
         assertTrue(detailResult.getSuccess());
@@ -289,7 +327,7 @@ class BlogPublicationMySqlIT {
                 request.setImages(images);
                 assertTrue(validation.getValidator().validate(request).isEmpty());
                 Blog post = ApiModelMapper.toBlog(request);
-                Result result = blogService.saveBlog(post);
+                Result result = publish(post);
                 assertTrue(result.getSuccess());
                 assertEquals(post.getId(), result.getData());
                 Blog stored = mapper.selectById(post.getId());
@@ -304,7 +342,7 @@ class BlogPublicationMySqlIT {
             maximum.setImages(String.join("", Collections.nCopies(2048, "p")));
             assertTrue(validation.getValidator().validate(maximum).isEmpty());
             Blog post = ApiModelMapper.toBlog(maximum);
-            blogService.saveBlog(post);
+            publish(post);
             assertEquals(maximum.getImages(), mapper.selectById(post.getId()).getImages());
             int count = jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class);
             for (String images : new String[]{String.join("", Collections.nCopies(2049, "p")),
@@ -332,7 +370,7 @@ class BlogPublicationMySqlIT {
         BlogCreateRequest request = request(null, "text-only reads", "plain text without a picture");
         request.setImages(null);
         Blog post = ApiModelMapper.toBlog(request);
-        blogService.saveBlog(post);
+        publish(post);
         verify(zset).add(eq("feed:702"), eq(post.getId().toString()), anyDouble());
         Blog detail = (Blog) blogService.queryBlogById(post.getId()).getData();
         assertEquals("", detail.getImages());

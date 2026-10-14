@@ -14,3 +14,5 @@ campushub:
     cancellation-reconciler-enabled: false
   cache:
     invalidation-worker-enabled: false
+  feed:
+    delivery-worker-enabled: false
