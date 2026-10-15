@@ -10,6 +10,7 @@ import io.github.frewily.campushub.security.RedisTokenAuthenticationFilter;
 import io.github.frewily.campushub.security.ResourceAuthorizationService;
 import io.github.frewily.campushub.security.SecurityErrorResponder;
 import io.github.frewily.campushub.service.IBlogService;
+import io.github.frewily.campushub.service.BlogPublicationService;
 import io.github.frewily.campushub.utils.RedisConstants;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.junit.jupiter.api.AfterEach;
@@ -51,6 +52,8 @@ class BlogEditHttpContractTest {
 
     @MockBean
     private IBlogService blogService;
+    @MockBean
+    private BlogPublicationService blogPublicationService;
     @MockBean
     private StringRedisTemplate stringRedisTemplate;
     @MockBean

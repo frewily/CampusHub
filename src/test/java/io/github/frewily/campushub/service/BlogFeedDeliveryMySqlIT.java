@@ -4,13 +4,17 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
+import io.github.frewily.campushub.dto.request.BlogCreateRequest;
+import io.github.frewily.campushub.dto.request.BlogEditRequest;
 import io.github.frewily.campushub.entity.Blog;
 import io.github.frewily.campushub.entity.BlogFeedDelivery;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
+import io.github.frewily.campushub.mapper.BlogPublicationRequestMapper;
 import io.github.frewily.campushub.mapper.BlogFeedDeliveryMapper;
 import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.mapper.FollowMapper;
+import io.github.frewily.campushub.service.BlogPublicationService;
 import io.github.frewily.campushub.service.impl.BlogServiceImpl;
 import io.github.frewily.campushub.service.impl.FollowServiceImpl;
 import io.github.frewily.campushub.utils.RedisConstants;
@@ -43,6 +47,7 @@ import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
@@ -58,6 +63,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -88,11 +97,14 @@ class BlogFeedDeliveryMySqlIT {
     private static BlogMapper blogMapper;
     private static BlogFeedDeliveryMapper deliveryMapper;
     private static BlogServiceImpl blogService;
+    private static BlogPublicationService publicationService;
     private static BlogFeedDeliveryService deliveryService;
     private static StringRedisTemplate redis;
     private static ZSetOperations<String, String> feed;
     private static final AtomicBoolean REPORT_ZERO_AFTER_REAL_ENQUEUE = new AtomicBoolean();
+    private static final AtomicBoolean REPORT_ZERO_AFTER_REAL_PUBLICATION_COMPLETE = new AtomicBoolean();
     private static final String DELIVERY_TABLE = "tb_blog_feed_delivery";
+    private static final String PUBLICATION_TABLE = "tb_blog_publication_request";
 
     @BeforeAll
     static void startPrivateMySqlAndSpringContext() throws Exception {
@@ -147,9 +159,11 @@ class BlogFeedDeliveryMySqlIT {
             deliveryMapper = context.getBean(BlogFeedDeliveryMapper.class);
             blogService = context.getBean(BlogServiceImpl.class);
             deliveryService = context.getBean(BlogFeedDeliveryService.class);
+            publicationService = context.getBean(BlogPublicationService.class);
             redis = context.getBean(StringRedisTemplate.class);
             feed = context.getBean("feedOperations", ZSetOperations.class);
-            assertTrue(AopUtils.isAopProxy(blogService), "publish service must use Spring transaction AOP");
+            assertTrue(AopUtils.isAopProxy(blogService), "blog service must use Spring transaction AOP");
+            assertTrue(AopUtils.isAopProxy(publicationService), "publication service must use Spring transaction AOP");
         } catch (Exception | Error failure) {
             try {
                 if (context != null) context.close();
@@ -171,6 +185,8 @@ class BlogFeedDeliveryMySqlIT {
                     new ClassPathResource("db/migration/V010__add_blog_author_withdrawal.sql"));
             ScriptUtils.executeSqlScript(connection,
                     new ClassPathResource("db/migration/V011__add_blog_feed_delivery_outbox.sql"));
+            ScriptUtils.executeSqlScript(connection,
+                    new ClassPathResource("db/migration/V012__add_blog_publication_requests.sql"));
         }
     }
 
@@ -203,6 +219,11 @@ class BlogFeedDeliveryMySqlIT {
         @Bean MapperFactoryBean<BlogFeedDeliveryMapper> blogFeedDeliveryMapper(
                 org.apache.ibatis.session.SqlSessionFactory factory) {
             return mapperFactory(BlogFeedDeliveryMapper.class, factory);
+        }
+
+        @Bean MapperFactoryBean<BlogPublicationRequestMapper> blogPublicationRequestMapper(
+                org.apache.ibatis.session.SqlSessionFactory factory) {
+            return mapperFactory(BlogPublicationRequestMapper.class, factory);
         }
 
         private static <T> MapperFactoryBean<T> mapperFactory(
@@ -243,6 +264,11 @@ class BlogFeedDeliveryMySqlIT {
             return service;
         }
 
+        @Bean BlogPublicationService blogPublicationService(IBlogService blogs,
+                BlogPublicationRequestMapper requests, Validator validator) {
+            return new BlogPublicationService(blogs, requests, validator);
+        }
+
         @Bean DataSourceTransactionManager transactionManager(DataSource dataSource) {
             return new DataSourceTransactionManager(dataSource);
         }
@@ -253,14 +279,21 @@ class BlogFeedDeliveryMySqlIT {
         @Override
         public Object intercept(Invocation invocation) throws Throwable {
             MappedStatement statement = (MappedStatement) invocation.getArgs()[0];
-            if (!statement.getId().endsWith(".enqueue")) return invocation.proceed();
+            boolean enqueue = statement.getId().endsWith(".enqueue");
+            boolean publicationComplete = statement.getId().endsWith(".complete")
+                    && statement.getId().contains("BlogPublicationRequestMapper");
+            if (!enqueue && !publicationComplete) return invocation.proceed();
             assertTrue(org.springframework.transaction.support.TransactionSynchronizationManager
-                            .isActualTransactionActive(), "outbox insert must run inside the post transaction");
+                            .isActualTransactionActive(), "database write requires an actual transaction");
+            assertTrue(org.springframework.transaction.support.TransactionSynchronizationManager
+                            .isSynchronizationActive(), "database write requires transaction synchronization");
             assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager
-                            .isCurrentTransactionReadOnly(), "outbox insert requires a writable transaction");
+                            .isCurrentTransactionReadOnly(), "database write requires a writable transaction");
             Object result = invocation.proceed();
-            if (REPORT_ZERO_AFTER_REAL_ENQUEUE.compareAndSet(true, false)) {
-                assertEquals(Integer.valueOf(1), result, "zero hook runs only after a real MySQL insert");
+            AtomicBoolean hook = enqueue ? REPORT_ZERO_AFTER_REAL_ENQUEUE
+                    : REPORT_ZERO_AFTER_REAL_PUBLICATION_COMPLETE;
+            if (hook.compareAndSet(true, false)) {
+                assertEquals(Integer.valueOf(1), result, "zero hook runs only after a real MySQL write");
                 return Integer.valueOf(0);
             }
             return result;
@@ -280,10 +313,13 @@ class BlogFeedDeliveryMySqlIT {
     void resetDatabaseAndMocks() {
         dropTrigger("fail_second_delivery");
         dropTrigger("fail_delivery_ack");
+        dropTrigger("fail_publication_complete");
+        jdbc.execute("DELETE FROM " + PUBLICATION_TABLE);
         jdbc.execute("DELETE FROM " + DELIVERY_TABLE);
         jdbc.execute("DELETE FROM tb_follow");
         jdbc.execute("DELETE FROM tb_blog");
         REPORT_ZERO_AFTER_REAL_ENQUEUE.set(false);
+        REPORT_ZERO_AFTER_REAL_PUBLICATION_COMPLETE.set(false);
         reset(redis, feed);
         when(redis.opsForZSet()).thenReturn(feed);
         doReturn(Boolean.TRUE).when(feed).add(anyString(), anyString(), anyDouble());
@@ -293,9 +329,11 @@ class BlogFeedDeliveryMySqlIT {
     @AfterEach
     void clearHooksAndUser() {
         REPORT_ZERO_AFTER_REAL_ENQUEUE.set(false);
+        REPORT_ZERO_AFTER_REAL_PUBLICATION_COMPLETE.set(false);
         UserHolder.removeUser();
         dropTrigger("fail_second_delivery");
         dropTrigger("fail_delivery_ack");
+        dropTrigger("fail_publication_complete");
     }
 
     @Test
@@ -502,6 +540,324 @@ class BlogFeedDeliveryMySqlIT {
         verify(feed, org.mockito.Mockito.times(65)).add(anyString(), eq(Long.toString(blogId)), anyDouble());
     }
 
+    @Test
+    void sameKeyAndNormalizedBodyReplayOneBlogAndOutboxWithoutSecondRedisFastPath() {
+        addFollow(RECIPIENT_A);
+        long blogId = resultBlogId(publicationService.publish(
+                request(null, "same post", null, "same content"), "replay_key"));
+
+        long replayed = resultBlogId(publicationService.publish(
+                request(null, "same post", "  \t", "same content"), "replay_key"));
+
+        assertEquals(blogId, replayed);
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        verify(feed).add(eq(RedisConstants.FEED_KEY + RECIPIENT_A), eq(Long.toString(blogId)), anyDouble());
+    }
+
+    @Test
+    void sameKeyWithChangedBodyConflictsWithoutCreatingPostOrOutbox() {
+        addFollow(RECIPIENT_A);
+        publicationService.publish(request(null, "original", null, "body"), "fixed-key");
+
+        BusinessException conflict = assertThrows(BusinessException.class,
+                () -> publicationService.publish(request(null, "changed", null, "body"), "fixed-key"));
+
+        assertEquals(ErrorCode.CONFLICT, conflict.getErrorCode());
+        assertEquals(409, conflict.getErrorCode().getHttpStatus().value());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        verify(feed, org.mockito.Mockito.times(1)).add(eq(RedisConstants.FEED_KEY + RECIPIENT_A),
+                anyString(), anyDouble());
+    }
+
+    @Test
+    void requestKeysAreScopedByAuthorAndRemainAsciiCaseSensitive() {
+        publicationService.publish(request(null, "author a", null, "body"), "SameKey");
+        UserHolder.saveUser(user(AUTHOR_ID + 1));
+        publicationService.publish(request(null, "author b", null, "body"), "SameKey");
+        UserHolder.saveUser(user(AUTHOR_ID));
+        publicationService.publish(request(null, "case split", null, "body"), "samekey");
+
+        assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(DISTINCT user_id) FROM " + PUBLICATION_TABLE,
+                Integer.class));
+    }
+
+    @Test
+    void firstRedisFailureStillReplaysCommittedIntentAndSameBlogWithoutFastPathRetry() {
+        addFollow(RECIPIENT_A);
+        doThrow(new IllegalStateException("synthetic private Redis failure"))
+                .when(feed).add(anyString(), anyString(), anyDouble());
+
+        long blogId = resultBlogId(publicationService.publish(
+                request(null, "redis failure", null, "body"), "redis-replay"));
+        doReturn(Boolean.TRUE).when(feed).add(anyString(), anyString(), anyDouble());
+        long replayed = resultBlogId(publicationService.publish(
+                request(null, "redis failure", "", "body"), "redis-replay"));
+
+        assertEquals(blogId, replayed);
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        verify(feed, org.mockito.Mockito.times(1)).add(eq(RedisConstants.FEED_KEY + RECIPIENT_A),
+                eq(Long.toString(blogId)), anyDouble());
+    }
+
+    @Test
+    void failedPublicationCompletionUpdateRollsBackPostReservationAndOutboxThenAllowsRetry() {
+        addFollow(RECIPIENT_A);
+        jdbc.execute("CREATE TRIGGER fail_publication_complete BEFORE UPDATE ON " + PUBLICATION_TABLE
+                + " FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic completion failure'");
+
+        BusinessException failure = assertThrows(BusinessException.class,
+                () -> publicationService.publish(request(null, "retry after rollback", null, "body"), "rollback"));
+
+        assertEquals(ErrorCode.INTERNAL_ERROR, failure.getErrorCode());
+        assertNull(failure.getCause());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        org.mockito.Mockito.verifyNoInteractions(feed);
+
+        dropTrigger("fail_publication_complete");
+        long blogId = resultBlogId(publicationService.publish(
+                request(null, "retry after rollback", null, "body"), "rollback"));
+        assertTrue(blogExists(blogId));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+    }
+
+    @Test
+    void reportedZeroAfterRealPublicationCompletionReturns422AndRollsBackEverything() {
+        addFollow(RECIPIENT_A);
+        REPORT_ZERO_AFTER_REAL_PUBLICATION_COMPLETE.set(true);
+
+        BusinessException failure = assertThrows(BusinessException.class,
+                () -> publicationService.publish(request(null, "completion zero", null, "body"), "zero"));
+
+        assertEquals(ErrorCode.OPERATION_FAILED, failure.getErrorCode());
+        assertEquals(422, failure.getErrorCode().getHttpStatus().value());
+        assertFalse(REPORT_ZERO_AFTER_REAL_PUBLICATION_COMPLETE.get());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        org.mockito.Mockito.verifyNoInteractions(feed);
+    }
+
+    @Test
+    void laterOutboxInsertFailureRollsBackPublicationReservationAndCanRetry() {
+        addFollow(RECIPIENT_A);
+        addFollow(RECIPIENT_B);
+        jdbc.execute("CREATE TRIGGER fail_second_delivery BEFORE INSERT ON " + DELIVERY_TABLE
+                + " FOR EACH ROW BEGIN SET @delivery_insert_count=COALESCE(@delivery_insert_count,0)+1; "
+                + "IF @delivery_insert_count=2 THEN SIGNAL SQLSTATE '45000' "
+                + "SET MESSAGE_TEXT='synthetic delivery failure'; END IF; END");
+
+        BusinessException failure = assertThrows(BusinessException.class,
+                () -> publicationService.publish(request(null, "outbox rollback", null, "body"), "outbox-retry"));
+        assertEquals(ErrorCode.INTERNAL_ERROR, failure.getErrorCode());
+        assertNull(failure.getCause());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        org.mockito.Mockito.verifyNoInteractions(feed);
+
+        dropTrigger("fail_second_delivery");
+        long blogId = resultBlogId(publicationService.publish(
+                request(null, "outbox rollback", null, "body"), "outbox-retry"));
+        assertTrue(blogExists(blogId));
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+    }
+
+    @Test
+    void concurrentSameAuthorAndKeyCreatesOneBlogAndOneIntent() throws Exception {
+        addFollow(RECIPIENT_A);
+        ExecutorService pool = Executors.newFixedThreadPool(4);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Result>> calls = new java.util.ArrayList<>();
+            for (int i = 0; i < 4; i++) {
+                calls.add(pool.submit(() -> publishAs(AUTHOR_ID, start,
+                        request(null, "concurrent", null, "same body"), "parallel-key")));
+            }
+            start.countDown();
+            long firstId = resultBlogId(calls.get(0).get(15, TimeUnit.SECONDS));
+            for (Future<Result> call : calls) assertEquals(firstId, resultBlogId(call.get(15, TimeUnit.SECONDS)));
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+        } finally {
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS), "concurrent publisher threads must terminate");
+            String engineStatus = jdbc.queryForMap("SHOW ENGINE INNODB STATUS").get("Status").toString();
+            boolean receiptDeadlock = engineStatus.contains("LATEST DETECTED DEADLOCK")
+                    && engineStatus.contains(PUBLICATION_TABLE);
+            // Classify only; never print the engine's SQL/record dump.
+            System.out.println("Synthetic four-caller publication receiptDeadlock=" + receiptDeadlock);
+            assertFalse(receiptDeadlock, "immutable receipt replay must not upgrade shared INSERT locks");
+        }
+    }
+
+    @Test
+    void duplicateLockingReadSeesWinnerBeyondRepeatableReadSnapshot() throws Exception {
+        addFollow(RECIPIENT_A);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        CountDownLatch oldSnapshotRead = new CountDownLatch(1);
+        try {
+            TransactionTemplate transaction = new TransactionTemplate(context.getBean(PlatformTransactionManager.class));
+            transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+            long replayed = transaction.execute(status -> {
+                assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+                Future<Result> winner = pool.submit(() -> {
+                    assertTrue(oldSnapshotRead.await(5, TimeUnit.SECONDS));
+                    UserHolder.saveUser(user(AUTHOR_ID));
+                    try {
+                        return publicationService.publish(request(null, "rr current read", null, "body"), "rr-key");
+                    } finally {
+                        UserHolder.removeUser();
+                    }
+                });
+                oldSnapshotRead.countDown();
+                long winnerId = resultBlogId(awaitResult(winner));
+                assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class),
+                        "the outer transaction keeps its earlier consistent-read snapshot");
+                long replayId = resultBlogId(publicationService.publish(
+                        request(null, "rr current read", "", "body"), "rr-key"));
+                assertEquals(winnerId, replayId);
+                return replayId;
+            });
+
+            assertNotNull(replayed);
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+            verify(feed).add(eq(RedisConstants.FEED_KEY + RECIPIENT_A), anyString(), anyDouble());
+        } finally {
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS), "RR winner thread must terminate");
+        }
+    }
+
+    @Test
+    void malformedReservationFailsClosedAndEditOrWithdrawDoesNotRecreateIt() {
+        BlogCreateRequest original = request(null, "original title", null, "original body");
+        long blogId = resultBlogId(publicationService.publish(original, "stable-request"));
+        jdbc.update("UPDATE " + PUBLICATION_TABLE + " SET blog_id=NULL WHERE user_id=? AND request_key=?",
+                AUTHOR_ID, "stable-request");
+        BusinessException malformed = assertThrows(BusinessException.class,
+                () -> publicationService.publish(original, "stable-request"));
+        assertEquals(ErrorCode.INTERNAL_ERROR, malformed.getErrorCode());
+
+        jdbc.update("UPDATE " + PUBLICATION_TABLE + " SET blog_id=? WHERE user_id=? AND request_key=?",
+                blogId, AUTHOR_ID, "stable-request");
+        BlogEditRequest edit = new BlogEditRequest();
+        edit.setTitle("edited title");
+        edit.setImages("image");
+        edit.setContent("edited body");
+        blogService.editBlog(blogId, edit);
+        blogService.withdrawBlog(blogId);
+
+        assertEquals(blogId, resultBlogId(publicationService.publish(original, "stable-request")));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT withdrawn FROM tb_blog WHERE id=?", Integer.class, blogId));
+        org.mockito.Mockito.verifyNoInteractions(feed);
+    }
+
+    @Test
+    void invalidKeyOrBodyIsRejectedBeforeReservationSql() {
+        assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(BusinessException.class,
+                () -> publicationService.publish(request(null, "valid", null, "body"), "bad key"))
+                .getErrorCode());
+        assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(BusinessException.class,
+                () -> publicationService.publish(request(null, " ", null, "body"), "valid-key"))
+                .getErrorCode());
+        UserHolder.saveUser(user(0));
+        assertEquals(ErrorCode.AUTHENTICATION_FAILED, assertThrows(BusinessException.class,
+                () -> publicationService.publish(request(null, "valid", null, "body"), "valid-key"))
+                .getErrorCode());
+        UserHolder.removeUser();
+        assertEquals(ErrorCode.AUTHENTICATION_FAILED, assertThrows(BusinessException.class,
+                () -> publicationService.publish(request(null, "valid", null, "body"), "valid-key"))
+                .getErrorCode());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        org.mockito.Mockito.verifyNoInteractions(feed);
+    }
+
+    @Test
+    void publicationRejectsMissingOrReadOnlyTransactionBeforeAnySqlWrite() {
+        BlogPublicationService unproxied = new BlogPublicationService(blogService,
+                context.getBean(BlogPublicationRequestMapper.class), context.getBean(Validator.class));
+        assertThrows(IllegalStateException.class, () -> unproxied.publish(
+                request(null, "outside transaction", null, "body"), "no-tx"));
+
+        TransactionTemplate readOnly = new TransactionTemplate(context.getBean(PlatformTransactionManager.class));
+        readOnly.setReadOnly(true);
+        assertThrows(IllegalStateException.class, () -> readOnly.execute(status -> unproxied.publish(
+                request(null, "read only", null, "body"), "read-only")));
+
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE, Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + DELIVERY_TABLE, Integer.class));
+        org.mockito.Mockito.verifyNoInteractions(feed);
+    }
+
+    @Test
+    void rerunningV012PreservesReservationAndExactPrimaryKeyAndAsciiBinaryColumns() throws Exception {
+        long blogId = resultBlogId(publicationService.publish(
+                request(null, "migration row", null, "body"), "MigrationKey"));
+        ClassPathResource migration = new ClassPathResource("db/migration/V012__add_blog_publication_requests.sql");
+        try (Connection connection = datasource.getConnection()) {
+            ScriptUtils.executeSqlScript(connection, migration);
+            ScriptUtils.executeSqlScript(connection, migration);
+        }
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + PUBLICATION_TABLE
+                + " WHERE user_id=? AND request_key=? AND blog_id=?", Integer.class,
+                AUTHOR_ID, "MigrationKey", blogId));
+        assertEquals("user_id,request_key", indexColumns(PUBLICATION_TABLE, "PRIMARY"));
+        assertEquals(Arrays.asList("user_id", "request_key", "request_hash", "blog_id", "create_time"),
+                jdbc.queryForList("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() "
+                        + "AND TABLE_NAME=? ORDER BY ORDINAL_POSITION", String.class, PUBLICATION_TABLE));
+        assertEquals("varchar(64)", jdbc.queryForObject("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+                + "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME='request_key'",
+                String.class, PUBLICATION_TABLE));
+        assertEquals("ascii_bin", jdbc.queryForObject("SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                + "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME='request_key'",
+                String.class, PUBLICATION_TABLE));
+        assertEquals("char(64)", jdbc.queryForObject("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+                + "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME='request_hash'",
+                String.class, PUBLICATION_TABLE));
+        assertEquals("ascii_bin", jdbc.queryForObject("SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                + "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME='request_hash'",
+                String.class, PUBLICATION_TABLE));
+    }
+
+    private static Result publishAs(long authorId, CountDownLatch start, BlogCreateRequest request, String key)
+            throws Exception {
+        assertTrue(start.await(5, TimeUnit.SECONDS));
+        UserHolder.saveUser(user(authorId));
+        try {
+            return publicationService.publish(request, key);
+        } finally {
+            UserHolder.removeUser();
+        }
+    }
+
+    private static BlogCreateRequest request(Long shopId, String title, String images, String content) {
+        BlogCreateRequest request = new BlogCreateRequest();
+        request.setShopId(shopId);
+        request.setTitle(title);
+        request.setImages(images);
+        request.setContent(content);
+        return request;
+    }
+
     private static void addFollow(long recipientId) {
         jdbc.update("INSERT INTO tb_follow(user_id,follow_user_id) VALUES (?,?)", recipientId, AUTHOR_ID);
     }
@@ -530,9 +886,12 @@ class BlogFeedDeliveryMySqlIT {
 
     private static long resultBlogId(Result result) {
         assertNotNull(result);
+        assertEquals(Boolean.TRUE, result.getSuccess());
         Object data = result.getData();
-        assertNotNull(data);
-        return ((Number) data).longValue();
+        assertTrue(data instanceof Long, "a successful publication returns a Long blog ID");
+        long blogId = (Long) data;
+        assertTrue(blogId > 0, "a successful publication returns a positive blog ID");
+        return blogId;
     }
 
     private static boolean blogExists(long blogId) {
@@ -560,9 +919,21 @@ class BlogFeedDeliveryMySqlIT {
     }
 
     private static String indexColumns(String index) {
+        return indexColumns(DELIVERY_TABLE, index);
+    }
+
+    private static String indexColumns(String table, String index) {
         return jdbc.queryForObject("SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) "
                 + "FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND INDEX_NAME=?",
-                String.class, DELIVERY_TABLE, index);
+                String.class, table, index);
+    }
+
+    private static Result awaitResult(Future<Result> future) {
+        try {
+            return future.get(15, TimeUnit.SECONDS);
+        } catch (Exception failure) {
+            throw new IllegalStateException("concurrent publication did not finish", failure);
+        }
     }
 
     private static void dropTrigger(String name) {

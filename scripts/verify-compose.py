@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Own a fresh local Compose project, exercise real HTTP, then remove only its synthetic resources."""
 import binascii
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import re
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -1143,6 +1145,8 @@ def verify_post_author_withdrawal(base, tokens):
         redis('EXPIRE', 'login:token:' + token, '600')
         headers[user_id] = {'authorization': token, 'Content-Type': 'application/json'}
     sql("INSERT INTO tb_follow(user_id,follow_user_id) VALUES(900063,900060),(900063,900061),(900063,900062);")
+    # Keep these three owned intents pending so the former fixture/worker race is reproducible.
+    redis('SET', 'feed:900063', 'synthetic withdrawal fixture blocker')
     posts = []
     for user_id in (900060, 900061, 900062):
         payload = {'title': 'synthetic withdrawal post', 'content': 'synthetic retained body', 'withdrawn': 1}
@@ -1165,6 +1169,21 @@ def verify_post_author_withdrawal(base, tokens):
     request(base, '/blog/like/%d' % first, 200, 'PUT', headers=headers[900061])
     # Make hidden candidates rank first if the generated hot query loses its visibility predicate.
     sql('UPDATE tb_blog SET liked=9000 WHERE id IN (%s);' % ','.join(map(str, posts)))
+    assert sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE recipient_user_id=900063;') == '3'
+    delivery_scores = {int(row.split('\t')[0]): int(row.split('\t')[1]) for row in sql(
+        'SELECT blog_id,score_millis FROM tb_blog_feed_delivery WHERE recipient_user_id=900063;').splitlines()}
+    redis('DEL', 'feed:900063')  # Only the synthetic blocker above; this actor has no prior Feed data.
+    redis('ZADD', 'feed:900063', '3000', str(posts[0]), '2000', str(posts[1]), '1000', str(posts[2]))
+    deadline = time.monotonic() + 25
+    while sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE recipient_user_id=900063;') != '0':
+        if time.monotonic() >= deadline:
+            raise AssertionError('synthetic withdrawal fixture intents did not settle')
+        time.sleep(.25)
+    # The recovery worker correctly restores publication scores, invalidating a premature low-score fixture.
+    for post_id in posts:
+        assert int(float(redis('ZSCORE', 'feed:900063', str(post_id)))) == delivery_scores[post_id] > 3000
+    print('Confirmed three synthetic withdrawal fixture scores are restored by pending delivery replay', flush=True)
+    # Only after ACK removes every owned intent can this frozen cursor scenario install synthetic scores.
     redis('ZADD', 'feed:900063', '3000', str(posts[0]), '2000', str(posts[1]), '1000', str(posts[2]))
     retained = sql('SELECT id,user_id,shop_id,title,images,content,liked,comments,create_time FROM tb_blog '
                    'WHERE id IN (%s) ORDER BY id;' % ','.join(map(str, posts)))
@@ -1449,6 +1468,140 @@ def verify_blog_feed_delivery(base):
     return base
 
 
+def verify_blog_publication_requests(base):
+    """Optional publication keys: only this fresh project's actors, receipts and fault triggers."""
+    authors, follower = (900100, 900101, 900102), 900103
+    headers = {}
+    for user_id, role in zip((*authors, follower), ('USER', 'MERCHANT', 'ADMIN', 'USER')):
+        sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(%d,'00000000%03d','synthetic-request-actor');"
+            "INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (user_id, user_id - 900000, user_id, role))
+        token = 'synthetic-publication-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[user_id] = {'authorization': token, 'Content-Type': 'application/json'}
+    request(base, '/follow/%d/true' % authors[0], 200, 'PUT', headers=headers[follower])
+    feed_key = 'feed:%d' % follower
+    redis('SET', feed_key, 'synthetic request retry blocker')
+    body = {'title': 'synthetic durable publication request', 'content': 'synthetic campus body'}
+    key = 'synthetic-publication-key'
+
+    def publish(actor, payload, request_key=key, expected=200):
+        send_headers = dict(headers[actor])
+        if request_key is not None:
+            send_headers['Idempotency-Key'] = request_key
+        raw, _ = request(base, '/blog', expected, 'POST', json.dumps(payload).encode(), send_headers)
+        result = json.loads(raw)
+        if expected == 200:
+            assert result['success'] is True
+            return int(result['data'])
+        assert not request_key or request_key.encode() not in raw
+        return result
+
+    def wait_until(condition, label):
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            if condition():
+                return
+            time.sleep(.25)
+        raise AssertionError('isolated publication request timed out: ' + label)
+
+    first_ids = {}
+    for actor in authors:
+        first_ids[actor] = publish(actor, body)
+        for images in (None, '', ' \t '):
+            assert publish(actor, dict(body, images=images, id=123, userId=follower, liked=99)) == first_ids[actor]
+        assert sql("SELECT COUNT(*) FROM tb_blog_publication_request WHERE user_id=%d AND request_key='%s' "
+                   "AND blog_id=%d AND LENGTH(request_hash)=64;" % (actor, key, first_ids[actor])) == '1'
+        assert sql('SELECT COUNT(*) FROM tb_blog WHERE user_id=%d;' % actor) == '1'
+    assert len(set(first_ids.values())) == 3
+    original = first_ids[authors[0]]
+    fixed_score = int(sql('SELECT score_millis FROM tb_blog_feed_delivery WHERE blog_id=%d AND recipient_user_id=%d;'
+                          % (original, follower)))
+    assert sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE blog_id=%d;' % original) == '1'
+    sql((ROOT / 'src/main/resources/db/migration/V012__add_blog_publication_requests.sql').read_text('utf-8'))
+    assert publish(authors[0], body) == original
+    redis('DEL', feed_key)  # Only the synthetic WRONGTYPE blocker created by this function.
+    wait_until(lambda: sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE blog_id=%d;' % original) == '0', 'Feed recovery')
+    assert int(float(redis('ZSCORE', feed_key, str(original)))) == fixed_score
+    assert redis('ZCARD', feed_key) == '1'
+    case_id = publish(authors[0], body, key.upper())
+    assert case_id != original
+    assert publish(authors[0], body, None) != publish(authors[0], body, None)
+    check('Publication keys: all three roles replay the original ID, normalized empty images/ignored fields, author and case isolation, retained V012 receipts and unchanged keyless behavior; Feed faults do not create another intent')
+
+    before_count = sql('SELECT COUNT(*) FROM tb_blog;')
+    before_feed = redis('ZRANGE', feed_key, '0', '-1', 'WITHSCORES')
+    for changed in (dict(body, title=body['title'] + ' '), dict(body, content='different'),
+                    dict(body, images='/synthetic.png'), dict(body, shopId=1, images='/synthetic.png')):
+        assert publish(authors[0], changed, expected=409)['errorCode'] == 'CONFLICT'
+    # Transport may normalize HTTP outer whitespace; do not claim byte-level header validation.
+    for invalid in ('', 'a b', 'a,b', 'x' * 65):
+        assert publish(authors[0], body, invalid, 400)['errorCode'] == 'VALIDATION_FAILED'
+    request(base, '/blog', 401, 'POST', json.dumps(body).encode(), {'Content-Type': 'application/json', 'Idempotency-Key': key})
+    assert sql('SELECT COUNT(*) FROM tb_blog;') == before_count
+    assert redis('ZRANGE', feed_key, '0', '-1', 'WITHSCORES') == before_feed
+    check('Publication key boundaries: changed effective content conflicts, invalid key syntax rejects, anonymous replay is unauthorized, no extra rows or Feed mutations')
+
+    barrier = threading.Barrier(4)
+    def concurrent_retry(_):
+        barrier.wait(timeout=10)
+        return publish(authors[0], body, 'synthetic-parallel-key')
+    before_count = int(sql('SELECT COUNT(*) FROM tb_blog;'))
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        parallel_ids = list(pool.map(concurrent_retry, range(4)))
+    assert len(set(parallel_ids)) == 1
+    assert int(sql('SELECT COUNT(*) FROM tb_blog;')) == before_count + 1
+    assert sql("SELECT COUNT(*) FROM tb_blog_publication_request WHERE user_id=%d AND request_key='synthetic-parallel-key' "
+               "AND blog_id=%d;" % (authors[0], parallel_ids[0])) == '1'
+    assert redis('ZSCORE', feed_key, str(parallel_ids[0])) != ''
+    check('Publication key race: four simultaneous real HTTP requests commit exactly one synthetic post/receipt and return the same ID; not a capacity measurement')
+
+    wait_until(lambda: sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE recipient_user_id=%d;' % follower) == '0', 'settled fault baseline')
+    for trigger, event, target, condition in (
+            ('reject_publication_receipt', 'UPDATE', 'tb_blog_publication_request',
+             "NEW.user_id=%d AND NEW.request_key='synthetic-rollback-key'" % authors[0]),
+            ('reject_publication_intent', 'INSERT', 'tb_blog_feed_delivery', 'NEW.recipient_user_id=%d' % follower)):
+        fault_key = 'synthetic-rollback-key' if event == 'UPDATE' else 'synthetic-intent-rollback-key'
+        before_count = sql('SELECT COUNT(*) FROM tb_blog;')
+        before_feed = redis('ZRANGE', feed_key, '0', '-1', 'WITHSCORES')
+        sql("DELIMITER $$\nCREATE TRIGGER %s BEFORE %s ON %s FOR EACH ROW BEGIN IF %s THEN "
+            "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private publication fault'; END IF; END$$\nDELIMITER ;"
+            % (trigger, event, target, condition))
+        try:
+            result = publish(authors[0], body, fault_key, 500)
+            assert result['errorCode'] == 'INTERNAL_ERROR' and 'synthetic private' not in result.get('errorMsg', '')
+        finally:
+            sql('DROP TRIGGER IF EXISTS %s;' % trigger)
+        assert sql('SELECT COUNT(*) FROM tb_blog;') == before_count
+        assert sql("SELECT COUNT(*) FROM tb_blog_publication_request WHERE user_id=%d AND request_key='%s';"
+                   % (authors[0], fault_key)) == '0'
+        assert sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE recipient_user_id=%d;' % follower) == '0'
+        assert redis('ZRANGE', feed_key, '0', '-1', 'WITHSCORES') == before_feed
+        recovered_id = publish(authors[0], body, fault_key)
+        assert publish(authors[0], body, fault_key) == recovered_id
+        wait_until(lambda: sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE recipient_user_id=%d;' % follower) == '0', 'fault retry ACK')
+    check('Publication receipt/intent SQL faults: post, reservation and Feed intent roll back together, no pre-commit Feed writes, sanitized 500 and same-key retry succeeds')
+
+    request(base, '/blog/%d' % original, 200, 'PUT', json.dumps(dict(body, title='synthetic edited')).encode(), headers[authors[0]])
+    assert publish(authors[0], body) == original
+    assert sql('SELECT title FROM tb_blog WHERE id=%d;' % original) == 'synthetic edited'
+    request(base, '/blog/%d' % original, 200, 'DELETE', headers=headers[authors[0]])
+    compose('restart', 'app')
+    base = app_base()
+    wait_ready(base)
+    assert publish(authors[0], body) == original
+    request(base, '/blog/%d' % original, 404, headers=headers[authors[0]])
+    assert sql('SELECT withdrawn FROM tb_blog WHERE id=%d;' % original) == '1'
+    assert int(float(redis('ZSCORE', feed_key, str(original)))) == fixed_score
+    sql("UPDATE tb_user SET status='DISABLED' WHERE id=%d;" % authors[0])
+    try:
+        publish(authors[0], body, expected=401)
+    finally:
+        sql("UPDATE tb_user SET status='ACTIVE' WHERE id=%d;" % authors[0])
+    check('Publication receipt survives app restart: replay after edit/withdrawal returns only the original ID without restoring content or refreshing Feed score; current disabled identity still rejects')
+    return base
+
+
 def main():
     if ENV.get("DOCKER_HOST") and not ENV["DOCKER_HOST"].startswith("unix://"):
         raise RuntimeError("acceptance rejects non-local DOCKER_HOST overrides")
@@ -1490,7 +1643,9 @@ def main():
                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog' AND COLUMN_NAME='withdrawn';") == 'NO:0'
         assert sql("SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM INFORMATION_SCHEMA.STATISTICS "
                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog_feed_delivery' AND INDEX_NAME='PRIMARY';") == 'blog_id,recipient_user_id'
-        check("V001-V011 repeat, nullable post store, withdrawn flag, Feed delivery intents, comment/hide audit cursor indexes, populated-database bootstrap refusal")
+        assert sql("SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM INFORMATION_SCHEMA.STATISTICS "
+                   "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog_publication_request' AND INDEX_NAME='PRIMARY';") == 'user_id,request_key'
+        check("V001-V012 repeat, nullable post store, withdrawn flag, Feed delivery/receipt tables, comment/hide audit cursor indexes, populated-database bootstrap refusal")
         sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(900001,'00000000001','synthetic-user'),(900002,'00000000002','synthetic-admin');"
             "INSERT INTO tb_user_role(user_id,role) VALUES(900001,'USER'),(900002,'ADMIN');")
         tokens = ["synthetic-phase5-" + uuid.uuid4().hex for _ in range(2)]
@@ -1510,6 +1665,7 @@ def main():
         verify_post_author_withdrawal(base, tokens)
         verify_follow_feed_cursor(base)
         base = verify_blog_feed_delivery(base)
+        base = verify_blog_publication_requests(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

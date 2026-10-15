@@ -9,6 +9,9 @@ import io.github.frewily.campushub.dto.request.BlogEditRequest;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.Blog;
 import io.github.frewily.campushub.service.IBlogService;
+import io.github.frewily.campushub.service.BlogPublicationService;
+import io.github.frewily.campushub.exception.BusinessException;
+import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.utils.SystemConstants;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.springframework.web.bind.annotation.*;
@@ -16,11 +19,13 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.security.access.prepost.PreAuthorize;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Positive;
 import java.util.List;
+import java.util.Enumeration;
 
 @RestController
 @RequestMapping("/blog")
@@ -29,10 +34,17 @@ public class BlogController {
 
     @Resource
     private IBlogService blogService;
+    @Resource
+    private BlogPublicationService blogPublicationService;
     @PostMapping
     @PreAuthorize("hasAnyRole('USER', 'MERCHANT', 'ADMIN')")
-    public Result saveBlog(@Valid @NotNull @RequestBody BlogCreateRequest blog) {
-        return blogService.saveBlog(ApiModelMapper.toBlog(blog));
+    public Result saveBlog(@Valid @NotNull @RequestBody BlogCreateRequest blog, HttpServletRequest request) {
+        Enumeration<String> keys = request.getHeaders("Idempotency-Key");
+        if (!keys.hasMoreElements()) return blogService.saveBlog(ApiModelMapper.toBlog(blog));
+        String key = keys.nextElement();
+        if (keys.hasMoreElements()) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        BlogPublicationService.validateKey(key);
+        return blogPublicationService.publish(blog, key);
     }
 
     @PutMapping("/{id}")

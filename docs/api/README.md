@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7N为POST/blog新增可选 `Idempotency-Key` 请求头；同用户/编号/有效创建内容重试返回原ID，不重新创建或投递，变化内容409，无编号路径不变。V012、身份校验、保留和回退边界见[7N记录](../refactor/36-phase-7n-blog-publication-keys.md)，映射数仍48/13。
+
 Phase7M保留POST/blog和48条映射，成功代表动态及投递意图提交，不代表全部关注者已立即收到；V011与后台恢复/发布重试边界见[7M记录](../refactor/35-phase-7m-blog-feed-delivery.md)。
 
 Phase7L修正既有关注Feed的同时间组偏移累计，响应形状与48条映射/13个Controller不变；静态集合、过滤空页及跨页变动边界见[7L记录](../refactor/34-phase-7l-follow-feed-cursor.md)。

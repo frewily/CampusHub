@@ -9,6 +9,7 @@ import io.github.frewily.campushub.security.RedisTokenAuthenticationFilter;
 import io.github.frewily.campushub.security.ResourceAuthorizationService;
 import io.github.frewily.campushub.security.SecurityErrorResponder;
 import io.github.frewily.campushub.service.IBlogService;
+import io.github.frewily.campushub.service.BlogPublicationService;
 import io.github.frewily.campushub.utils.RedisConstants;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.junit.jupiter.api.AfterEach;
@@ -33,6 +34,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -48,6 +50,8 @@ class CampusTextPostHttpContractTest {
 
     @MockBean
     private IBlogService blogService;
+    @MockBean
+    private BlogPublicationService blogPublicationService;
     @MockBean
     private StringRedisTemplate stringRedisTemplate;
     @MockBean
@@ -106,6 +110,81 @@ class CampusTextPostHttpContractTest {
     }
 
     @Test
+    void identicalPublicationKeyMustNotCreateASecondPostOnHttpRetry() throws Exception {
+        prepareSession("retry-token", "ACTIVE", "USER", 7001L);
+        when(blogPublicationService.publish(any(), eq("synthetic-retry-key")))
+                .thenReturn(Result.ok(31L), Result.ok(31L));
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post("/blog").header("authorization", "retry-token")
+                            .header("Idempotency-Key", "synthetic-retry-key")
+                            .contentType(MediaType.APPLICATION_JSON).content(BODY))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data").value(31));
+        }
+        verify(blogPublicationService, times(2)).publish(any(), eq("synthetic-retry-key"));
+        verifyNoInteractions(blogService);
+    }
+
+    @Test
+    void malformedPublicationKeysAreBadRequestsAndNeverReachEitherService() throws Exception {
+        prepareSession("key-token", "ACTIVE", "USER", 7001L);
+        String[] invalidKeys = {"", " ", "leading space", " trailing", "comma,key", "slash/key",
+                "café", repeat('k', 65)};
+        for (String key : invalidKeys) {
+            mockMvc.perform(post("/blog").header("authorization", "key-token")
+                            .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(BODY))
+                    .andExpect(status().isBadRequest());
+        }
+        mockMvc.perform(post("/blog").header("authorization", "key-token")
+                        .header("Idempotency-Key", "first", "second")
+                        .contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(blogService, blogPublicationService);
+    }
+
+    @Test
+    void authenticatedPublicationKeyIsForwardedAndRequestWhitelistAndValidationRemainActive() throws Exception {
+        when(blogPublicationService.publish(any(), any())).thenReturn(Result.ok(44L));
+        for (String role : new String[]{"USER", "MERCHANT", "ADMIN"}) {
+            String token = role.toLowerCase() + "-key-token";
+            prepareSession(token, "ACTIVE", role, 7001L);
+            mockMvc.perform(post("/blog").header("authorization", token)
+                            .header("Idempotency-Key", "Key_9-A")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\":\"Campus\",\"images\":\"  /raw  \",\"content\":\"Hello\","
+                                    + "\"id\":999,\"userId\":88,\"liked\":777,\"comments\":666,"
+                                    + "\"createTime\":\"2000-01-01T00:00:00\",\"ignored\":true}"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data").value(44));
+        }
+        mockMvc.perform(post("/blog").header("authorization", "user-key-token")
+                        .header("Idempotency-Key", "valid-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\" \",\"content\":\"Hello\"}"))
+                .andExpect(status().isBadRequest());
+
+        org.mockito.ArgumentCaptor<io.github.frewily.campushub.dto.request.BlogCreateRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(io.github.frewily.campushub.dto.request.BlogCreateRequest.class);
+        verify(blogPublicationService, times(3)).publish(captor.capture(), eq("Key_9-A"));
+        for (io.github.frewily.campushub.dto.request.BlogCreateRequest request : captor.getAllValues()) {
+            assertNull(request.getShopId());
+            assertEquals("Campus", request.getTitle());
+            assertEquals("  /raw  ", request.getImages());
+            assertEquals("Hello", request.getContent());
+        }
+        verifyNoInteractions(blogService);
+    }
+
+    @Test
+    void authenticatedRequestsWithoutPublicationKeyKeepUsingLegacyService() throws Exception {
+        when(blogService.saveBlog(any())).thenReturn(Result.ok(45L));
+        prepareSession("legacy-token", "ACTIVE", "USER", 7001L);
+        mockMvc.perform(post("/blog").header("authorization", "legacy-token")
+                        .contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data").value(45));
+        verify(blogService).saveBlog(any());
+        verifyNoInteractions(blogPublicationService);
+    }
+
+    @Test
     void invalidIdentityStatesAreUnauthorizedAndNeverReachPublicationService() throws Exception {
         when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
         when(hashOperations.entries(RedisConstants.LOGIN_USER_KEY + "missing-token"))
@@ -129,6 +208,7 @@ class CampusTextPostHttpContractTest {
                         .contentType(MediaType.APPLICATION_JSON).content(BODY))
                 .andExpect(status().isUnauthorized());
         verifyNoInteractions(blogService);
+        verifyNoInteractions(blogPublicationService);
     }
 
     @Test
@@ -174,5 +254,11 @@ class CampusTextPostHttpContractTest {
         when(accountAccessMapper.findAccountStatus(userId)).thenReturn(status);
         when(accountAccessMapper.findRoles(userId)).thenReturn(role == null
                 ? Collections.<String>emptyList() : Collections.singletonList(role));
+    }
+
+    private static String repeat(char value, int count) {
+        char[] chars = new char[count];
+        java.util.Arrays.fill(chars, value);
+        return new String(chars);
     }
 }

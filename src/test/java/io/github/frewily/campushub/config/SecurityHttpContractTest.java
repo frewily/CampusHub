@@ -15,6 +15,7 @@ import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.service.IShopService;
 import io.github.frewily.campushub.service.IVoucherService;
 import io.github.frewily.campushub.service.IBlogService;
+import io.github.frewily.campushub.service.BlogPublicationService;
 import io.github.frewily.campushub.service.IBlogCommentsService;
 import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
@@ -66,6 +67,8 @@ class SecurityHttpContractTest {
     private IVoucherService voucherService;
     @MockBean
     private IBlogService blogService;
+    @MockBean
+    private BlogPublicationService blogPublicationService;
     @MockBean
     private IBlogCommentsService blogCommentsService;
     @MockBean
@@ -312,6 +315,60 @@ class SecurityHttpContractTest {
         }
 
         verify(blogService, times(3)).saveBlog(any());
+    }
+
+    @Test
+    void publicationKeyRouteKeepsRoleGateAndDelegatesForAllAllowedRoles() throws Exception {
+        prepareSession("key-user", 61L, "USER");
+        prepareSession("key-merchant", 62L, "MERCHANT");
+        prepareSession("key-admin", 63L, "ADMIN");
+        when(blogPublicationService.publish(any(), any())).thenReturn(Result.ok(71L));
+        String body = "{\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"}";
+        for (String[] role : new String[][]{{"key-user", "user-key"},
+                {"key-merchant", "merchant-key"}, {"key-admin", "admin-key"}}) {
+            mockMvc.perform(post("/blog").header("authorization", role[0])
+                            .header("Idempotency-Key", role[1]).contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data").value(71));
+        }
+        org.mockito.ArgumentCaptor<io.github.frewily.campushub.dto.request.BlogCreateRequest> requests =
+                org.mockito.ArgumentCaptor.forClass(io.github.frewily.campushub.dto.request.BlogCreateRequest.class);
+        org.mockito.ArgumentCaptor<String> keys = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(blogPublicationService, times(3)).publish(requests.capture(), keys.capture());
+        org.junit.jupiter.api.Assertions.assertEquals(Arrays.asList("user-key", "merchant-key", "admin-key"),
+                keys.getAllValues());
+        for (io.github.frewily.campushub.dto.request.BlogCreateRequest request : requests.getAllValues()) {
+            org.junit.jupiter.api.Assertions.assertEquals("Lunch", request.getTitle());
+            org.junit.jupiter.api.Assertions.assertEquals("Good", request.getContent());
+        }
+        verifyNoInteractions(blogService);
+    }
+
+    @Test
+    void unauthorizedKeyedPublishDoesNotReachEitherPublicationService() throws Exception {
+        String body = "{\"title\":\"Lunch\",\"images\":\"/imgs/lunch.jpg\",\"content\":\"Good\"}";
+        mockMvc.perform(post("/blog").header("Idempotency-Key", "valid-key")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+
+        String disabledToken = "key-disabled";
+        Map<Object, Object> disabled = new HashMap<>();
+        disabled.put("id", "64");
+        disabled.put("nickName", "disabled");
+        when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(LOGIN_USER_KEY + disabledToken)).thenReturn(disabled);
+        when(accountAccessMapper.findAccountStatus(64L)).thenReturn("DISABLED");
+        when(accountAccessMapper.findRoles(64L)).thenReturn(Arrays.asList("USER"));
+        mockMvc.perform(post("/blog").header("authorization", disabledToken)
+                        .header("Idempotency-Key", "valid-key")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+
+        prepareSession("key-roleless", 65L);
+        mockMvc.perform(post("/blog").header("authorization", "key-roleless")
+                        .header("Idempotency-Key", "valid-key")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(blogService, blogPublicationService);
     }
 
     @Test

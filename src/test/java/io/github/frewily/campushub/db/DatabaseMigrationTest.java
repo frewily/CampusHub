@@ -11,6 +11,21 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class DatabaseMigrationTest {
     @Test
+    void publicationRequestsDefineAuthorScopedCaseSensitiveRetainedReceipts() throws IOException {
+        String migration = StreamUtils.copyToString(getClass().getResourceAsStream(
+                "/db/migration/V012__add_blog_publication_requests.sql"), StandardCharsets.UTF_8);
+        String normalized = migration.replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("CREATE TABLE IF NOT EXISTS tb_blog_publication_request"));
+        assertTrue(normalized.contains("PRIMARY KEY (user_id, request_key)"));
+        assertTrue(normalized.contains("request_key VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL"));
+        assertTrue(normalized.contains("request_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL"));
+        assertTrue(normalized.contains("blog_id BIGINT UNSIGNED NULL"));
+        assertFalse(normalized.contains("FOREIGN KEY"));
+        assertFalse(normalized.contains("DROP TABLE"));
+        assertFalse(normalized.contains("expires_at"));
+    }
+
+    @Test
     void feedDeliveryOutboxDefinesImmutableRecipientKeyStableScoreAndBoundedDueIndex() throws IOException {
         String migration = StreamUtils.copyToString(getClass().getResourceAsStream(
                 "/db/migration/V011__add_blog_feed_delivery_outbox.sql"), StandardCharsets.UTF_8);
