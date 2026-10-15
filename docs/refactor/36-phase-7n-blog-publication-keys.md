@@ -24,7 +24,7 @@
 
 ## 指纹与事务
 
-`BlogPublicationService` 先校验用户、编号和原DTO约束，用 `ApiModelMapper` 得到白名单动态，再计算创建请求指纹。指纹固定域 `CampusHub:POST/blog:v1`，按shopId、title、images、content顺序进行长度前缀SHA-256：nullable shopId用固定哨兵，字符串以Java UTF-16代码单元和长度编码，避免简单分隔符歧义或异常Unicode替换造成等价。它不是签名、认证、隐私匿名化或无碰撞数学保证；变更v1规则须有兼容设计。
+`BlogPublicationService` 先校验用户、编号和原DTO约束，用 `ApiModelMapper` 得到白名单动态，再计算创建请求指纹。v1输入精确定义：固定ASCII域 `CampusHub:POST/blog:v1`（无终止符），随后shopId为固定8字节有符号大端整数（null用-1），再按title、images、content顺序各写4字节有符号大端Java UTF-16代码单元长度（null用-1）、非null时逐代码单元写大端两字节，最后SHA-256并输出64位小写hex。整数不是文本字段，只有三个字符串使用长度前缀；固定宽度与长度前缀组合避免简单分隔符歧义或异常Unicode替换造成等价。既有代码和固定向量按此规则，不因文字澄清而改变。它不是签名、认证、隐私匿名化或无碰撞数学保证；变更v1规则须有兼容设计。
 
 无图的省略/null/空串/trim空白已归一为空串，所以相同编号视为同请求；非空图片、标题、正文不做额外trim、大小写或Unicode归一。JSON字段顺序及被忽略的id/userId/计数等不参与指纹。DTO原始长度/关联图片约束仍须通过，即使它看起来能归一成已有请求也不能跳过校验。
 
