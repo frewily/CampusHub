@@ -46,6 +46,7 @@ import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
 import javax.validation.Validation;
@@ -90,8 +91,14 @@ class BlogCommentsMySqlIT {
     private static final AtomicReference<Runnable> AFTER_OWNED_REPLY_QUERY = new AtomicReference<>();
     private static final AtomicReference<Runnable> AFTER_OWNED_COMMENT_QUERY = new AtomicReference<>();
     private static final AtomicReference<Runnable> AFTER_MODERATABLE_COMMENT_QUERY = new AtomicReference<>();
+    private static final AtomicReference<Runnable> AFTER_MODERATABLE_REPLY_QUERY = new AtomicReference<>();
     private static final AtomicReference<Callable<Integer>> AFTER_HIDE_AUDIT_INSERT = new AtomicReference<>();
+    private static final AtomicReference<Callable<Integer>> AFTER_REPLY_HIDE_AUDIT_INSERT = new AtomicReference<>();
+    private static final AtomicReference<Callable<Integer>> AFTER_DIRECT_REPLY_STATUS_UPDATE = new AtomicReference<>();
+    private static final AtomicReference<Callable<Integer>> AFTER_DIRECT_REPLY_COUNTER_UPDATE = new AtomicReference<>();
     private static final ThreadLocal<Boolean> EXPECT_READ_ONLY_REPLY_LIST =
+            ThreadLocal.withInitial(() -> Boolean.FALSE);
+    private static final ThreadLocal<Boolean> EXPECT_NO_MAPPER_SQL =
             ThreadLocal.withInitial(() -> Boolean.FALSE);
 
     @BeforeAll
@@ -173,6 +180,10 @@ class BlogCommentsMySqlIT {
             ScriptUtils.executeSqlScript(connection, auditPageIndex);
             ScriptUtils.executeSqlScript(connection,
                     new ClassPathResource("db/migration/V010__add_blog_author_withdrawal.sql"));
+            ClassPathResource replyHideAudit = new ClassPathResource(
+                    "db/migration/V013__add_blog_reply_hide_audit.sql");
+            ScriptUtils.executeSqlScript(connection, replyHideAudit);
+            ScriptUtils.executeSqlScript(connection, replyHideAudit);
         }
     }
 
@@ -232,6 +243,9 @@ class BlogCommentsMySqlIT {
         public Object intercept(Invocation invocation) throws Throwable {
             MappedStatement statement = (MappedStatement) invocation.getArgs()[0];
             String id = statement.getId();
+            if (EXPECT_NO_MAPPER_SQL.get() && id.startsWith(BlogCommentsMapper.class.getName() + ".")) {
+                fail("transaction gate must reject before the first mapper statement");
+            }
             if (id.endsWith(".findBlog") || id.endsWith(".findFirstLevelComments")
                     || id.endsWith(".findDirectReplies")
                     || id.endsWith(".findFirstLevelHideAuditDetails")
@@ -268,12 +282,41 @@ class BlogCommentsMySqlIT {
                 Runnable hook = AFTER_MODERATABLE_COMMENT_QUERY.getAndSet(null);
                 if (hook != null) hook.run();
             }
+            if (id.endsWith(".findModeratableDirectReply")) {
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                Runnable hook = AFTER_MODERATABLE_REPLY_QUERY.getAndSet(null);
+                if (hook != null) hook.run();
+            }
             if (id.endsWith(".insertFirstLevelHideAudit")) {
                 assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
                 assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
                 Callable<Integer> hook = AFTER_HIDE_AUDIT_INSERT.getAndSet(null);
                 if (hook != null) {
                     assertEquals(Integer.valueOf(1), result, "hook requires a successful real audit INSERT");
+                    return hook.call();
+                }
+            }
+            if (id.endsWith(".insertDirectReplyHideAudit")) {
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                Callable<Integer> hook = AFTER_REPLY_HIDE_AUDIT_INSERT.getAndSet(null);
+                if (hook != null) {
+                    assertEquals(Integer.valueOf(1), result, "hook requires a successful real reply audit INSERT");
+                    return hook.call();
+                }
+            }
+            if (id.endsWith(".hideDirectReply")) {
+                Callable<Integer> hook = AFTER_DIRECT_REPLY_STATUS_UPDATE.getAndSet(null);
+                if (hook != null) {
+                    assertEquals(Integer.valueOf(1), result, "hook requires a successful real status UPDATE");
+                    return hook.call();
+                }
+            }
+            if (id.endsWith(".decrementCommentCount")) {
+                Callable<Integer> hook = AFTER_DIRECT_REPLY_COUNTER_UPDATE.getAndSet(null);
+                if (hook != null) {
+                    assertEquals(Integer.valueOf(1), result, "hook requires a successful real counter UPDATE");
                     return hook.call();
                 }
             }
@@ -295,6 +338,9 @@ class BlogCommentsMySqlIT {
         dropTrigger("fail_reply_update");
         dropTrigger("remove_blog_before_reply_update");
         dropTrigger("fail_hide_audit_insert");
+        dropTrigger("fail_reply_hide_status_update");
+        dropTrigger("fail_reply_hide_audit_insert");
+        jdbc.execute("DELETE FROM tb_blog_reply_hide_audit");
         jdbc.execute("DELETE FROM tb_blog_comment_hide_audit");
         jdbc.execute("DELETE FROM tb_blog_comments");
         jdbc.execute("DELETE FROM tb_blog");
@@ -309,8 +355,13 @@ class BlogCommentsMySqlIT {
         AFTER_OWNED_REPLY_QUERY.set(null);
         AFTER_OWNED_COMMENT_QUERY.set(null);
         AFTER_MODERATABLE_COMMENT_QUERY.set(null);
+        AFTER_MODERATABLE_REPLY_QUERY.set(null);
         AFTER_HIDE_AUDIT_INSERT.set(null);
+        AFTER_REPLY_HIDE_AUDIT_INSERT.set(null);
+        AFTER_DIRECT_REPLY_STATUS_UPDATE.set(null);
+        AFTER_DIRECT_REPLY_COUNTER_UPDATE.set(null);
         EXPECT_READ_ONLY_REPLY_LIST.remove();
+        EXPECT_NO_MAPPER_SQL.remove();
         UserHolder.removeUser();
         dropTrigger("fail_comment_insert");
         dropTrigger("fail_blog_counter_update");
@@ -318,6 +369,8 @@ class BlogCommentsMySqlIT {
         dropTrigger("fail_reply_update");
         dropTrigger("remove_blog_before_reply_update");
         dropTrigger("fail_hide_audit_insert");
+        dropTrigger("fail_reply_hide_status_update");
+        dropTrigger("fail_reply_hide_audit_insert");
     }
 
     @Test
@@ -327,6 +380,32 @@ class BlogCommentsMySqlIT {
                         + "AND TABLE_NAME='tb_blog_comments' AND INDEX_NAME='idx_blog_comments_page' "
                         + "ORDER BY SEQ_IN_INDEX", String.class);
         assertEquals(Arrays.asList("blog_id", "parent_id", "answer_id", "status", "id"), columns);
+    }
+
+    @Test
+    void directReplyHideMigrationRepeatsPreservesRowsAndHasExpectedUniqueAuditShape() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "migration root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "migration reply");
+        service.hideReply(reply, hideRequest("migration receipt"));
+        ClassPathResource migration = new ClassPathResource("db/migration/V013__add_blog_reply_hide_audit.sql");
+        try (Connection connection = datasource.getConnection()) {
+            ScriptUtils.executeSqlScript(connection, migration);
+            ScriptUtils.executeSqlScript(connection, migration);
+        }
+        assertEquals(1, replyAuditCount(reply));
+        assertEquals(Arrays.asList("id", "reply_id", "blog_id", "root_comment_id", "operator_user_id", "reason",
+                        "from_status", "to_status", "create_time"), jdbc.queryForList(
+                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() "
+                        + "AND TABLE_NAME='tb_blog_reply_hide_audit' ORDER BY ORDINAL_POSITION", String.class));
+        assertEquals(Integer.valueOf(0), jdbc.queryForObject(
+                "SELECT NON_UNIQUE FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=DATABASE() "
+                        + "AND TABLE_NAME='tb_blog_reply_hide_audit' "
+                        + "AND INDEX_NAME='uk_blog_reply_hide_audit_reply'", Integer.class));
+        assertEquals(Collections.singletonList("reply_id"), jdbc.queryForList(
+                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=DATABASE() "
+                        + "AND TABLE_NAME='tb_blog_reply_hide_audit' "
+                        + "AND INDEX_NAME='uk_blog_reply_hide_audit_reply' ORDER BY SEQ_IN_INDEX", String.class));
     }
 
     @Test
@@ -1107,6 +1186,418 @@ class BlogCommentsMySqlIT {
     }
 
     @Test
+    void hideReplyKeepsContentRelationsAndFirstReceiptSeparateFromRootAuditPages() {
+        long blogId = blog(AUTHOR_ID, 6);
+        jdbc.update("UPDATE tb_blog SET liked=17 WHERE id=?", blogId);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root retained independently");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "reply private content");
+        long sibling = comment(blogId, AUTHOR_ID + 2, root, root, 0, "sibling stays visible");
+        long ownReply = comment(blogId, AUTHOR_ID + 10, root, root, 0, "operator authored reply");
+        service.hideComment(root, hideRequest("root receipt remains root-only"));
+
+        UserHolder.saveUser(user(AUTHOR_ID + 10));
+        String firstReason = "first reply reason ' 合成";
+        service.hideReply(reply, hideRequest(firstReason));
+        service.hideReply(ownReply, hideRequest("operator may hide own reply"));
+        UserHolder.saveUser(user(AUTHOR_ID + 11));
+        service.hideReply(reply, hideRequest("repeat must not replace receipt"));
+
+        assertEquals(Integer.valueOf(2), mapper.selectById(reply).getStatus());
+        assertEquals("reply private content", mapper.selectById(reply).getContent());
+        assertEquals(Long.valueOf(root), mapper.selectById(reply).getParentId());
+        assertEquals(Long.valueOf(root), mapper.selectById(reply).getAnswerId());
+        assertEquals(Integer.valueOf(0), mapper.selectById(reply).getLiked());
+        assertEquals(Integer.valueOf(0), mapper.selectById(sibling).getStatus());
+        assertEquals("sibling stays visible", mapper.selectById(sibling).getContent());
+        assertEquals(Integer.valueOf(2), mapper.selectById(ownReply).getStatus());
+        assertEquals(Integer.valueOf(2), mapper.selectById(root).getStatus());
+        assertEquals("root retained independently", mapper.selectById(root).getContent());
+        assertEquals(4, countComments(blogId));
+        assertEquals(Integer.valueOf(3), blogCounter(blogId));
+        assertEquals(Integer.valueOf(17), jdbc.queryForObject("SELECT liked FROM tb_blog WHERE id=?", Integer.class, blogId));
+        assertEquals(1, replyAuditCount(reply));
+        assertEquals(1, replyAuditCount(ownReply));
+        assertEquals(Long.valueOf(AUTHOR_ID + 10), jdbc.queryForObject(
+                "SELECT operator_user_id FROM tb_blog_reply_hide_audit WHERE reply_id=?", Long.class, reply));
+        assertEquals(Long.valueOf(AUTHOR_ID + 10), jdbc.queryForObject(
+                "SELECT operator_user_id FROM tb_blog_reply_hide_audit WHERE reply_id=?", Long.class, ownReply));
+        assertEquals(firstReason, jdbc.queryForObject(
+                "SELECT reason FROM tb_blog_reply_hide_audit WHERE reply_id=?", String.class, reply));
+        assertEquals(Long.valueOf(blogId), jdbc.queryForObject(
+                "SELECT blog_id FROM tb_blog_reply_hide_audit WHERE reply_id=?", Long.class, reply));
+        assertEquals(Long.valueOf(root), jdbc.queryForObject(
+                "SELECT root_comment_id FROM tb_blog_reply_hide_audit WHERE reply_id=?", Long.class, reply));
+        assertEquals(Integer.valueOf(2), jdbc.queryForObject(
+                "SELECT from_status + to_status FROM tb_blog_reply_hide_audit WHERE reply_id=?", Integer.class, reply));
+        assertNotNull(jdbc.queryForObject(
+                "SELECT create_time FROM tb_blog_reply_hide_audit WHERE reply_id=?", java.sql.Timestamp.class, reply));
+        assertEquals(1, auditCount(root));
+        assertEquals("root receipt remains root-only", service.queryHideAudit(root).getReason());
+        BlogCommentHideAuditPage rootAudits = service.listHideAudits(blogId, hideAuditPageRequest(null, 20));
+        assertEquals(1, rootAudits.getItems().size(), "direct reply receipts must not enter the root audit page");
+        assertEquals(Long.toString(root), rootAudits.getItems().get(0).getCommentId());
+    }
+
+    @Test
+    void hideReplyAllowsHiddenOrWithdrawnRootsAndWithdrawnPosts() {
+        long blogId = blog(AUTHOR_ID, 5);
+        long hiddenRoot = comment(blogId, AUTHOR_ID, 0, 0, 0, "hidden root");
+        long hiddenRootReply = comment(blogId, AUTHOR_ID + 1, hiddenRoot, hiddenRoot, 0, "reply under hidden root");
+        service.hideComment(hiddenRoot, hideRequest("hide root first"));
+        service.hideReply(hiddenRootReply, hideRequest("hide reply under hidden root"));
+
+        long withdrawnRoot = comment(blogId, AUTHOR_ID, 0, 0, 0, "withdrawn root");
+        long withdrawnRootReply = comment(blogId, AUTHOR_ID + 2, withdrawnRoot, withdrawnRoot, 0,
+                "reply under withdrawn root");
+        service.withdrawComment(withdrawnRoot);
+        service.hideReply(withdrawnRootReply, hideRequest("hide reply under withdrawn root"));
+
+        long postReply = comment(blogId, AUTHOR_ID + 3, hiddenRoot, hiddenRoot, 0, "reply on withdrawn post");
+        jdbc.update("UPDATE tb_blog SET withdrawn=1 WHERE id=?", blogId);
+        service.hideReply(postReply, hideRequest("manage reply on withdrawn post"));
+        assertEquals(Integer.valueOf(2), mapper.selectById(hiddenRootReply).getStatus());
+        assertEquals(Integer.valueOf(2), mapper.selectById(withdrawnRootReply).getStatus());
+        assertEquals(Integer.valueOf(2), mapper.selectById(postReply).getStatus());
+        assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE blog_id=?",
+                Integer.class, blogId));
+        assertEquals(Integer.valueOf(0), blogCounter(blogId));
+    }
+
+    @Test
+    void hideReplyRejectsMissingCrossBlogMalformedAndUnsupportedRowsIncludingLegacyHidden() {
+        long blogId = blog(AUTHOR_ID, 12);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root");
+        long otherRoot = comment(blogId, AUTHOR_ID, 0, 0, 0, "other root");
+        List<Long> rejected = new ArrayList<>();
+        rejected.add(999999L);
+        rejected.add(comment(blogId, AUTHOR_ID, root, otherRoot, 0, "answer mismatch"));
+        long parentOnly = comment(blogId, AUTHOR_ID, root, 0, 0, "parent only");
+        rejected.add(parentOnly);
+        rejected.add(comment(blogId, AUTHOR_ID, 0, root, 0, "answer only"));
+        long nested = comment(blogId, AUTHOR_ID, parentOnly, parentOnly, 0, "nested direct shape is not root reply");
+        rejected.add(nested);
+        for (Integer state : Arrays.asList(1, 3, null, 4)) {
+            rejected.add(comment(blogId, AUTHOR_ID, root, root, state, "excluded state"));
+        }
+        long legacyHidden = comment(blogId, AUTHOR_ID, root, root, 2, "legacy hidden without receipt");
+        rejected.add(legacyHidden);
+        long hiddenWithWrongReceipt = comment(blogId, AUTHOR_ID, root, root, 2, "hidden with mismatched receipt");
+        jdbc.update("INSERT INTO tb_blog_reply_hide_audit(reply_id,blog_id,root_comment_id,operator_user_id,reason,"
+                        + "from_status,to_status) VALUES(?,?,?,?,'wrong root context',0,2)",
+                hiddenWithWrongReceipt, blogId, otherRoot, AUTHOR_ID);
+        rejected.add(hiddenWithWrongReceipt);
+        long foreignBlog = blog(AUTHOR_ID, 0);
+        rejected.add(comment(foreignBlog, AUTHOR_ID, root, root, 0, "cross-blog reply"));
+        long orphanBlog = blog(AUTHOR_ID, 0);
+        long orphanRoot = comment(orphanBlog, AUTHOR_ID, 0, 0, 0, "orphan root");
+        long orphanReply = comment(orphanBlog, AUTHOR_ID, orphanRoot, orphanRoot, 0, "orphan reply");
+        jdbc.update("DELETE FROM tb_blog WHERE id=?", orphanBlog);
+        long missingRoot = comment(blogId, AUTHOR_ID, 0, 0, 0, "root removed after reply creation");
+        long missingRootReply = comment(blogId, AUTHOR_ID + 1, missingRoot, missingRoot, 0, "reply with absent root");
+        jdbc.update("DELETE FROM tb_blog_comments WHERE id=?", missingRoot);
+        for (Long replyId : rejected) {
+            assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                    () -> service.hideReply(replyId, hideRequest("must not apply"))).getErrorCode(),
+                    "ineligible reply id " + replyId);
+        }
+        assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                () -> service.hideReply(orphanReply, hideRequest("missing post"))).getErrorCode());
+        assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                () -> service.hideReply(missingRootReply, hideRequest("missing root"))).getErrorCode());
+        assertEquals(Integer.valueOf(12), blogCounter(blogId));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog_reply_hide_audit", Integer.class));
+    }
+
+    @Test
+    void hideReplyClampsNullAndLowCountersAndRepeatNeverDecrementsAgain() {
+        for (Integer counter : Arrays.asList(null, 0, 1, 7)) {
+            long blogId = blog(AUTHOR_ID, counter);
+            long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "counter root");
+            long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "counter reply");
+            service.hideReply(reply, hideRequest("first"));
+            service.hideReply(reply, hideRequest("repeat"));
+            assertEquals(Integer.valueOf(counter == null || counter == 0 ? 0 : counter - 1), blogCounter(blogId));
+            assertEquals(Integer.valueOf(2), mapper.selectById(reply).getStatus());
+            assertEquals(2, countComments(blogId));
+            assertEquals(1, replyAuditCount(reply));
+        }
+    }
+
+    @Test
+    void hideReplyStatusCounterAndAuditFailuresRollbackAndHideInsertZeroCountIs422() {
+        long blogId = blog(AUTHOR_ID, 5);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "failure root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "failure reply");
+        List<String> triggers = Arrays.asList(
+                "CREATE TRIGGER fail_reply_hide_status_update BEFORE UPDATE ON tb_blog_comments FOR EACH ROW "
+                        + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='private direct reply status failure'",
+                "CREATE TRIGGER fail_blog_counter_update BEFORE UPDATE ON tb_blog FOR EACH ROW "
+                        + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='private direct reply counter failure'",
+                "CREATE TRIGGER fail_reply_hide_audit_insert BEFORE INSERT ON tb_blog_reply_hide_audit FOR EACH ROW "
+                        + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='private direct reply audit failure'");
+        for (String trigger : triggers) {
+            jdbc.execute(trigger);
+            BusinessException error = assertThrows(BusinessException.class,
+                    () -> service.hideReply(reply, hideRequest("rollback all")));
+            assertEquals(ErrorCode.INTERNAL_ERROR, error.getErrorCode());
+            assertNull(error.getCause());
+            assertFalse(error.getMessage().contains("private"));
+            assertEquals(Integer.valueOf(0), mapper.selectById(reply).getStatus());
+            assertEquals(Integer.valueOf(5), blogCounter(blogId));
+            assertEquals(0, replyAuditCount(reply));
+            dropTrigger("fail_reply_hide_status_update");
+            dropTrigger("fail_blog_counter_update");
+            dropTrigger("fail_reply_hide_audit_insert");
+        }
+
+        AFTER_REPLY_HIDE_AUDIT_INSERT.set(() -> 0);
+        BusinessException affectedRows = assertThrows(BusinessException.class,
+                () -> service.hideReply(reply, hideRequest("real insert then synthetic count")));
+        assertEquals(ErrorCode.OPERATION_FAILED, affectedRows.getErrorCode());
+        assertEquals(422, affectedRows.getErrorCode().getHttpStatus().value());
+        assertNull(affectedRows.getCause());
+        assertEquals(Integer.valueOf(0), mapper.selectById(reply).getStatus());
+        assertEquals(Integer.valueOf(5), blogCounter(blogId));
+        assertEquals(0, replyAuditCount(reply));
+        assertNull(AFTER_REPLY_HIDE_AUDIT_INSERT.get());
+
+        AFTER_DIRECT_REPLY_STATUS_UPDATE.set(() -> 0);
+        BusinessException statusRows = assertThrows(BusinessException.class,
+                () -> service.hideReply(reply, hideRequest("status mapper reports zero")));
+        assertEquals(ErrorCode.OPERATION_FAILED, statusRows.getErrorCode());
+        assertEquals(Integer.valueOf(0), mapper.selectById(reply).getStatus());
+        assertEquals(Integer.valueOf(5), blogCounter(blogId));
+        assertEquals(0, replyAuditCount(reply));
+
+        AFTER_DIRECT_REPLY_COUNTER_UPDATE.set(() -> 0);
+        BusinessException counterRows = assertThrows(BusinessException.class,
+                () -> service.hideReply(reply, hideRequest("counter mapper reports zero")));
+        assertEquals(ErrorCode.OPERATION_FAILED, counterRows.getErrorCode());
+        assertEquals(Integer.valueOf(0), mapper.selectById(reply).getStatus());
+        assertEquals(Integer.valueOf(5), blogCounter(blogId));
+        assertEquals(0, replyAuditCount(reply));
+        assertNull(AFTER_DIRECT_REPLY_STATUS_UPDATE.get());
+        assertNull(AFTER_DIRECT_REPLY_COUNTER_UPDATE.get());
+    }
+
+    @Test
+    void hideReplyRepeatDoesNotExecuteStatusUpdateEvenWhenAnUpdateTriggerWouldRejectIt() {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "repeat root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "repeat reply");
+        service.hideReply(reply, hideRequest("first receipt"));
+        jdbc.execute("CREATE TRIGGER fail_reply_hide_status_update BEFORE UPDATE ON tb_blog_comments FOR EACH ROW "
+                + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='repeat must not update status'");
+        service.hideReply(reply, hideRequest("must not replace"));
+        assertEquals(Integer.valueOf(2), mapper.selectById(reply).getStatus());
+        assertEquals(Integer.valueOf(0), blogCounter(blogId));
+        assertEquals(1, replyAuditCount(reply));
+        assertEquals("first receipt", jdbc.queryForObject(
+                "SELECT reason FROM tb_blog_reply_hide_audit WHERE reply_id=?", String.class, reply));
+    }
+
+    @Test
+    void hideReplyRequiresAnActualWritableSynchronizedTransactionBeforeAnyWrite() {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "gate root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "gate reply");
+        BlogCommentsServiceImpl unproxied = new BlogCommentsServiceImpl(context.getBean(Validator.class));
+        assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(BusinessException.class,
+                () -> service.hideReply(0L, hideRequest("invalid id"))).getErrorCode());
+        assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(BusinessException.class,
+                () -> service.hideReply(null, hideRequest("null id"))).getErrorCode());
+        assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(BusinessException.class,
+                () -> service.hideReply(reply, hideRequest("  "))).getErrorCode());
+        assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(BusinessException.class,
+                () -> service.hideReply(reply, null)).getErrorCode());
+        UserHolder.removeUser();
+        assertEquals(ErrorCode.AUTHENTICATION_FAILED, assertThrows(BusinessException.class,
+                () -> service.hideReply(reply, hideRequest("missing identity"))).getErrorCode());
+        UserHolder.saveUser(user(AUTHOR_ID));
+        EXPECT_NO_MAPPER_SQL.set(Boolean.TRUE);
+        try {
+            assertThrows(IllegalStateException.class,
+                    () -> unproxied.hideReply(reply, hideRequest("unproxied call")));
+
+            TransactionTemplate readOnly = new TransactionTemplate(context.getBean(DataSourceTransactionManager.class));
+            readOnly.setReadOnly(true);
+            assertThrows(IllegalStateException.class, () -> readOnly.execute(status -> {
+                service.hideReply(reply, hideRequest("read-only call"));
+                return null;
+            }));
+        } finally {
+            EXPECT_NO_MAPPER_SQL.remove();
+        }
+        assertEquals(Integer.valueOf(0), mapper.selectById(reply).getStatus());
+        assertEquals(Integer.valueOf(1), blogCounter(blogId));
+        assertEquals(0, replyAuditCount(reply));
+    }
+
+    @Test
+    void hideReplyUsesCurrentLockedRelationshipAfterCandidateLookup() {
+        long blogId = blog(AUTHOR_ID, 8);
+        long otherRoot = comment(blogId, AUTHOR_ID, 0, 0, 0, "other root");
+        long otherBlog = blog(AUTHOR_ID, 0);
+        for (String change : Arrays.asList("status", "answer", "blog")) {
+            long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "current root");
+            long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "changed reply");
+            AFTER_MODERATABLE_REPLY_QUERY.set(() -> {
+                String column = "status".equals(change) ? "status"
+                        : "answer".equals(change) ? "answer_id" : "blog_id";
+                long value = "status".equals(change) ? 3L : "answer".equals(change) ? otherRoot : otherBlog;
+                try (Connection connection = datasource.getConnection();
+                     PreparedStatement statement = connection.prepareStatement(
+                             "UPDATE tb_blog_comments SET " + column + "=? WHERE id=?")) {
+                    statement.setLong(1, value);
+                    statement.setLong(2, reply);
+                    assertEquals(1, statement.executeUpdate());
+                } catch (SQLException error) {
+                    throw new AssertionError("independent reply eligibility change failed", error);
+                }
+            });
+            assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                    () -> service.hideReply(reply, hideRequest("stale candidate must not write"))).getErrorCode());
+            assertEquals(Integer.valueOf(8), blogCounter(blogId));
+            assertEquals(0, replyAuditCount(reply));
+        }
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "root whose relation changes");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "root lock recheck reply");
+        AFTER_MODERATABLE_REPLY_QUERY.set(() -> {
+            try (Connection connection = datasource.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(
+                         "UPDATE tb_blog_comments SET parent_id=? WHERE id=?")) {
+                statement.setLong(1, otherRoot);
+                statement.setLong(2, root);
+                assertEquals(1, statement.executeUpdate());
+            } catch (SQLException error) {
+                throw new AssertionError("independent root relationship change failed", error);
+            }
+        });
+        assertEquals(ErrorCode.NOT_FOUND, assertThrows(BusinessException.class,
+                () -> service.hideReply(reply, hideRequest("root ceased being canonical"))).getErrorCode());
+        assertEquals(Integer.valueOf(8), blogCounter(blogId));
+        assertEquals(0, replyAuditCount(reply));
+        assertNull(AFTER_MODERATABLE_REPLY_QUERY.get());
+    }
+
+    @Test
+    void hideReplyConcurrentRetriesWriteOneReceiptAndDecrementOnce() throws Exception {
+        long blogId = blog(AUTHOR_ID, 2);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "parallel root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "parallel reply");
+        int participants = 10;
+        CountDownLatch ready = new CountDownLatch(participants);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(participants);
+        List<Future<?>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < participants; i++) {
+                final int index = i;
+                futures.add(executor.submit(() -> {
+                    UserHolder.saveUser(user(AUTHOR_ID + 10 + index));
+                    ready.countDown();
+                    try {
+                        assertTrue(start.await(10, TimeUnit.SECONDS));
+                        service.hideReply(reply, hideRequest("parallel reason " + index));
+                        return null;
+                    } finally { UserHolder.removeUser(); }
+                }));
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
+            start.countDown();
+            for (Future<?> future : futures) future.get(20, TimeUnit.SECONDS);
+            assertEquals(Integer.valueOf(2), mapper.selectById(reply).getStatus());
+            assertEquals(Integer.valueOf(1), blogCounter(blogId));
+            assertEquals(1, replyAuditCount(reply));
+            assertTrue(jdbc.queryForObject("SELECT reason FROM tb_blog_reply_hide_audit WHERE reply_id=?", String.class,
+                    reply).startsWith("parallel reason "));
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void hideReplyCurrentReadsWinnerReceiptCommittedAfterItsInitialSnapshot() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "snapshot root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "snapshot reply");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            TransactionTemplate repeatableRead = new TransactionTemplate(
+                    context.getBean(DataSourceTransactionManager.class));
+            repeatableRead.setIsolationLevel(Connection.TRANSACTION_REPEATABLE_READ);
+            repeatableRead.execute(status -> {
+                assertEquals(0, replyAuditCount(reply), "establish an older ordinary RR snapshot");
+                AFTER_MODERATABLE_REPLY_QUERY.set(() -> {
+                    runIndependent(executor, AUTHOR_ID + 10,
+                            () -> service.hideReply(reply, hideRequest("independent winner")));
+                    assertEquals(0, replyAuditCount(reply),
+                            "ordinary snapshot must still miss the independently committed receipt");
+                });
+                service.hideReply(reply, hideRequest("outer losing reason"));
+                return null;
+            });
+            assertEquals(Integer.valueOf(2), mapper.selectById(reply).getStatus());
+            assertEquals(Integer.valueOf(0), blogCounter(blogId));
+            assertEquals(1, replyAuditCount(reply));
+            assertEquals("independent winner", jdbc.queryForObject(
+                    "SELECT reason FROM tb_blog_reply_hide_audit WHERE reply_id=?", String.class, reply));
+            assertNull(AFTER_MODERATABLE_REPLY_QUERY.get());
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void hideReplyAndAuthorWithdrawalCompetitionHasOneTerminalStateAndOneDecrement() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "competing root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "competing reply");
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<Boolean> hide;
+        Future<Boolean> withdraw;
+        try {
+            hide = executor.submit(() -> {
+                UserHolder.saveUser(user(AUTHOR_ID + 10));
+                ready.countDown();
+                try {
+                    assertTrue(start.await(10, TimeUnit.SECONDS));
+                    try { service.hideReply(reply, hideRequest("competing admin")); return true; }
+                    catch (BusinessException error) { assertEquals(ErrorCode.NOT_FOUND, error.getErrorCode()); return false; }
+                } finally { UserHolder.removeUser(); }
+            });
+            withdraw = executor.submit(() -> {
+                UserHolder.saveUser(user(AUTHOR_ID + 1));
+                ready.countDown();
+                try {
+                    assertTrue(start.await(10, TimeUnit.SECONDS));
+                    try { service.withdrawReply(reply); return true; }
+                    catch (BusinessException error) { assertEquals(ErrorCode.NOT_FOUND, error.getErrorCode()); return false; }
+                } finally { UserHolder.removeUser(); }
+            });
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
+            start.countDown();
+            boolean hidden = hide.get(20, TimeUnit.SECONDS);
+            boolean withdrawn = withdraw.get(20, TimeUnit.SECONDS);
+            assertNotEquals(hidden, withdrawn, "exactly one terminal operation should win");
+            Integer state = mapper.selectById(reply).getStatus();
+            assertEquals(hidden ? Integer.valueOf(2) : Integer.valueOf(3), state);
+            assertEquals(hidden ? 1 : 0, replyAuditCount(reply));
+            assertEquals(Integer.valueOf(0), blogCounter(blogId));
+            assertEquals(2, countComments(blogId));
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
     void hidePreservesContentChildrenCursorAndFirstOperatorReasonOnRepeat() {
         long blogId = blog(AUTHOR_ID, 3);
         long otherRoot = comment(blogId, AUTHOR_ID, 0, 0, 0, "other root");
@@ -1740,6 +2231,11 @@ class BlogCommentsMySqlIT {
     private static int auditCount(long commentId) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog_comment_hide_audit WHERE comment_id=?",
                 Integer.class, commentId);
+    }
+
+    private static int replyAuditCount(long replyId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE reply_id=?",
+                Integer.class, replyId);
     }
 
     private static BlogCommentHideRequest hideRequest(String reason) {

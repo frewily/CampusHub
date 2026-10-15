@@ -1,8 +1,10 @@
 # CampusHub
 
+Phase 7O 增加 ADMIN 直接回复隐藏 `POST /admin/blog-comments/replies/{replyId}/hide`；V013 使用独立回复审计表。当前源码映射为49条/13个Controller，其中`AdminBlogCommentsController`4条。134项定向通过；Java 8 clean package 470项（0失败/错误、4项原设计跳过）、113项显式IT（0失败/错误/skip）和目标Compose 44组均通过。本阶段选定本机验证及清理完成；阶段证据见[7O记录](docs/refactor/37-phase-7o-direct-reply-moderation.md)与[学习笔记](docs/learning/direct-reply-moderation.md)，个人掌握仍需独立确认。
+
 Phase7N补[可选发布请求编号](docs/refactor/36-phase-7n-blog-publication-keys.md)：`POST /blog`携带合法 `Idempotency-Key` 时，同用户/编号/有效内容重试返回原ID，不再次建动态或投递任务；变更内容409，无编号的旧路径不变。V012必须先审查迁移再升级，账本持续保留；回退忽略编号的旧应用会失去保证。[学习笔记](docs/learning/blog-publication-keys.md)与[决策](docs/adr/0004-blog-publication-keys.md)说明边界。
 
-7N本轮81项定向、458项Java8默认统计（0失败/错误、4设计跳过）、101项显式隔离IT、41组目标Compose通过，四请求锁升级死锁已复现并修正为共享当前读，测试资源清理独立复核完成；不是生产或容量证明。提交后独立审查，最终SHA与同步状态在交付对话报告。
+7N当时记录81项定向、458项Java8默认统计（0失败/错误、4设计跳过）、101项显式隔离IT、41组目标Compose通过，四请求锁升级死锁已复现并修正为共享当前读，测试资源清理独立复核完成；这些是7N历史证据，不是7O结果，也不是生产或容量证明。提交后独立审查，最终SHA与同步状态在交付对话报告。
 
 Phase7M补[动态发布与Feed可恢复投递](docs/refactor/35-phase-7m-blog-feed-delivery.md)：动态和本次收件意图同事务，提交后失败不改报发布失败，后台按原成员/分数恢复；POST成功不是全部关注者立即可见。新增V011，需先迁移再升级，待办不可删除来回退。[学习笔记](docs/learning/blog-feed-delivery.md)与[决策](docs/adr/0003-blog-feed-delivery.md)说明边界。
 
@@ -10,7 +12,7 @@ Phase7M补[动态发布与Feed可恢复投递](docs/refactor/35-phase-7m-blog-fe
 
 Phase7L修正[关注Feed同分值游标累计](docs/refactor/34-phase-7l-follow-feed-cursor.md)：静态ZSet连续分页和撤回过滤空页都按原成员推进，换时间组重置；不新增API/DDL，不等于可靠投递或跨页冻结快照。[学习笔记](docs/learning/follow-feed-cursor.md)说明旧失败和边界。
 
-Phase 7K 增加[作者本人动态逻辑撤回](docs/refactor/33-phase-7k-post-author-withdrawal.md)：三角色均仅本人，不物理删除；撤回后关闭公开读写，保留评论/审核及Redis数据。API为48条应用映射；V010须先迁移再升级，**不能直接回退不识别撤回标记的旧应用**。验证与交付状态以阶段记录和本轮交付对话为准；[学习笔记](docs/learning/post-author-withdrawal.md)说明边界。
+Phase 7K 增加[作者本人动态逻辑撤回](docs/refactor/33-phase-7k-post-author-withdrawal.md)：三角色均仅本人，不物理删除；撤回后关闭公开读写，保留评论/审核及Redis数据。7K当时为48条应用映射；V010须先迁移再升级，**不能直接回退不识别撤回标记的旧应用**。验证与交付状态以阶段记录和本轮交付对话为准；[学习笔记](docs/learning/post-author-withdrawal.md)说明边界。
 
 CampusHub 是从“黑马点评”教学项目渐进演进的校园生活与周边商户服务后端，目标是让设计、实现和验证都能被解释和复现，而不是隐藏来源或堆叠中间件。
 
@@ -32,7 +34,7 @@ HTTP → Spring Security（Redis Token + 数据库账号/角色）→ Controller
 - USER / MERCHANT / ADMIN 权限与商户资源归属检查；采用可失效的 Redis Token，不是 JWT。
 - 门店、校园动态、关注、Feed、签到和优惠活动沿用合理的遗留模块；不是所有遗留接口都已完成 DTO 改造。
 - Phase 7A 支持不关联门店的校园动态：POST /blog 的 shopId 可省略/null，提供则为正数；7I 当前语义进一步允许这种动态省略或提供空白 images，归一化后保存空字符串。关联门店动态仍要求非空白图片；7I 选定本轮实现与验证完成。一级评论由 7B 单独增加。
-- Phase 7B/7C 支持一级评论和一层直接回复的创建/可见游标读取，关系由服务端派生，写入与计数同事务；7D/7E 支持本人回复/一级评论逻辑撤回（保留原文、重复不扣计数），所有角色均仅本人。根撤回不改/扣回复，关闭其下新请求的回复列表/创建，回复作者仍可独立撤回；7F 支持 ADMIN 隐藏正常一级评论并事务写入审计；7G 单条查询与 7H 按动态分页查询均限定为审计只读读取。仍无多级回复、级联/物理删除、恢复、回复审核、举报工作流、通知或完整评价系统。
+- Phase 7B/7C 支持一级评论和一层直接回复的创建/可见游标读取，关系由服务端派生，写入与计数同事务；7D/7E 支持本人回复/一级评论逻辑撤回（保留原文、重复不扣计数），所有角色均仅本人。根撤回不改/扣回复，关闭其下新请求的回复列表/创建，回复作者仍可独立撤回；7F 支持 ADMIN 隐藏正常一级评论并事务写入审计；7G 单条查询与 7H 按动态分页查询均限定为根评论审计只读读取；7O 增加 ADMIN 隐藏合法直接回复并写入独立审计。仍无多级回复、级联/物理删除、恢复、举报工作流、通知或完整评价系统。
 - 库存、资格、时间窗口、一人一单与请求重放由 Redis Lua 校验。`ACCEPTED` 只代表进入 Stream，不代表订单落库或支付。
 - 消费者支持 pending 恢复、有限重试、失败归档和运维前向重放；数据库有唯一约束。保留 Redis Stream，不引入专业 MQ，见 [ADR 0001](docs/adr/0001-order-message-broker.md)。
 - 本人已落库未支付订单支持查询/取消，取消与 outbox 同事务；Redis 补偿独立恢复。不包含支付、退款或自动超时取消。
@@ -100,10 +102,10 @@ smoke 检查 live、ready 和合成门店搜索，成功输出 `PASS`；它只�
 首次使用全新 MySQL 卷时，官方镜像运行 `deploy/mysql/init/00-bootstrap.sh`：
 
 ```text
-空库检查 → schema.sql → V001…V012 → seed.sql（合成类别与一间门店）
+空库检查 → schema.sql → V001…V013 → seed.sql（合成类别与一间门店）
 ```
 
-没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V012；不会自动修复脏数据或同名错误结构。7A 的 V006、7B 的 V007、7F 的 V008 及 7H 的 V009 必须在升级应用前具备，已有卷不会因重启自动迁移。Phase 7I 不新增迁移，复用现有 `tb_blog.images` 列；应用升级无需新增 DDL；回退旧应用会恢复原图片必填的发布校验，不删除已发布的纯文字行。V007 只按索引名判断是否存在；同名但定义错误的索引需人工核查，不会自动修复。V008 使用 `CREATE TABLE IF NOT EXISTS`，不会校验同名表的列/索引定义，也不回填历史审计；V009 依赖 V008 表，重复执行按索引名跳过但不会修复同名错误定义。已有卷需备份、核对索引形状并人工审查 V009；旧应用回退可保留该索引，不自动删除索引或恢复状态/计数。新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)；评论索引的现有库升级要求见[7B 阶段记录](docs/refactor/24-phase-7b-comments.md)，管理员隐藏与审计表见[7F 阶段记录](docs/refactor/28-phase-7f-comment-moderation.md)，分页审计索引见[7H 阶段记录](docs/refactor/30-phase-7h-comment-audit-pages.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
+没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V013；不会自动修复脏数据或同名错误结构。7A 的 V006、7B 的 V007、7F 的 V008、7H 的 V009 和 7O 的 V013 必须在升级应用前具备，已有卷不会因重启自动迁移。Phase 7I 不新增迁移，复用现有 `tb_blog.images` 列；应用升级无需新增 DDL；回退旧应用会恢复原图片必填的发布校验，不删除已发布的纯文字行。V007 只按索引名判断是否存在；同名但定义错误的索引需人工核查，不会自动修复。V008 使用 `CREATE TABLE IF NOT EXISTS`，不会校验同名表的列/索引定义，也不回填历史审计；V009 依赖 V008 表，重复执行按索引名跳过但不会修复同名错误定义。V013 同样使用 `CREATE TABLE IF NOT EXISTS`，不会修复同名错误表或回填旧回复隐藏审计。已有卷需备份并核对表/索引定义；回退应用不会删除 V013 审计，也不能靠删审计或恢复状态/计数来回退。新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)；评论索引的现有库升级要求见[7B 阶段记录](docs/refactor/24-phase-7b-comments.md)，管理员隐藏与审计表见[7F 阶段记录](docs/refactor/28-phase-7f-comment-moderation.md)，分页审计索引见[7H 阶段记录](docs/refactor/30-phase-7h-comment-audit-pages.md)，回复隐藏见[7O 阶段记录](docs/refactor/37-phase-7o-direct-reply-moderation.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
 
 日常停止容器并保留数据：
 
@@ -185,7 +187,7 @@ python3 scripts/verify-business-diagnostics.py
 
 ## API 与设计文档
 
-- [当前 API 目录](docs/api/README.md)、[47 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：来自 13 个 Controller，另列两个 Actuator GET 管理路由；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
+- [当前 API 目录](docs/api/README.md)、[48 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：来自 13 个 Controller，另列两个 Actuator GET 管理路由；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
 - [Phase 7A 校园动态](docs/refactor/23-phase-7a-campus-posts.md)、[可选门店关联与发布/回退](docs/learning/campus-post-store-association.md)。
 - [Phase 7B 一级评论](docs/refactor/24-phase-7b-comments.md)、[一级评论与游标分页学习笔记](docs/learning/first-level-comments-and-cursors.md)。
 - [Phase 7C 直接回复](docs/refactor/25-phase-7c-comment-replies.md)、[关系派生、锁顺序与可见性](docs/learning/direct-comment-replies.md)。
@@ -196,6 +198,7 @@ python3 scripts/verify-business-diagnostics.py
 - [Phase 7H 按动态分页读取隐藏审计](docs/refactor/30-phase-7h-comment-audit-pages.md)、[游标与跨页快照学习笔记](docs/learning/comment-hide-audit-pagination.md)：实现与选定本轮验证完成，不承诺跨页冻结或性能 SLA；最终提交/审查状态在交付对话报告。
 - [Phase 7I 纯文字校园动态](docs/refactor/31-phase-7i-text-only-campus-posts.md)、[条件校验与空串兼容笔记](docs/learning/text-only-campus-posts.md)：实现与选定本轮验证完成，无新迁移或 UI；最终提交/审查状态在交付对话报告。
 - [Phase 7J 动态作者编辑](docs/refactor/32-phase-7j-post-author-edit.md)、[完整替换、行锁与并发边界](docs/learning/post-author-edit.md)：实现与选定本轮验证完成；完整内容替换、仅本人、无新迁移或 UI，最终提交/审查状态在交付对话报告。
+- [Phase 7O 管理员隐藏直接回复](docs/refactor/37-phase-7o-direct-reply-moderation.md)、[锁序、独立审计与计数语义](docs/learning/direct-reply-moderation.md)：源码及选定本机验证已完成；不等于个人已掌握，也不代表生产验收。
 - [领域模型](docs/domain-model.md)、[迁移计划](docs/refactor/02-migration-plan.md)、[遗留兼容说明](docs/learning/legacy-compatibility.md)。
 - [请求/响应契约](docs/refactor/09-phase-2d-api-models.md)、[权限](docs/refactor/08-phase-2c-authorization.md)。
 - [活动准入](docs/refactor/10-phase-3a-flash-sale-admission.md)、[消费恢复](docs/refactor/11-phase-3b-reliable-order-consumption.md)、[订单取消](docs/refactor/12-phase-3c-order-lifecycle.md)。

@@ -11,6 +11,20 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class DatabaseMigrationTest {
     @Test
+    void replyHideAuditsAreSeparateRetainedReceiptsWithOneAuditPerReply() throws IOException {
+        String migration = StreamUtils.copyToString(getClass().getResourceAsStream(
+                "/db/migration/V013__add_blog_reply_hide_audit.sql"), StandardCharsets.UTF_8);
+        String normalized = migration.replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("CREATE TABLE IF NOT EXISTS tb_blog_reply_hide_audit"));
+        assertTrue(normalized.contains("root_comment_id BIGINT UNSIGNED NOT NULL"));
+        assertTrue(normalized.contains("operator_user_id BIGINT UNSIGNED NOT NULL"));
+        assertTrue(normalized.contains("UNIQUE KEY uk_blog_reply_hide_audit_reply (reply_id)"));
+        assertTrue(normalized.contains("reason VARCHAR(255) NOT NULL"));
+        assertFalse(normalized.contains("FOREIGN KEY"));
+        assertFalse(normalized.contains("DROP TABLE"));
+    }
+
+    @Test
     void publicationRequestsDefineAuthorScopedCaseSensitiveRetainedReceipts() throws IOException {
         String migration = StreamUtils.copyToString(getClass().getResourceAsStream(
                 "/db/migration/V012__add_blog_publication_requests.sql"), StandardCharsets.UTF_8);

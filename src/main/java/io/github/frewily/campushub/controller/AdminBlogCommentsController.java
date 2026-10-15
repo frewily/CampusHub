@@ -47,4 +47,12 @@ public class AdminBlogCommentsController {
         blogCommentsService.hideComment(commentId, request);
         return Result.ok();
     }
+
+    @PostMapping("/replies/{replyId}/hide")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result hideReply(@Positive @PathVariable("replyId") Long replyId,
+                            @Valid @NotNull @RequestBody BlogCommentHideRequest request) {
+        blogCommentsService.hideReply(replyId, request);
+        return Result.ok();
+    }
 }

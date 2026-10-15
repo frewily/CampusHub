@@ -36,6 +36,16 @@ public interface BlogCommentsMapper extends BaseMapper<BlogComments> {
                                                          @Param("limit") int limit);
     int insertFirstLevelHideAudit(@Param("commentId") Long commentId, @Param("blogId") Long blogId,
                                  @Param("operatorUserId") Long operatorUserId, @Param("reason") String reason);
+    BlogComments findModeratableDirectReply(@Param("replyId") Long replyId);
+    Long lockDirectReplyRoot(@Param("rootId") Long rootId, @Param("blogId") Long blogId);
+    BlogComments lockModeratableDirectReply(@Param("replyId") Long replyId, @Param("blogId") Long blogId,
+                                            @Param("rootId") Long rootId);
+    int hideDirectReply(@Param("replyId") Long replyId, @Param("blogId") Long blogId, @Param("rootId") Long rootId);
+    Long findDirectReplyHideAudit(@Param("replyId") Long replyId, @Param("blogId") Long blogId,
+                                  @Param("rootId") Long rootId);
+    int insertDirectReplyHideAudit(@Param("replyId") Long replyId, @Param("blogId") Long blogId,
+                                    @Param("rootId") Long rootId, @Param("operatorUserId") Long operatorUserId,
+                                    @Param("reason") String reason);
     List<BlogComments> findFirstLevelComments(@Param("blogId") Long blogId,
                                             @Param("beforeId") Long beforeId,
                                             @Param("limit") int limit);

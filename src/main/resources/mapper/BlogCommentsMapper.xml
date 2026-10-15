@@ -99,6 +99,37 @@
         <if test="beforeId != null">AND id &lt; #{beforeId}</if>
         ORDER BY id DESC LIMIT #{limit}
     </select>
+    <select id="findModeratableDirectReply" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id, parent_id FROM tb_blog_comments
+        WHERE id = #{replyId} AND parent_id &gt; 0 AND answer_id = parent_id AND status IN (0, 2)
+    </select>
+    <select id="lockDirectReplyRoot" resultType="long" timeout="5">
+        SELECT id FROM tb_blog_comments
+        WHERE id = #{rootId} AND blog_id = #{blogId} AND parent_id = 0 AND answer_id = 0
+        FOR UPDATE
+    </select>
+    <select id="lockModeratableDirectReply" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
+        SELECT id, blog_id, parent_id, status FROM tb_blog_comments
+        WHERE id = #{replyId} AND blog_id = #{blogId} AND parent_id = #{rootId} AND answer_id = #{rootId}
+          AND parent_id &gt; 0 AND status IN (0, 2)
+        FOR UPDATE
+    </select>
+    <update id="hideDirectReply" timeout="5">
+        UPDATE tb_blog_comments SET status = 2
+        WHERE id = #{replyId} AND blog_id = #{blogId} AND parent_id = #{rootId} AND answer_id = #{rootId}
+          AND parent_id &gt; 0 AND status = 0
+    </update>
+    <select id="findDirectReplyHideAudit" resultType="long" timeout="5">
+        SELECT id FROM tb_blog_reply_hide_audit
+        WHERE reply_id = #{replyId} AND blog_id = #{blogId} AND root_comment_id = #{rootId}
+          AND from_status = 0 AND to_status = 2
+        FOR UPDATE
+    </select>
+    <insert id="insertDirectReplyHideAudit" timeout="5">
+        INSERT INTO tb_blog_reply_hide_audit
+            (reply_id, blog_id, root_comment_id, operator_user_id, reason, from_status, to_status)
+        VALUES (#{replyId}, #{blogId}, #{rootId}, #{operatorUserId}, #{reason}, 0, 2)
+    </insert>
     <select id="findFirstLevelComments" resultType="io.github.frewily.campushub.entity.BlogComments" timeout="5">
         SELECT id, blog_id, user_id, content, create_time
         FROM tb_blog_comments

@@ -2,6 +2,8 @@
 
 7N补可选发布编号的同事务账本与重试原ID，见[证据](../refactor/36-phase-7n-blog-publication-keys.md)。仅在亲自复现编号冲突、真实回滚、并发当前读和旧版回退边界后表述已理解；不能写成所有发布自动去重、恰好一次或未经测量的性能提升。
 
+7O已增加管理员隐藏直接回复与V013独立审计，并完成选定本机验证。下面只可作为学习候选；在本人能解释并复现锁序、当前读、审计分表和计数语义前，不写入简历。
+
 7M已补选定动态Feed故障恢复，见[证据](../refactor/35-phase-7m-blog-feed-delivery.md)。只有亲自复现事务回滚、固定分数重放和ACK失败后再确认的部分才可表述为已理解；不使用“恰好一次”“发布不重复”“全Feed可重建”“生产高可用”或未经实测的性能提升。
 
 后续7K补作者逻辑撤回与全入口可见性约束，见[证据](../refactor/33-phase-7k-post-author-withdrawal.md)；仅为可选学习材料，不自动增补为个人能力或简历成绩，不宣称物理删除、可靠Feed或生产合规。
@@ -19,6 +21,7 @@ CampusHub：从黑马点评教学工程渐进演进的校园生活与周边商�
 | 候选表述 | 使用前需要能解释/复现 | 证据 |
 | --- | --- | --- |
 | 基于 Spring Security 与可撤销 Redis 会话实现角色和门店资源归属校验，为优先写接口增加请求字段白名单与统一错误语义 | opaque token、禁用/登出、有效商户成员、越权拒绝；不是 JWT/refresh token，也不是所有遗留接口均已隔离 Entity | [权限](../refactor/08-phase-2c-authorization.md)、[API 边界](../refactor/09-phase-2d-api-models.md) |
+| 为直接回复增加 ADMIN-only 隐藏状态转移，以动态→根→回复的锁序复核资格，并把状态、动态派生计数和专用审计放在同一事务 | 需能说明当前读与RR快照差别、status=2重试为何查V013匹配审计、V008和V013隔离，以及计数不等于可见行数；已完成选定本机验收，不外推生产或个人掌握 | [Phase 7O](../refactor/37-phase-7o-direct-reply-moderation.md)、[学习笔记](../learning/direct-reply-moderation.md) |
 | 以 Redis Lua 完成限量活动准入与重复受理，结合 Redis Stream pending 接管、有界重试、失败归档和数据库唯一约束处理异步建单 | ACCEPTED 不等于已落库；提交后 ACK 失败、同 ID 幂等、冲突 ID、失败库存保留与人工核对后的 redrive | [准入](../refactor/10-phase-3a-flash-sale-admission.md)、[可靠消费](../refactor/11-phase-3b-reliable-order-consumption.md)、[ADR 0001](../adr/0001-order-message-broker.md) |
 | 对限量活动建立隔离的有限合成 HTTP 批次验收，核对首次受理、原 ID 重放、售罄分类及 Redis/Stream/DB 订单和库存账本 | 20/200 合成账号各三轮、每人两次请求、半库存；正式 1320 次请求中 330 新受理、330 重放、660 售罄；独立预热另 120 次请求、30 笔订单。不是持续 QPS/TPS、同步起跑、容量或逐单落库延迟；不包含真实短信、强杀/HA 或生产 SLO 结论 | [有限批次报告](../performance/flash-sale.md)、[Phase 6E2 记录](../refactor/21-phase-6e2-flash-sale-results.md) |
 | 用 MySQL 事务 outbox 与独立 Redis 幂等 marker 支持本人未支付订单取消及补偿恢复 | DB/Redis 分别确认、租约/CAS、Redis 成功但 DB 确认失败、PENDING 转核对；未实现支付/退款 | [订单闭环](../refactor/12-phase-3c-order-lifecycle.md)、[取消笔记](../learning/order-cancellation-recovery.md) |

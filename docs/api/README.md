@@ -1,14 +1,16 @@
 # CampusHub 当前 API 目录
 
-Phase7N为POST/blog新增可选 `Idempotency-Key` 请求头；同用户/编号/有效创建内容重试返回原ID，不重新创建或投递，变化内容409，无编号路径不变。V012、身份校验、保留和回退边界见[7N记录](../refactor/36-phase-7n-blog-publication-keys.md)，映射数仍48/13。
+Phase 7O 新增 ADMIN-only `POST /admin/blog-comments/replies/{replyId}/hide`，通过 V013 独立记录直接回复隐藏审计。源码与机器清单当前为 **49 个显式 method/path 映射、13 个 Controller**；AdminBlogCommentsController 当前 4 条。选定本机验证完成，证据见[7O记录](../refactor/37-phase-7o-direct-reply-moderation.md)；此前各阶段的路由数均是其当时的历史统计。
+
+Phase7N为POST/blog新增可选 `Idempotency-Key` 请求头；同用户/编号/有效创建内容重试返回原ID，不重新创建或投递，变化内容409，无编号路径不变。V012、身份校验、保留和回退边界见[7N记录](../refactor/36-phase-7n-blog-publication-keys.md)；其48/13是7N当时的历史统计。
 
 Phase7M保留POST/blog和48条映射，成功代表动态及投递意图提交，不代表全部关注者已立即收到；V011与后台恢复/发布重试边界见[7M记录](../refactor/35-phase-7m-blog-feed-delivery.md)。
 
 Phase7L修正既有关注Feed的同时间组偏移累计，响应形状与48条映射/13个Controller不变；静态集合、过滤空页及跨页变动边界见[7L记录](../refactor/34-phase-7l-follow-feed-cursor.md)。
 
-Phase 7K 新增作者本人 `DELETE /blog/{id}` 逻辑撤回，当前48条应用映射、13个Controller；可见性、评论/审核保留及不可直接回退旧应用的要求见[7K记录](../refactor/33-phase-7k-post-author-withdrawal.md)。下段7J是目录演进历史。
+Phase 7K 新增作者本人 `DELETE /blog/{id}` 逻辑撤回，7K当时48条应用映射、13个Controller；可见性、评论/审核保留及不可直接回退旧应用的要求见[7K记录](../refactor/33-phase-7k-post-author-withdrawal.md)。下段7J是目录演进历史。
 
-机器清单在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 建立；这是目录初建来源，不表示该提交包含后续路由。参数/响应说明随业务阶段更新：7A 校园动态，7B 一级评论，7C 直接回复，7D/7E 本人回复/一级评论撤回，7F 管理员隐藏一级评论，7G 单条隐藏审计查询，7H 按动态分页读取隐藏审计，7I 纯文字校园动态发布语义，7J 作者编辑（选定本轮实现与验证完成），见[7A](../refactor/23-phase-7a-campus-posts.md)、[7B](../refactor/24-phase-7b-comments.md)、[7C](../refactor/25-phase-7c-comment-replies.md)、[7D](../refactor/26-phase-7d-reply-withdrawal.md)、[7E](../refactor/27-phase-7e-comment-withdrawal.md)、[7F](../refactor/28-phase-7f-comment-moderation.md)、[7G](../refactor/29-phase-7g-comment-audit-query.md)、[7H](../refactor/30-phase-7h-comment-audit-pages.md)、[7I](../refactor/31-phase-7i-text-only-campus-posts.md)和[7J](../refactor/32-phase-7j-post-author-edit.md)。机器清单当前记录 **48 个显式 method/path 映射**（含健康和图片），来自 13 个 Controller。两个 Actuator GET 管理路由另列，不混入应用端数量；原 44 条为 7F 阶段历史基数。
+机器清单的 `source_revision` 在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 初建时人工记录；这是目录来源，不表示该提交包含后续路由，也不随每阶段改写。参数/响应说明随业务阶段更新：7A 校园动态，7B 一级评论，7C 直接回复，7D/7E 本人回复/一级评论撤回，7F 管理员隐藏一级评论，7G 单条隐藏审计查询，7H 按动态分页读取隐藏审计，7I 纯文字校园动态发布语义，7J 作者编辑，7O 管理员隐藏直接回复，见相应阶段记录。机器清单当前记录 **49 个显式 method/path 映射**（含健康和图片），来自 13 个 Controller。两个 Actuator GET 管理路由另列，不混入应用端数量；7F 的44、7G的45、7H的46、7J的47及7N的48都是各阶段历史基数。
 
 - [逐接口目录](endpoints.md)：方法、路径、身份/资源限制、参数、响应与缺失资源语义，链接 Controller、Service 和模型。
 - [机器清单](routes.json)：method/path、Controller、handler 与声明的 `preAuthorize` 原文，用于回归。空字符串仅表示没有该注解，**不代表匿名可访问**；仍受 SecurityConfig 和服务层授权约束。
@@ -77,6 +79,8 @@ Java 8，使用当前已有 Maven 依赖：
 
 7H 门禁明确断言 46 个应用路由、13 个 Controller、原评论 6 条加管理员 3 条；7H 当时的 40 项定向检查及 374 项默认统计通过（默认有 4 项设计跳过）。上述 7G 数字是历史记录，不用于外推 7H。
 
-7J 门禁新增作者编辑映射/guard 检查，实际 5 项目录检查通过，断言 47 个应用路由、13 个 Controller、BlogController 9 条、原评论 6 条及管理员 3 条。83 项定向、398 项默认统计（4 设计跳过）、60 项显式 MySQL IT 和 28 组目标 Compose 的选定范围见 7J 阶段记录；目录一致性本身不是权限/事务运行证据。
+7J 门禁新增作者编辑映射/guard 检查，实际 5 项目录检查通过，断言当时47个应用路由、13个Controller、BlogController 9 条、原评论 6 条及管理员 3 条。83 项定向、398 项默认统计（4 设计跳过）、60 项显式 MySQL IT 和 28 组目标 Compose 的选定范围见 7J 阶段记录；目录一致性本身不是权限/事务运行证据。
 
-它不能自动核验文档中的字段语义、真实角色/归属执行、Service/Mapper 成功路径、数据库状态或管理面暴露；这些仍需源码审查及阶段明确范围内的 HTTP/隔离验收，不能把映射一致等同于 47 个完整端到端接口都已验收。7H 的接口、分页和迁移已在选定本轮范围内实现与验证，真实 MySQL 49 项与目标 Compose 25 组证据见[7H 阶段记录](../refactor/30-phase-7h-comment-audit-pages.md)。6E2 性能原始证据本阶段不重跑/改写。
+7O 新增直接回复隐藏路由后，源码和机器清单为49个应用映射/13个Controller，评论管理 Controller 为4条。目录5项检查通过；本轮134项定向、470项默认统计（4项原设计跳过）、113项显式IT和44组Compose的选定范围见7O记录。最初的404红证据仅证明旧route缺失；整合时补齐旧管理员条数断言、接口表新路由和unit mock读取核验。目录一致性与mock夹具本身仍不是真实数据库行为证据。
+
+它不能自动核验文档中的字段语义、真实角色/归属执行、Service/Mapper 成功路径、数据库状态或管理面暴露；这些仍需源码审查及阶段明确范围内的 HTTP/隔离验收，不能把映射一致等同于49个完整端到端接口都已验收。7H 的接口、分页和迁移已在其选定范围内实现与验证；其真实 MySQL 49 项与目标 Compose 25 组是7H历史证据，不是7O结果。6E2性能原始证据本阶段不重跑/改写。

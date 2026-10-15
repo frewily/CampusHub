@@ -815,6 +815,174 @@ def verify_first_level_moderation(base, tokens):
     check("root hide NULL/zero floor and status/counter/audit/zero-row faults atomically preserve original content, descendants and count")
 
 
+def verify_direct_reply_moderation(base):
+    """Own synthetic actors/posts; verify reply-only ADMIN writes and retained root-only read APIs."""
+    actors = ((900110, 'USER'), (900111, 'MERCHANT'), (900112, 'ADMIN'),
+              (900113, 'ADMIN'), (900114, 'ADMIN'), (900115, None))
+    headers = {}
+    for user_id, role in actors:
+        sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(%d,'%011d','synthetic-reply-moderation');" %
+            (user_id, user_id))
+        if role:
+            sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (user_id, role))
+        token = 'synthetic-reply-hide-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[user_id] = {'authorization': token, 'Content-Type': 'application/json'}
+    sql("UPDATE tb_user SET status='DISABLED' WHERE id=900114;")
+    author, admin = headers[900110], headers[900112]
+    payload = b'{"reason":"retained first reply reason","operatorUserId":900110,"status":3,"blogId":99,"rootCommentId":1}'
+
+    def post():
+        body, _ = request(base, '/blog', 200, 'POST',
+                          b'{"title":"synthetic reply moderation","content":"retained post"}', author)
+        return int(json.loads(body)['data'])
+
+    def root(blog):
+        body, _ = request(base, '/blog-comments', 200, 'POST',
+                          json.dumps({'blogId': str(blog), 'content': 'retained root'}).encode(), author)
+        return json.loads(body)['data']['id']
+
+    def reply(parent, actor=author):
+        body, _ = request(base, '/blog-comments/' + parent + '/replies', 200, 'POST',
+                          b'{"content":"retained reply"}', actor)
+        return json.loads(body)['data']['id']
+
+    def route(target):
+        return '/admin/blog-comments/replies/' + str(target) + '/hide'
+
+    def count(blog):
+        return sql('SELECT comments FROM tb_blog WHERE id=%d;' % blog)
+
+    def retained(target):
+        return sql("SELECT CONCAT_WS('|',id,user_id,blog_id,parent_id,answer_id,content,liked,create_time) "
+                   "FROM tb_blog_comments WHERE id=%s;" % target)
+
+    blog = post()
+    parent = root(blog)
+    target, sibling = reply(parent), reply(parent, headers[900111])
+    assert int(target) > 9007199254740992, 'retain existing large-ID acceptance boundary'
+    before = {row: retained(row) for row in (parent, target, sibling)}
+    counter = int(count(blog))
+    request(base, route(target), 401, 'POST', payload, {'Content-Type': 'application/json'})
+    for user_id in (900110, 900111):
+        request(base, route(target), 403, 'POST', payload, headers[user_id])
+    for user_id in (900114, 900115):
+        request(base, route(target), 401, 'POST', payload, headers[user_id])
+    for invalid in ('0', '-1', 'bad', '9223372036854775808'):
+        request(base, route(invalid), 400, 'POST', payload, admin)
+    for body in (b'{', b'null', b'{}', b'{"reason":null}', b'{"reason":" "}',
+                 json.dumps({'reason': 'x' * 256}).encode(),
+                 json.dumps({'reason': '\U0001f600' * 128}).encode()):
+        request(base, route(target), 400, 'POST', body, admin)
+    assert count(blog) == str(counter)
+    for actor, body in ((admin, payload), (headers[900113], b'{"reason":"later admin reason"}')):
+        response, _ = request(base, route(target), 200, 'POST', body, actor)
+        assert json.loads(response) == {'success': True}
+    assert count(blog) == str(counter - 1)
+    assert sql('SELECT status FROM tb_blog_comments WHERE id=%s;' % target) == '2'
+    assert sql('SELECT COUNT(*) FROM tb_blog_comments WHERE id IN (%s,%s) AND status=0;' % (parent, sibling)) == '2'
+    assert all(retained(row) == value for row, value in before.items())
+    audit = sql("SELECT CONCAT(operator_user_id,':',reason,':',from_status,':',to_status,':',root_comment_id) "
+                "FROM tb_blog_reply_hide_audit WHERE reply_id=%s AND blog_id=%d AND create_time IS NOT NULL;" % (target, blog))
+    assert audit == '900112:retained first reply reason:0:2:' + parent
+    sql((ROOT / 'src/main/resources/db/migration/V013__add_blog_reply_hide_audit.sql').read_text('utf-8'))
+    assert sql('SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE reply_id=%s;' % target) == '1'
+    page, _ = request(base, '/blog-comments/' + parent + '/replies?size=50', headers=author)
+    assert [item['id'] for item in json.loads(page)['data']['items']] == [sibling]
+    request(base, '/blog-comments/replies/' + target, 404, 'DELETE', headers=author)
+    request(base, '/admin/blog-comments/' + target + '/hide-audit', 404, headers=admin)
+    page, _ = request(base, '/admin/blog-comments/hide-audits/of/blog/%d' % blog, headers=admin)
+    assert json.loads(page)['data'] == {'items': [], 'hasNext': False}
+    own = reply(parent, admin)
+    request(base, route(own), 200, 'POST', json.dumps({'reason': 'x' * 255}).encode(), admin)
+    assert sql('SELECT CHAR_LENGTH(reason) FROM tb_blog_reply_hide_audit WHERE reply_id=%s;' % own) == '255'
+    check('ADMIN reply hide: real roles/identity, large IDs, reason/forged-field boundaries, first receipt wins, exact one decrement and root-only audit reads')
+
+    # Import malformed legacy rows without changing counters, then prove the new use case leaves them untouched.
+    other_blog = post()
+    other_root = root(other_blog)
+    missing = 9223372036854775000
+    rejected = [(1, parent, parent, blog), (2, parent, parent, blog),
+                (3, parent, parent, blog), ('NULL', parent, parent, blog),
+                (0, parent, 0, blog), (0, 0, parent, blog),
+                (0, sibling, sibling, blog), (0, missing, missing, blog),
+                (0, other_root, other_root, blog), (0, parent, parent, missing)]
+    for state, parent_id, answer_id, owner_blog in rejected:
+        excluded = sql("INSERT INTO tb_blog_comments(user_id,blog_id,parent_id,answer_id,content,status) "
+                       "VALUES(900110,%s,%s,%s,'synthetic excluded reply hide',%s); SELECT LAST_INSERT_ID();" %
+                       (owner_blog, parent_id, answer_id, state))
+        snapshot = sql('SELECT * FROM tb_blog_comments WHERE id=%s;' % excluded)
+        initial_count = count(blog)
+        request(base, route(excluded), 404, 'POST', payload, admin)
+        assert sql('SELECT * FROM tb_blog_comments WHERE id=%s;' % excluded) == snapshot
+        assert count(blog) == initial_count
+        assert sql('SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE reply_id=%s;' % excluded) == '0'
+    for excluded in (parent, missing):
+        request(base, route(excluded), 404, 'POST', payload, admin)
+    for boundary in ('hidden-root', 'withdrawn-root', 'withdrawn-post'):
+        owned_blog = post()
+        owned_root = root(owned_blog)
+        child = reply(owned_root)
+        if boundary == 'hidden-root':
+            request(base, '/admin/blog-comments/' + owned_root + '/hide', 200, 'POST', payload, admin)
+        elif boundary == 'withdrawn-root':
+            request(base, '/blog-comments/' + owned_root, 200, 'DELETE', headers=author)
+        else:
+            request(base, '/blog/%d' % owned_blog, 200, 'DELETE', headers=author)
+        previous = int(count(owned_blog))
+        request(base, route(child), 200, 'POST', payload, admin)
+        request(base, route(child), 200, 'POST', payload, headers[900113])
+        assert count(owned_blog) == str(previous - 1)
+        assert sql('SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE reply_id=%s;' % child) == '1'
+    for legacy in ('NULL', '0', '1', '7'):
+        owned_blog = post()
+        child = reply(root(owned_blog))
+        sql('UPDATE tb_blog SET comments=%s WHERE id=%d;' % (legacy, owned_blog))
+        for _ in range(2):
+            request(base, route(child), 200, 'POST', payload, admin)
+        assert count(owned_blog) == str(max(0, int(legacy if legacy != 'NULL' else '0') - 1))
+    check('Reply moderation: malformed/legacy/orphan/cross-post rows remain unchanged; hidden/withdrawn roots and posts remain moderatable; NULL/0/1/7 counter floors')
+
+    owned_blog = post()
+    owned_root = root(owned_blog)
+    child, sibling = reply(owned_root), reply(owned_root)
+    before = {row: sql('SELECT * FROM tb_blog_comments WHERE id=%s;' % row)
+              for row in (owned_root, child, sibling)}
+    child_metadata = retained(child)
+    for name, definition, expected, code in (
+            ('synthetic_reply_hide_status', 'BEFORE UPDATE ON tb_blog_comments FOR EACH ROW '
+             "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private reply status'", 500, 'INTERNAL_ERROR'),
+            ('synthetic_reply_hide_counter', 'BEFORE UPDATE ON tb_blog FOR EACH ROW '
+             "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private reply counter'", 500, 'INTERNAL_ERROR'),
+            ('synthetic_reply_hide_audit', 'BEFORE INSERT ON tb_blog_reply_hide_audit FOR EACH ROW '
+             "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private reply audit'", 500, 'INTERNAL_ERROR'),
+            ('synthetic_reply_hide_zero', 'BEFORE UPDATE ON tb_blog_comments FOR EACH ROW '
+             'DELETE FROM tb_blog WHERE id=NEW.blog_id', 422, 'OPERATION_FAILED')):
+        sql('CREATE TRIGGER ' + name + ' ' + definition + ';')
+        try:
+            result, _ = request(base, route(child), expected, 'POST', payload, admin)
+            result = json.loads(result)
+            assert result['success'] is False and result['errorCode'] == code
+            assert 'synthetic private' not in json.dumps(result)
+            assert count(owned_blog) == '3'
+            assert all(sql('SELECT * FROM tb_blog_comments WHERE id=%s;' % row) == value
+                       for row, value in before.items())
+            assert sql('SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE reply_id=%s;' % child) == '0'
+        finally:
+            sql('DROP TRIGGER ' + name + ';')
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(request, base, route(child), 200, 'POST', payload, admin) for _ in range(4)]
+        assert all(json.loads(future.result(timeout=20)[0]) == {'success': True} for future in futures)
+    assert count(owned_blog) == '2'
+    assert sql('SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE reply_id=%s;' % child) == '1'
+    assert retained(child) == child_metadata
+    assert sql('SELECT status FROM tb_blog_comments WHERE id=%s;' % child) == '2'
+    assert sql('SELECT * FROM tb_blog_comments WHERE id=%s;' % owned_root) == before[owned_root]
+    assert sql('SELECT * FROM tb_blog_comments WHERE id=%s;' % sibling) == before[sibling]
+    check('Reply hide real status/counter/audit SQL errors and zero-row 422 roll back all state; four concurrent HTTP retries commit one hide and receipt')
+
+
 def verify_comment_hide_audit_query(base, tokens):
     """Single-record metadata query, role isolation and retained-record semantics on target MySQL."""
     blog_id, root_id, operator_id, audit_id = (9007199254745001, 9007199254745003,
@@ -1645,7 +1813,10 @@ def main():
                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog_feed_delivery' AND INDEX_NAME='PRIMARY';") == 'blog_id,recipient_user_id'
         assert sql("SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM INFORMATION_SCHEMA.STATISTICS "
                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog_publication_request' AND INDEX_NAME='PRIMARY';") == 'user_id,request_key'
-        check("V001-V012 repeat, nullable post store, withdrawn flag, Feed delivery/receipt tables, comment/hide audit cursor indexes, populated-database bootstrap refusal")
+        assert sql("SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM INFORMATION_SCHEMA.STATISTICS "
+                   "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tb_blog_reply_hide_audit' "
+                   "AND INDEX_NAME='uk_blog_reply_hide_audit_reply' AND NON_UNIQUE=0;") == 'reply_id'
+        check("V001-V013 repeat, nullable post store, withdrawn flag, Feed delivery/receipt tables, root/reply hide audit keys, populated-database bootstrap refusal")
         sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(900001,'00000000001','synthetic-user'),(900002,'00000000002','synthetic-admin');"
             "INSERT INTO tb_user_role(user_id,role) VALUES(900001,'USER'),(900002,'ADMIN');")
         tokens = ["synthetic-phase5-" + uuid.uuid4().hex for _ in range(2)]
@@ -1659,6 +1830,7 @@ def main():
         verify_reply_withdrawal(base, tokens)
         verify_first_level_withdrawal(base, tokens)
         verify_first_level_moderation(base, tokens)
+        verify_direct_reply_moderation(base)
         verify_comment_hide_audit_query(base, tokens)
         verify_comment_hide_audit_pages(base, tokens)
         verify_post_author_edit(base, tokens)

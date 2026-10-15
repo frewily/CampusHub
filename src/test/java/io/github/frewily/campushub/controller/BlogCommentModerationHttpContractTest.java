@@ -70,6 +70,25 @@ class BlogCommentModerationHttpContractTest {
     }
 
     @Test
+    void adminDirectReplyHideHasItsOwnEndpoint() throws Exception {
+        prepareSession("reply-admin", "ACTIVE", "ADMIN");
+        String reason = repeatedText('m', 255);
+        mockMvc.perform(post(BASE + "replies/" + LARGE_ID + "/hide")
+                        .header("authorization", "reply-admin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"" + reason + "\",\"replyId\":4,\"status\":\"VISIBLE\","
+                                + "\"operatorId\":8,\"extra\":true}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        assertNull(UserHolder.getUser(), "request filter must clear the thread-local user after the request");
+
+        org.mockito.ArgumentCaptor<BlogCommentHideRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(BlogCommentHideRequest.class);
+        verify(commentsService).hideReply(eq(9007199254740993L), captor.capture());
+        assertEquals(reason, captor.getValue().getReason());
+    }
+
+    @Test
     void adminCanHideLargeIdWithMaximumReasonAndOnlyReasonIsBound() throws Exception {
         prepareSession("admin-token", "ACTIVE", "ADMIN");
         String reason = repeatedText('r', 255);
@@ -109,14 +128,43 @@ class BlogCommentModerationHttpContractTest {
     }
 
     @Test
+    void anonymousAndNonAdminUsersCannotHideDirectReplies() throws Exception {
+        mockMvc.perform(post(BASE + "replies/1/hide").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"moderation\"}"))
+                .andExpect(status().isUnauthorized());
+
+        prepareSession("reply-user-token", "ACTIVE", "USER");
+        mockMvc.perform(post(BASE + "replies/1/hide").header("authorization", "reply-user-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"moderation\"}"))
+                .andExpect(status().isForbidden());
+
+        prepareSession("reply-merchant-token", "ACTIVE", "MERCHANT");
+        mockMvc.perform(post(BASE + "replies/1/hide").header("authorization", "reply-merchant-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"moderation\"}"))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(commentsService);
+    }
+
+    @Test
     void disabledAccountAndUnknownRoleAreRejectedAsUnauthorized() throws Exception {
         prepareSession("disabled-token", "DISABLED", "ADMIN");
         mockMvc.perform(post(BASE + "1/hide").header("authorization", "disabled-token")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"moderation\"}"))
                 .andExpect(status().isUnauthorized());
 
+        prepareSession("disabled-reply-token", "DISABLED", "ADMIN");
+        mockMvc.perform(post(BASE + "replies/1/hide").header("authorization", "disabled-reply-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"moderation\"}"))
+                .andExpect(status().isUnauthorized());
+
         prepareSession("unknown-role-token", "ACTIVE", "AUDITOR");
         mockMvc.perform(post(BASE + "1/hide").header("authorization", "unknown-role-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"moderation\"}"))
+                .andExpect(status().isUnauthorized());
+
+        prepareSession("unknown-reply-role-token", "ACTIVE", "AUDITOR");
+        mockMvc.perform(post(BASE + "replies/1/hide").header("authorization", "unknown-reply-role-token")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"moderation\"}"))
                 .andExpect(status().isUnauthorized());
 
@@ -130,12 +178,20 @@ class BlogCommentModerationHttpContractTest {
             mockMvc.perform(post(BASE + id + "/hide").header("authorization", "admin-token")
                             .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"moderation\"}"))
                     .andExpect(status().isBadRequest());
+
+            mockMvc.perform(post(BASE + "replies/" + id + "/hide").header("authorization", "admin-token")
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"moderation\"}"))
+                    .andExpect(status().isBadRequest());
         }
 
         String tooLong = repeatedText('x', 256);
         for (String body : new String[]{"{", "null", "{}", "{\"reason\":null}",
                 "{\"reason\":\" \"}", "{\"reason\":\"" + tooLong + "\"}"}) {
             mockMvc.perform(post(BASE + "1/hide").header("authorization", "admin-token")
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest());
+
+            mockMvc.perform(post(BASE + "replies/1/hide").header("authorization", "admin-token")
                             .contentType(MediaType.APPLICATION_JSON).content(body))
                     .andExpect(status().isBadRequest());
         }
@@ -152,6 +208,13 @@ class BlogCommentModerationHttpContractTest {
         org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.INTERNAL_ERROR))
                 .when(commentsService).hideComment(eq(43L), any(BlogCommentHideRequest.class));
 
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.NOT_FOUND))
+                .when(commentsService).hideReply(eq(51L), any(BlogCommentHideRequest.class));
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.OPERATION_FAILED))
+                .when(commentsService).hideReply(eq(52L), any(BlogCommentHideRequest.class));
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.INTERNAL_ERROR))
+                .when(commentsService).hideReply(eq(53L), any(BlogCommentHideRequest.class));
+
         for (String[] testCase : new String[][]{{"41", "404", "NOT_FOUND"},
                 {"42", "422", "OPERATION_FAILED"}, {"43", "500", "INTERNAL_ERROR"}}) {
             mockMvc.perform(post(BASE + testCase[0] + "/hide").header("authorization", "admin-token")
@@ -161,9 +224,22 @@ class BlogCommentModerationHttpContractTest {
                     .andExpect(content().string(not(containsString("java.lang"))));
         }
 
+        for (String[] testCase : new String[][]{{"51", "404", "NOT_FOUND"},
+                {"52", "422", "OPERATION_FAILED"}, {"53", "500", "INTERNAL_ERROR"}}) {
+            mockMvc.perform(post(BASE + "replies/" + testCase[0] + "/hide")
+                            .header("authorization", "admin-token")
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"moderation\"}"))
+                    .andExpect(status().is(Integer.parseInt(testCase[1])))
+                    .andExpect(jsonPath("$.errorCode").value(testCase[2]))
+                    .andExpect(content().string(not(containsString("java.lang"))));
+        }
+
         verify(commentsService).hideComment(eq(41L), any(BlogCommentHideRequest.class));
         verify(commentsService).hideComment(eq(42L), any(BlogCommentHideRequest.class));
         verify(commentsService).hideComment(eq(43L), any(BlogCommentHideRequest.class));
+        verify(commentsService).hideReply(eq(51L), any(BlogCommentHideRequest.class));
+        verify(commentsService).hideReply(eq(52L), any(BlogCommentHideRequest.class));
+        verify(commentsService).hideReply(eq(53L), any(BlogCommentHideRequest.class));
         org.mockito.Mockito.verifyNoMoreInteractions(commentsService);
     }
 

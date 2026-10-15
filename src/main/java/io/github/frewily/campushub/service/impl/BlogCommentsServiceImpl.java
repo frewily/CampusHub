@@ -21,6 +21,7 @@ import io.github.frewily.campushub.utils.UserHolder;
 import org.springframework.dao.DataAccessException;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import javax.validation.Validator;
 import java.util.ArrayList;
 import java.util.List;
@@ -234,6 +235,51 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
             BlogCommentHideAuditResponse audit = baseMapper.findFirstLevelHideAuditDetails(commentId);
             if (audit == null) throw new BusinessException(ErrorCode.NOT_FOUND);
             return audit;
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void hideReply(Long replyId, BlogCommentHideRequest request) {
+        validateCommentId(replyId);
+        validate(request);
+        UserDTO operator = UserHolder.getUser();
+        if (operator == null || operator.getId() == null || operator.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        // Do not leave status/counter/audit half-written when an internal caller bypasses transaction AOP.
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()
+                || TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+            throw new IllegalStateException("Reply moderation requires an active writable transaction");
+        }
+        try {
+            BlogComments candidate = baseMapper.findModeratableDirectReply(replyId);
+            if (candidate == null || baseMapper.lockBlog(candidate.getBlogId()) == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND);
+            }
+            Long rootId = candidate.getParentId();
+            // One writer order: post, canonical root, target reply. Parent visibility does not erase moderation.
+            if (baseMapper.lockDirectReplyRoot(rootId, candidate.getBlogId()) == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND);
+            }
+            BlogComments current = baseMapper.lockModeratableDirectReply(replyId, candidate.getBlogId(), rootId);
+            if (current == null) throw new BusinessException(ErrorCode.NOT_FOUND);
+            if (Integer.valueOf(2).equals(current.getStatus())) {
+                // A legacy hidden status alone is not proof this action already completed.
+                if (baseMapper.findDirectReplyHideAudit(replyId, candidate.getBlogId(), rootId) == null) {
+                    throw new BusinessException(ErrorCode.NOT_FOUND);
+                }
+                return;
+            }
+            if (baseMapper.hideDirectReply(replyId, candidate.getBlogId(), rootId) != 1
+                    || baseMapper.decrementCommentCount(candidate.getBlogId()) != 1
+                    || baseMapper.insertDirectReplyHideAudit(replyId, candidate.getBlogId(), rootId,
+                            operator.getId(), request.getReason()) != 1) {
+                throw new BusinessException(ErrorCode.OPERATION_FAILED);
+            }
         } catch (DataAccessException error) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }

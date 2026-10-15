@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 48 条，来自 13 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。评论相关路由为原 6 条评论/回复/撤回，加 3 条 ADMIN 隐藏和审计路由。7B 增加一级评论，7C 增加直接回复，7D/7E 分别增加本人直接回复/一级评论撤回，7F 增加管理员一级评论隐藏，7G 单条审计查询，7H 按动态分页查询；7I 调整既有 POST /blog 的条件字段语义；7J 增加作者编辑路由，实现与选定本轮验证完成，边界见 7J 阶段记录。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共 49 条，来自 13 个 Controller。方法和路径按类级 `@RequestMapping` 与方法级映射合并；未把 Spring 自动支持的 HEAD/OPTIONS、框架 `/error` 或 Actuator 管理端计入。评论相关路由为原 6 条评论/回复/撤回，加 4 条 ADMIN 隐藏和审计路由。7B 增加一级评论，7C 增加直接回复，7D/7E 分别增加本人直接回复/一级评论撤回，7F 增加管理员一级评论隐藏，7G 单条审计查询，7H 按动态分页查询；7I 调整既有 POST /blog 的条件字段语义；7J 增加作者编辑路由；7O 增加直接回复隐藏路由，选定本机验证已完成。
 
 ## 通用约定
 
@@ -100,7 +100,7 @@ Controller：[BlogCommentsController.java](../../src/main/java/io/github/frewily
 
 | DELETE | `/blog-comments/{commentId}` | [`withdrawComment`](../../src/main/java/io/github/frewily/campushub/controller/BlogCommentsController.java)；需认证；允许 USER、MERCHANT、ADMIN，但均仅可操作本人一级评论，没有商户/管理员覆盖权限 | Path commentId 为 Java Long 正数；无 body。目标须作者匹配、parentId=answerId=0、状态为 0 或 3，所属动态存在；直接回复不能用此入口撤回 | HTTP 200、`{"success":true}`，无 data。0→3 与动态 comments 递减同事务，NULL/0 下限 0；3 重复不写入/扣计数。仅根评论减一，保留原文及所有回复行/状态；随后新请求的回复读取/创建为 404，回复作者仍可用上述回复撤回入口。非本人（含已撤回）、关系/状态不符、目标/动态缺失均 404；参数 400、无效会话 401、SQL 异常通用 500、影响行数异常 422 |
 
-作者撤回使用状态 3，管理员隐藏使用状态 2，均只扣目标根一次，保留回复行/状态及其作者独立撤回入口；comments 不保证等于当前可见数量。并发中的只读快照可读到变更前数据；提交后开始的新请求不返回撤回/隐藏根及其回复列表。7C–7E 没有新结构迁移，7F 增加 V008 审核记录表，须在升级前具备 V006–V008。不支持多级回复、级联/物理删除、恢复、回复审核、通知、创建请求幂等键或历史计数回填。说明见[7E 记录](../refactor/27-phase-7e-comment-withdrawal.md)、[一级评论撤回笔记](../learning/first-level-comment-withdrawal.md)、[回复撤回笔记](../learning/direct-reply-withdrawal.md)、[一级评论笔记](../learning/first-level-comments-and-cursors.md)和[直接回复笔记](../learning/direct-comment-replies.md)。
+作者撤回使用状态 3，管理员隐藏使用状态 2，均只扣目标对象一次，保留原文和关系；comments 是维护的派生计数，不保证等于当前可见数量。并发中的只读快照可读到变更前数据。7C–7E 没有新结构迁移，7F 增加 V008 根评论审计表；7O 增加 V013 直接回复审计表。当前不支持多级回复、级联/物理删除、恢复、举报工作流、通知、创建请求幂等键或历史计数回填。说明见[7E 记录](../refactor/27-phase-7e-comment-withdrawal.md)、[7O 记录](../refactor/37-phase-7o-direct-reply-moderation.md)、[一级评论撤回笔记](../learning/first-level-comment-withdrawal.md)、[回复撤回笔记](../learning/direct-reply-withdrawal.md)、[一级评论笔记](../learning/first-level-comments-and-cursors.md)和[直接回复笔记](../learning/direct-comment-replies.md)。
 
 ## 一级评论管理员隐藏（Phase 7F，业务应用端）
 
@@ -111,6 +111,20 @@ Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/fr
 | POST | `/admin/blog-comments/{commentId}/hide` | [`hideComment`](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；需认证；方法 guard 为 `hasRole('ADMIN')`，可隐藏他人或本人正常一级评论，USER/MERCHANT 即使是作者也不允许 | Path commentId 为 Java Long 正数；JSON reason 非空白且最多 255 个 Java 字符单元，未知字段忽略。动态存在、parentId=answerId=0、状态 0；已隐藏 2 仅有同动态 0→2 审核记录时允许重复成功 | HTTP 200、`{"success":true}`，无 data。0→2、comments 减一（NULL/0 下限 0）、首次 operator/reason/from/to/时间审核记录同事务；保留原文和回复。重复不扣数、不改首次记录；未审计的旧 2、1/3/NULL、回复、关系不符或目标/动态缺失 404。参数 400、无效会话 401、非管理员 403、数据库异常通用 500、影响行数异常 422 |
 
 先锁动态，再当前读锁根和重复分支的审核记录，避免旧 RR 快照误判并发重复。首次成功原因不可覆盖，审核记录不会由本用例更新/删除；不承诺防数据库管理员篡改。根隐藏后新请求回复列表/创建为 404，回复作者仍可独立撤回；根作者不能把隐藏改成作者撤回。作者撤回先完成则管理员隐藏为 404。7F 本身没有审核读取接口，7G 的单条查询与 7H 的按动态分页见后续两节；仍未提供全局审核列表、恢复、举报工作流或完整管理后台，见[7F 记录](../refactor/28-phase-7f-comment-moderation.md)和[审核笔记](../learning/first-level-comment-moderation.md)。
+
+## 直接回复管理员隐藏（Phase 7O，业务应用端）
+
+源码与选定本机验证已完成，最终提交与同步状态以交付对话为准。HTTP mock的初始404仅证明当时路由缺失；真实MySQL与Compose证据、完整边界见[7O阶段记录](../refactor/37-phase-7o-direct-reply-moderation.md)及[学习笔记](../learning/direct-reply-moderation.md)。
+
+Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；请求复用：[BlogCommentHideRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentHideRequest.java)；独立审计迁移：[V013](../../src/main/resources/db/migration/V013__add_blog_reply_hide_audit.sql)。该审计表不并入 V008 根评论审计读取接口。
+
+| Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
+|---|---|---|---|---|
+| POST | `/admin/blog-comments/replies/{replyId}/hide` | [`hideReply`](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；需认证；`hasRole('ADMIN')` | Path `replyId` 为正 Java Long；JSON 复用隐藏请求，仅 `reason` 生效，非空白且最多255个Java UTF-16单元；操作人来自会话 | HTTP 200、`{"success":true}`，无 data。合法直接回复从0→2，动态comments按零下限减一，并写一条V013审计，在同一事务完成。有效重复仅凭匹配的V013用途审计返回200，不覆盖首次操作者/原因、不再扣数；没有匹配审计的旧status=2返回404。参数错误400、未认证401、非ADMIN 403、目标/动态缺失或关系/状态非法404、写入行数不符422、数据访问异常通用500 |
+
+候选查询后依次锁动态、同动态规范根评论、目标直接回复，并用锁定当前读复核；父根是否隐藏或撤回不阻止本操作。仅接受 `parent_id>0`、`answer_id=parent_id` 且状态0/2的直接回复，不接受多级关系。隐藏/撤回的根以及已撤回的动态下，只要动态、规范根与目标回复仍存在且回复自身状态/关系合法，仍可隐藏。回复正文、liked、关系、根和兄弟回复保留，不级联改状态；动态 `comments` 是写入维护的派生数，不等于“当前可见评论数”。
+
+隐藏后的status=2回复不能被作者撤回。V013 使用 `UNIQUE(reply_id)` 独立记录 reply/blog/root/operator/reason/from/to/time；旧V008单条/分页根评论读取不混入回复审计，本阶段不增加审计读取路由。全新库顺序为V001…V013；已有库先备份、核对结构并审查V013再升级。`CREATE TABLE IF NOT EXISTS`不修复同名错表，不回填旧隐藏记录；回退不删除审计、不恢复状态或计数。选定本机验证已完成，证据见7O阶段记录。
 
 ## 单条隐藏审计查询（Phase 7G 文档契约）
 

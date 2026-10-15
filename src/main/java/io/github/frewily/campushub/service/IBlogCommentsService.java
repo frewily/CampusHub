@@ -27,6 +27,8 @@ public interface IBlogCommentsService extends IService<BlogComments> {
 
     void hideComment(Long commentId, BlogCommentHideRequest request);
 
+    void hideReply(Long replyId, BlogCommentHideRequest request);
+
     BlogCommentHideAuditResponse queryHideAudit(Long commentId);
 
     BlogCommentHideAuditPage listHideAudits(Long blogId, BlogCommentHideAuditPageRequest request);

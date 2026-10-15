@@ -2,6 +2,8 @@
 
 Phase7N增加[发布请求账本](refactor/36-phase-7n-blog-publication-keys.md)：V012以当前用户/可选请求编号记录有效创建请求摘要与原成功ID，与动态/Feed意图同事务。账本不是正文历史或当前可见性，保留成功编号，不随撤回删除；无编号创建仍可能重复，不代表全部写接口都幂等。
 
+Phase 7O 增加[ADMIN 隐藏直接回复](refactor/37-phase-7o-direct-reply-moderation.md)：合法直接回复0→2、动态comments减一和独立V013审计同事务；根隐藏/撤回不阻止管理该回复。选定本机验证已完成。
+
 Phase7M增加[动态Feed投递意图](refactor/35-phase-7m-blog-feed-delivery.md)：V011按post/recipient记录本次DB关注快照及固定score，与动态同事务；后台确认前保留，确认后删除。它不是永久投递历史、全Feed重建或读消息状态，不改变既有Post/Follow生命周期；以下Phase1A的“应可重建”仍是目标，不是本阶段已实现事实。
 
 Phase 7K 状态：[作者本人动态逻辑撤回](refactor/33-phase-7k-post-author-withdrawal.md)新增V010 `withdrawn`标记，保留原文/关联/评论/计数/审计和Redis；详情、互动新增与公开列表尊重可见性。无物理删除、恢复或动态审核；旧应用不可直接回退。以下Phase1A及各阶段段落是设计/演进历史。
@@ -10,7 +12,7 @@ Phase 7K 状态：[作者本人动态逻辑撤回](refactor/33-phase-7k-post-aut
 
 本文定义 CampusHub 从点评教学项目演进为校园生活与商户服务平台时采用的统一业务语言、实体关系、核心规则、权限边界和旧数据映射。它是 Phase 1A 的设计结论，不在本阶段修改 Java 类、数据库表、接口或运行行为。
 
-后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog）。Phase 7B 已按[阶段记录](refactor/24-phase-7b-comments.md)落地一级评论（V007），Phase 7C 增加[一层直接回复](refactor/25-phase-7c-comment-replies.md)，7D/7E 增加作者本人逻辑撤回，7F 增加[ADMIN 隐藏一级评论及审计](refactor/28-phase-7f-comment-moderation.md)（V008），7G 单条读取，7H 按动态分页读取（V009）；7H 实现与选定本轮验证完成。Phase 7I 已实现 POST /blog 对无关联门店纯文字动态的 images 归一化语义，不新增结构；选定本轮验证完成，见[阶段记录](refactor/31-phase-7i-text-only-campus-posts.md)。Phase 7J 已实现既有动态的作者本人完整替换编辑：仅允许 USER/MERCHANT/ADMIN 编辑本人动态，ADMIN 不覆盖作者限制；门店关联保持存量值不变，不新增结构，状态见[阶段记录](refactor/32-phase-7j-post-author-edit.md)。仍未实现多级回复、恢复、回复审核、举报工作流、通知、点赞持久化和完整管理后台。
+后续状态：本文保留 Phase 1A 历史设计；Phase 7A 已按[阶段记录](refactor/23-phase-7a-campus-posts.md)落地普通动态的可选门店关联（V006 + POST /blog）。Phase 7B 已按[阶段记录](refactor/24-phase-7b-comments.md)落地一级评论（V007），Phase 7C 增加[一层直接回复](refactor/25-phase-7c-comment-replies.md)，7D/7E 增加作者本人逻辑撤回，7F 增加[ADMIN 隐藏一级评论及审计](refactor/28-phase-7f-comment-moderation.md)（V008），7G 单条读取，7H 按动态分页读取（V009）；7H 实现与选定本轮验证完成。Phase 7I 已实现 POST /blog 对无关联门店纯文字动态的 images 归一化语义，不新增结构；选定本轮验证完成，见[阶段记录](refactor/31-phase-7i-text-only-campus-posts.md)。Phase 7J 已实现既有动态的作者本人完整替换编辑：仅允许 USER/MERCHANT/ADMIN 编辑本人动态，ADMIN 不覆盖作者限制；门店关联保持存量值不变，不新增结构，状态见[阶段记录](refactor/32-phase-7j-post-author-edit.md)。Phase 7O 已实现 ADMIN 隐藏合法直接回复并以 V013 独立记审计；本阶段选定本机验证已完成。当前仍未实现多级回复、恢复、举报工作流、通知、点赞持久化和完整管理后台。
 
 CampusHub 继续采用模块化单体。第一版按单校园场景设计，不引入多租户或 `Campus` 表；当系统出现跨校数据隔离、不同校区运营或独立管理员等真实需求时，再增加校园维度。当前重点是把“账号、商户主体、门店、内容、活动和订单”分清，而不是机械替换 `Shop`、`Blog`、`Voucher` 等名称。
 
@@ -35,7 +37,7 @@ CampusHub 继续采用模块化单体。第一版按单校园场景设计，不�
 | Store | 用户可浏览、搜索和到店消费的门店 | `Shop`、`tb_shop` | 先保持表和接口兼容，Phase 1C 再迁移代码身份 |
 | StoreCategory | 门店分类 | `ShopType`、`tb_shop_type` | 保留语义，后续改名 |
 | Post | 校园动态或与门店关联的内容 | `Blog`、`tb_blog` | 先修 Feed，再迁移名称与请求响应边界 |
-| Comment | 对动态的一级评论及一层直接回复 | `BlogComments`、`tb_blog_comments` | 7B/7C 创建和可见列表读取，7D/7E 作者本人逻辑撤回，7F ADMIN 隐藏一级评论并记审计；多级回复/级联或物理删除/恢复/回复审核与举报工作流待后续设计 |
+| Comment | 对动态的一级评论及一层直接回复 | `BlogComments`、`tb_blog_comments`；根隐藏审计 `tb_blog_comment_hide_audit`，回复隐藏审计 `tb_blog_reply_hide_audit` | 7B/7C 创建和可见列表读取，7D/7E 作者本人逻辑撤回，7F ADMIN 隐藏一级评论并记根审计，7O ADMIN 隐藏直接回复并记独立审计；多级回复/级联或物理删除/恢复/举报工作流待后续设计 |
 | Follow | 用户对用户的关注关系 | `Follow`、`tb_follow` | MySQL 为事实来源，Redis 仅加速 |
 | PostLike | 用户对动态的点赞关系 | Redis ZSet 和 `tb_blog.liked` 计数 | 后续增加持久化关系，计数作为派生值 |
 | FeedEntry | 用户 Feed 收件箱中的动态投影 | Redis ZSet | 不是独立业务事实，可由关注与动态重建 |
@@ -97,7 +99,7 @@ Store 保存名称、分类、图片、地址、坐标、营业时间和展示�
 
 7B 的一级评论写入 `parent_id=answer_id=0`；7C 的直接回复只接受正常一级评论为目标，blog_id 从根评论派生，parent_id=answer_id=根评论 ID，作者来自会话，liked/status=0。两类列表独立按 ID 倒序游标查询，回复不混入一级列表。写回复先锁动态后锁根评论，当前读复核根状态；不实现多级回复，不将旧字段直接视为完整业务能力。
 
-7D 的 `DELETE /blog-comments/replies/{replyId}` 是本人直接回复逻辑撤回：所有角色均只可操作本人符合 parent_id>0、answer_id=parent_id 的 0/3 状态行，要求动态存在，不要求父评论仍存在/可见（包括本人符合格式的旧孤立回复）。先锁动态，再当前读锁回复并复核归属/关系/状态；0→3 和计数递减同事务，3 重复不扣计数。保留原文，无物理删除、恢复或回复审核。NULL/0 计数下限为 0，不回填历史，不保证聚合等于可见数。规则及回退限制见[回复撤回笔记](learning/direct-reply-withdrawal.md)。
+7D 的 `DELETE /blog-comments/replies/{replyId}` 是本人直接回复逻辑撤回：所有角色均只可操作本人符合 parent_id>0、answer_id=parent_id 的 0/3 状态行，要求动态存在，不要求父评论仍存在/可见（包括本人符合格式的旧孤立回复）。先锁动态，再当前读锁回复并复核归属/关系/状态；0→3 和计数递减同事务，3 重复不扣计数。7D阶段没有回复审核；7O新增管理员隐藏，规则见下文。保留原文，无物理删除或恢复。NULL/0 计数下限为 0，不回填历史，不保证聚合等于可见数。规则及回退限制见[回复撤回笔记](learning/direct-reply-withdrawal.md)。
 
 7E 的 `DELETE /blog-comments/{commentId}` 是本人一级评论撤回：作者及 parent_id=answer_id=0、status 0/3、动态存在同时成立。保持相同锁顺序/当前读复核，根 0→3 和减一同事务，重复不扣。保留全部回复行/状态，不级联修改或扣回复数；撤回根从一级列表排除，其下新请求的回复读取/创建为 404，回复作者仍可用 7D 独立撤回。管理员和商户也仅本人，不扩展恢复/回复审核。并发只读快照可能看见旧版本，细节见[一级评论撤回笔记](learning/first-level-comment-withdrawal.md)。
 
@@ -106,6 +108,8 @@ Store 保存名称、分类、图片、地址、坐标、营业时间和展示�
 7G 增加单条审计查询 `GET /admin/blog-comments/{commentId}/hide-audit`，由应用端 ADMIN guard 保护，正 Java Long 参数；匿名、停用或未知角色身份为 401，USER/MERCHANT（包括评论作者或操作人）为 403，非法参数 400，缺失审计 404，数据库错误通用 500。成功返回 `Result.ok` 与八字段白名单 DTO（字符串 ID、reason、Integer 状态和 `LocalDateTime createTime`）。按 V008 审计行独立读取，不关联当前评论/动态/用户，不从当前状态推断历史；参数绑定的普通 SELECT 在 5 秒超时的只读 REPEATABLE READ 事务中执行，不加 `FOR UPDATE`。新事务读取已提交快照，既有 RR 事务可能看到更早快照；不回填历史记录，审计仍非防篡改证据。无状态写、计数变化、列表/导出、恢复、UI 或新迁移。26 项定向、360 项默认统计（4 设计跳过）、43 项显式 MySQL IT、23 组目标 Compose 验证通过；最终提交/审查状态在交付对话报告，见[7G 阶段记录](refactor/29-phase-7g-comment-audit-query.md)。
 
 7H 已增加 `GET /admin/blog-comments/hide-audits/of/blog/{blogId}`，仅 ADMIN 可读，按一个 blog 过滤并使用 `id < beforeId`、`id DESC` 游标及默认 20/最大 50 条分页。每页在只读 REPEATABLE READ 事务中执行参数化普通 SELECT，5 秒查询超时，以 `size+1` lookahead 得到 hasNext；nextBeforeId 仅在还有下一页时取最后返回审计 ID 字符串。审计 DTO 仍为 8 个字段；空/缺失 blog 与无审计统一成功返回空页，不 join 当前业务行。V009 增加候选 `(blog_id,id)` 索引，名字检查可重复执行但不修复同名错误形状，依赖 V008 表先创建；DDL 与行保留已在隔离 MySQL 验证，不代表生产迁移或性能提升。ID 分配次序不是提交顺序，因此各页独立快照，不保证跨页无遗漏/冻结视图，不作 SLA 或性能结论。范围、验证证据与部署约束见[7H 阶段记录](refactor/30-phase-7h-comment-audit-pages.md)。
+
+7O 的 `POST /admin/blog-comments/replies/{replyId}/hide` 是 ADMIN-only 直接回复隐藏入口。reason复用请求DTO：非空白、最多255个Java UTF-16单元；操作人来自会话，成功为200 `Result.ok()`且无data。写事务门禁在任何SQL之前；按候选回复→锁动态→锁同动态规范根（parent_id=answer_id=0，不限根状态）→锁目标回复的顺序，用锁定当前读复核目标。仅接受 parent_id>0、answer_id=parent_id、status=0/2 的直接回复。首次0→2、动态comments按零下限减一、V013插入一条专用审计同事务；任一写入不为1返回422并回滚，DataAccessException转不带cause的通用500。只有status=2且有匹配reply/blog/root、from=0/to=2的本用途审计才重复200，不写、不扣、不覆盖首次操作人/原因；旧status=2无此审计为404。1/3/NULL、非法或多级关系、缺动态/根/回复均404。隐藏或撤回根、已撤回动态下仍能隐藏存在且关系正确的回复。作者不能撤回status=2回复。保留正文、liked、关系、根和兄弟，不级联。计数是写入维护的派生值，不是当前可见行数保证，不回填历史。V013独立表唯一约束reply_id；不加外键、内容快照、TTL、恢复、举报、通知或审计读取路由，7G/7H的V008根评论审计API不包含回复审计。部署/回退见[7O记录](refactor/37-phase-7o-direct-reply-moderation.md)，学习见[直接回复隐藏笔记](learning/direct-reply-moderation.md)；选定本机验证已完成。
 
 `Follow` 只表示账号关注账号，禁止自己关注自己；同一 `(follower_id, followee_id)` 只能存在一次。MySQL 保存关系事实，Redis 集合或有序集合只能作为查询加速，结构必须统一。
 
@@ -131,7 +135,7 @@ Notification 只定义为未来独立模块。只有在订单状态、活动结�
 
 ## 4 角色与资源权限
 
-下表是目标权限边界，并非全部已实现 API。当前 7D/7E 回复/一级评论逻辑撤回对 USER/MERCHANT/ADMIN 一律仅本人，无商户内容或管理员覆盖；7F 增加 ADMIN 隐藏正常一级评论，7G/7H 已实现 ADMIN 审计单条/按动态分页读取。7J 已实现作者本人动态编辑，不改变门店关联或计数。动态删除、级联/物理删除、恢复、回复审核、举报工作流和完整审核后台仍未实现。
+下表是目标权限边界，并非全部已实现 API。当前 7D/7E 回复/一级评论逻辑撤回对 USER/MERCHANT/ADMIN 一律仅本人，无商户内容或管理员覆盖；7F 增加 ADMIN 隐藏正常一级评论，7G/7H 已实现该根审计的单条/按动态分页只读，7O 增加 ADMIN 隐藏合法直接回复。7J 已实现作者本人动态编辑，不改变门店关联或计数。动态删除、级联/物理删除、恢复、举报工作流和完整审核后台仍未实现。
 
 | 操作 | 匿名用户 | USER | MERCHANT | ADMIN |
 | --- | --- | --- | --- | --- |
@@ -140,6 +144,7 @@ Notification 只定义为未来独立模块。只有在订单状态、活动结�
 | 发布普通校园动态、评论、关注和点赞 | 不允许 | 允许 | 允许 | 允许 |
 | 编辑动态（7J） | 不允许 | 仅本人 | 仅本人 | 仅本人；无管理员覆盖 |
 | 隐藏正常一级评论（7F） | 不允许 | 不允许 | 不允许 | 允许；作者身份不影响管理权限 |
+| 隐藏合法直接回复（7O） | 不允许 | 不允许 | 不允许 | 允许；父根可见性不影响该管理操作 |
 | 读取隐藏审计（7G 单条/7H 按动态分页） | 不允许 | 不允许 | 不允许 | 只读；不受原操作人身份影响 |
 | 签到、参与活动、查看订单 | 不允许 | 仅本人 | 以用户身份仅本人 | 仅管理接口，不能冒充用户下单 |
 | 创建或修改门店 | 不允许 | 不允许 | 仅有效成员所属 Merchant 的 Store | 允许审核和平台管理 |
