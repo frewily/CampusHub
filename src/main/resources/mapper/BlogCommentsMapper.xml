@@ -108,6 +108,13 @@
         SELECT id, reply_id, blog_id, root_comment_id, operator_user_id, reason, from_status, to_status, create_time
         FROM tb_blog_reply_hide_audit WHERE reply_id = #{replyId}
     </select>
+    <select id="findReplyHideAuditsByBlog"
+            resultType="io.github.frewily.campushub.dto.response.BlogReplyHideAuditResponse" timeout="5">
+        SELECT id, reply_id, blog_id, root_comment_id, operator_user_id, reason, from_status, to_status, create_time
+        FROM tb_blog_reply_hide_audit WHERE blog_id = #{blogId}
+        <if test="beforeId != null">AND id &lt; #{beforeId}</if>
+        ORDER BY id DESC LIMIT #{limit}
+    </select>
     <select id="lockDirectReplyRoot" resultType="long" timeout="5">
         SELECT id FROM tb_blog_comments
         WHERE id = #{rootId} AND blog_id = #{blogId} AND parent_id = 0 AND answer_id = 0

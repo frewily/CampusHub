@@ -39,6 +39,13 @@ public class AdminBlogCommentsController {
         return Result.ok(blogCommentsService.queryReplyHideAudit(replyId));
     }
 
+    @GetMapping("/replies/hide-audits/of/blog/{blogId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result listReplyHideAudits(@Positive @PathVariable("blogId") Long blogId,
+                                      @Valid @ModelAttribute BlogCommentHideAuditPageRequest request) {
+        return Result.ok(blogCommentsService.listReplyHideAudits(blogId, request));
+    }
+
     @GetMapping("/hide-audits/of/blog/{blogId}")
     @PreAuthorize("hasRole('ADMIN')")
     public Result listHideAudits(@Positive @PathVariable("blogId") Long blogId,

@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共50条，来自13个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。评论相关为6条评论/回复/撤回和5条ADMIN隐藏/审计路由。7O增加直接回复隐藏，7P增加单条回复隐藏审计读取；阶段证据与兼容边界见各自记录，历史阶段的映射数不当作当前数量。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自13个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由。7O增加直接回复隐藏，7P/7Q分别增加单条/按动态分页读取回复审计；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
 
 ## 通用约定
 
@@ -124,7 +124,7 @@ Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/fr
 
 候选查询后依次锁动态、同动态规范根评论、目标直接回复，并用锁定当前读复核；父根是否隐藏或撤回不阻止本操作。仅接受 `parent_id>0`、`answer_id=parent_id` 且状态0/2的直接回复，不接受多级关系。隐藏/撤回的根以及已撤回的动态下，只要动态、规范根与目标回复仍存在且回复自身状态/关系合法，仍可隐藏。回复正文、liked、关系、根和兄弟回复保留，不级联改状态；动态 `comments` 是写入维护的派生数，不等于“当前可见评论数”。
 
-隐藏后的status=2回复不能被作者撤回。V013 使用 `UNIQUE(reply_id)` 独立记录 reply/blog/root/operator/reason/from/to/time；旧V008单条/分页根评论读取不混入回复审计，7O当时未增加审计读取路由，7P已补回复单条读取。全新库顺序为V001…V013；已有库先备份、核对结构并审查V013再升级。`CREATE TABLE IF NOT EXISTS`不修复同名错表，不回填旧隐藏记录；回退不删除审计、不恢复状态或计数。选定本机验证已完成，证据见7O阶段记录。
+隐藏后的status=2回复不能被作者撤回。V013 使用 `UNIQUE(reply_id)` 独立记录 reply/blog/root/operator/reason/from/to/time；旧V008单条/分页根评论读取不混入回复审计，7O当时未增加审计读取路由，7P已补回复单条读取。7O当时新库顺序为V001…V013，当前7Q到V014；已有库先备份、核对结构并审查V013再升级。`CREATE TABLE IF NOT EXISTS`不修复同名错表，不回填旧隐藏记录；回退不删除审计、不恢复状态或计数。选定本机验证已完成，证据见7O阶段记录。
 
 ## 单条回复隐藏审计查询（Phase 7P）
 
@@ -135,6 +135,16 @@ Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/fr
 | GET | `/admin/blog-comments/replies/{replyId}/hide-audit` | `queryReplyHideAudit`；需认证；`hasRole('ADMIN')`。匿名、停用、无有效角色401，有效USER/MERCHANT403，包括回复作者或原操作人 | 正Java Long `replyId`；无body。只读REPEATABLE READ事务；参数化普通SELECT V013，5秒语句超时，不加锁、不join当前业务行 | 200 `Result.ok(dto)`；九字段：String `id`、`replyId`、`blogId`、`rootCommentId`、`operatorUserId`；`reason`、`fromStatus`、`toStatus`、`createTime`。五个ID为十进制字符串；不含正文、资料或当前状态。无审计404；非法/溢出ID400；数据库异常无cause通用500 |
 
 只读取当前事务快照可见的已提交存储记录；旧RR快照可能继续404，不读脏数据，不承诺即时看到之后提交的记录。审计独立于当前回复、根、动态、原操作人，移除这些行不会自动删除审计；缺审计的旧status=2不能推断为成功审核。V008根评论单条/分页仍不混入V013；新接口不是审计分页、导出、恢复或防篡改日志。不新增DDL，依赖已审查应用的V013；只读不会改变状态、计数或审计。学习见[单条回复审计](../learning/reply-hide-audit-query.md)。
+
+## 按动态分页读取回复隐藏审计（Phase 7Q）
+
+Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/frewily/campushub/controller/AdminBlogCommentsController.java)；请求复用通用游标字段：[BlogCommentHideAuditPageRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCommentHideAuditPageRequest.java)；响应：[BlogReplyHideAuditPage.java](../../src/main/java/io/github/frewily/campushub/dto/response/BlogReplyHideAuditPage.java)。阶段范围见[7Q记录](../refactor/39-phase-7q-reply-audit-pages.md)。
+
+| Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
+|---|---|---|---|---|
+| GET | `/admin/blog-comments/replies/hide-audits/of/blog/{blogId}` | `listReplyHideAudits`；`hasRole('ADMIN')`，按当前身份校验；匿名/停用/无有效角色401，USER/MERCHANT403，包括原操作人 | 正Long blogId；可选正Long beforeId为审计ID，size默认20、1..50，忽略未知query；参数化普通SELECT按blog、严格小于审计游标、id DESC，limit=size+1，5秒语句超时 | 200 `Result.ok(page)`：items复用7P九字段元数据（五个ID字符串）、hasNext、nextBeforeId。多取一行后裁剪，hasNext为true才返回末条已返回审计ID字符串作为游标，false时NON_NULL省略。无审计/空结果/当前动态缺失均空页成功，不查总量或join当前实体。非法参数400，数据库异常无cause通用500 |
+
+每页只读RR快照，不加行锁、不写状态/计数/审计。V013回复审计不混入V008根分页；业务行或原操作人外部移除不影响保留元数据。自增ID分配不等于提交顺序，跨页不冻结，也不承诺全量无遗漏导出。V014增加候选(blog_id,id)索引，已有库须先备份、核结构并审查应用，重复按索引名跳过但不修同名错形状；没有性能提升或优化器采用证明。学习见[回复审计游标](../learning/reply-hide-audit-pagination.md)。
 
 ## 单条隐藏审计查询（Phase 7G 文档契约）
 

@@ -1,6 +1,8 @@
 # CampusHub
 
-Phase7P补[单条回复隐藏审计读取](docs/refactor/38-phase-7p-reply-audit-query.md)：仅ADMIN查询V013保留元数据，五个ID用字符串返回；不join当前内容/用户、不修改状态或计数。当前50条应用映射/13个Controller，管理员评论Controller5条，不增加DDL或分页/导出/恢复。144项定向、480项Java8默认统计（4原设计跳过）、122项显式IT及46组Compose通过，隔离资源清理独立复核完成；不代表生产或个人掌握。[学习笔记](docs/learning/reply-hide-audit-query.md)说明快照与保留语义，最终提交/审查/同步状态以交付对话为准。
+Phase7Q补[按动态分页读取回复隐藏审计](docs/refactor/39-phase-7q-reply-audit-pages.md)：仅ADMIN按一个blog读取V013，审计ID倒序游标、默认20/最大50、九字段元数据；不混V008，不更新状态/计数。当前51条应用映射/13个Controller，管理员评论Controller6条。159项定向、495项Java8默认统计（4原设计跳过）、132项显式IT及48组Compose通过，隔离资源清理独立复核完成；非生产或个人掌握证明。新增V014候选索引，已有库先备份核结构并审查应用再升级；无跨页冻结、性能结论、全局列表、导出或恢复。[学习笔记](docs/learning/reply-hide-audit-pagination.md)说明边界，最终提交/审查/同步状态以交付对话为准。
+
+Phase7P补[单条回复隐藏审计读取](docs/refactor/38-phase-7p-reply-audit-query.md)，仅ADMIN、不join当前实体。7P当时50条映射/13个Controller，管理员评论Controller5条；144项定向、480项Java8默认统计（4原设计跳过）、122项显式IT及46组Compose通过。这些是7P历史证据，非7Q结果，不代表生产或个人掌握；[学习笔记](docs/learning/reply-hide-audit-query.md)保留当时只读快照边界。
 
 Phase 7O 增加 ADMIN 直接回复隐藏 `POST /admin/blog-comments/replies/{replyId}/hide`；V013 使用独立回复审计表。7O当时49条映射/13个Controller，其中管理员评论Controller4条；134项定向、470项Java8默认统计（4项原设计跳过）、113项显式IT和44组Compose通过。这些是7O历史证据，非7P结果；见[7O记录](docs/refactor/37-phase-7o-direct-reply-moderation.md)与[学习笔记](docs/learning/direct-reply-moderation.md)，个人掌握仍需独立确认。
 
@@ -36,7 +38,7 @@ HTTP → Spring Security（Redis Token + 数据库账号/角色）→ Controller
 - USER / MERCHANT / ADMIN 权限与商户资源归属检查；采用可失效的 Redis Token，不是 JWT。
 - 门店、校园动态、关注、Feed、签到和优惠活动沿用合理的遗留模块；不是所有遗留接口都已完成 DTO 改造。
 - Phase 7A 支持不关联门店的校园动态：POST /blog 的 shopId 可省略/null，提供则为正数；7I 当前语义进一步允许这种动态省略或提供空白 images，归一化后保存空字符串。关联门店动态仍要求非空白图片；7I 选定本轮实现与验证完成。一级评论由 7B 单独增加。
-- Phase 7B/7C 支持一级评论和一层直接回复的创建/可见游标读取，关系由服务端派生，写入与计数同事务；7D/7E 支持本人回复/一级评论逻辑撤回（保留原文、重复不扣计数），所有角色均仅本人。根撤回不改/扣回复，关闭其下新请求的回复列表/创建，回复作者仍可独立撤回；7F 支持 ADMIN 隐藏正常一级评论并事务写入审计；7G 单条查询与 7H 按动态分页查询均限定为根评论审计只读读取；7O 增加 ADMIN 隐藏合法直接回复并写入独立审计，7P 增加该审计的单条只读查询。仍无多级回复、级联/物理删除、恢复、举报工作流、通知或完整评价系统。
+- Phase 7B/7C 支持一级评论和一层直接回复的创建/可见游标读取，关系由服务端派生，写入与计数同事务；7D/7E 支持本人回复/一级评论逻辑撤回（保留原文、重复不扣计数），所有角色均仅本人。根撤回不改/扣回复，关闭其下新请求的回复列表/创建，回复作者仍可独立撤回；7F 支持 ADMIN 隐藏正常一级评论并事务写入审计；7G 单条查询与 7H 按动态分页查询均限定为根评论审计只读读取；7O 增加 ADMIN 隐藏合法直接回复并写入独立审计，7P/7Q分别支持该审计的单条/按动态分页只读查询。仍无多级回复、级联/物理删除、恢复、举报工作流、通知或完整评价系统。
 - 库存、资格、时间窗口、一人一单与请求重放由 Redis Lua 校验。`ACCEPTED` 只代表进入 Stream，不代表订单落库或支付。
 - 消费者支持 pending 恢复、有限重试、失败归档和运维前向重放；数据库有唯一约束。保留 Redis Stream，不引入专业 MQ，见 [ADR 0001](docs/adr/0001-order-message-broker.md)。
 - 本人已落库未支付订单支持查询/取消，取消与 outbox 同事务；Redis 补偿独立恢复。不包含支付、退款或自动超时取消。
@@ -104,10 +106,12 @@ smoke 检查 live、ready 和合成门店搜索，成功输出 `PASS`；它只�
 首次使用全新 MySQL 卷时，官方镜像运行 `deploy/mysql/init/00-bootstrap.sh`：
 
 ```text
-空库检查 → schema.sql → V001…V013 → seed.sql（合成类别与一间门店）
+空库检查 → schema.sql → V001…V014 → seed.sql（合成类别与一间门店）
 ```
 
-没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V013；不会自动修复脏数据或同名错误结构。7A 的 V006、7B 的 V007、7F 的 V008、7H 的 V009 和 7O 的 V013 必须在升级应用前具备，已有卷不会因重启自动迁移。Phase 7I 不新增迁移，复用现有 `tb_blog.images` 列；应用升级无需新增 DDL；回退旧应用会恢复原图片必填的发布校验，不删除已发布的纯文字行。V007 只按索引名判断是否存在；同名但定义错误的索引需人工核查，不会自动修复。V008 使用 `CREATE TABLE IF NOT EXISTS`，不会校验同名表的列/索引定义，也不回填历史审计；V009 依赖 V008 表，重复执行按索引名跳过但不会修复同名错误定义。V013 同样使用 `CREATE TABLE IF NOT EXISTS`，不会修复同名错误表或回填旧回复隐藏审计。已有卷需备份并核对表/索引定义；回退应用不会删除 V013 审计，也不能靠删审计或恢复状态/计数来回退。新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)；评论索引的现有库升级要求见[7B 阶段记录](docs/refactor/24-phase-7b-comments.md)，管理员隐藏与审计表见[7F 阶段记录](docs/refactor/28-phase-7f-comment-moderation.md)，分页审计索引见[7H 阶段记录](docs/refactor/30-phase-7h-comment-audit-pages.md)，回复隐藏见[7O 阶段记录](docs/refactor/37-phase-7o-direct-reply-moderation.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
+没有教学个人数据、默认登录用户或活动库存。新库保留业务列含义，去掉显示宽度/ZEROFILL；活动起止时间的旧零日期默认改为可空值，仅适用于 fresh schema。**这不是已有 hmdp 库的迁移/重建方案。** 不要对有数据的库导入旧 `hmdp.sql`（含 DROP）。现有库必须先备份，核对结构并按各阶段文档审查 V001–V014；不会自动修复脏数据或同名错误结构。7A 的 V006、7B 的 V007、7F 的 V008、7H 的 V009、7O 的 V013 和 7Q 的 V014 必须在升级应用前具备，已有卷不会因重启自动迁移。Phase 7I 不新增迁移，复用现有 `tb_blog.images` 列；应用升级无需新增 DDL；回退旧应用会恢复原图片必填的发布校验，不删除已发布的纯文字行。V007 只按索引名判断是否存在；同名但定义错误的索引需人工核查，不会自动修复。V008 使用 `CREATE TABLE IF NOT EXISTS`，不会校验同名表的列/索引定义，也不回填历史审计；V009 依赖 V008 表，重复执行按索引名跳过但不会修复同名错误定义。V013 同样使用 `CREATE TABLE IF NOT EXISTS`，不会修复同名错误表或回填旧回复隐藏审计。已有卷需备份并核对表/索引定义；回退应用不会删除 V013 审计，也不能靠删审计或恢复状态/计数来回退。新增无关联动态后不可直接回退 NOT NULL，见[兼容与回退说明](docs/learning/campus-post-store-association.md)；评论索引的现有库升级要求见[7B 阶段记录](docs/refactor/24-phase-7b-comments.md)，管理员隐藏与审计表见[7F 阶段记录](docs/refactor/28-phase-7f-comment-moderation.md)，分页审计索引见[7H 阶段记录](docs/refactor/30-phase-7h-comment-audit-pages.md)，回复隐藏见[7O 阶段记录](docs/refactor/37-phase-7o-direct-reply-moderation.md)。初始化途中失败可能留下部分表，需要检查，不要反复强行导入。
+
+7Q的V014依赖V013，为回复审计增加候选 `(blog_id,id)` 索引；现有库先备份、核对索引形状并人工审查应用再升级，DDL可能锁表和隐式提交。同名错索引不自动修复；回退7P可保留该索引和所有审计，不恢复状态或计数。迁移检查不是性能证明，见[7Q部署边界](docs/refactor/39-phase-7q-reply-audit-pages.md)。
 
 日常停止容器并保留数据：
 

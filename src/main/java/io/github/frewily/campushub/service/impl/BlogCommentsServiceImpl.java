@@ -14,6 +14,7 @@ import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
 import io.github.frewily.campushub.dto.response.BlogReplyHideAuditResponse;
+import io.github.frewily.campushub.dto.response.BlogReplyHideAuditPage;
 import io.github.frewily.campushub.dto.request.BlogCommentHideAuditPageRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditPage;
 import io.github.frewily.campushub.exception.BusinessException;
@@ -323,6 +324,29 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
             List<BlogCommentHideAuditResponse> items = new ArrayList<>(rows.subList(0, Math.min(size, rows.size())));
             String nextBeforeId = hasNext ? items.get(items.size() - 1).getId() : null;
             return new BlogCommentHideAuditPage(items, hasNext, nextBeforeId);
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public BlogReplyHideAuditPage listReplyHideAudits(Long blogId, BlogCommentHideAuditPageRequest request) {
+        if (blogId == null || blogId <= 0) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        validate(request);
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null || user.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        try {
+            // V013 metadata only: no current entity lookup, root-audit mixing, or count query.
+            int size = request.getSize();
+            List<BlogReplyHideAuditResponse> rows = baseMapper.findReplyHideAuditsByBlog(
+                    blogId, request.getBeforeId(), size + 1);
+            boolean hasNext = rows.size() > size;
+            List<BlogReplyHideAuditResponse> items = new ArrayList<>(rows.subList(0, Math.min(size, rows.size())));
+            String nextBeforeId = hasNext ? items.get(items.size() - 1).getId() : null;
+            return new BlogReplyHideAuditPage(items, hasNext, nextBeforeId);
         } catch (DataAccessException error) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }

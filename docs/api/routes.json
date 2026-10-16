@@ -3,6 +3,7 @@
   "source_revision": "68aa03bd86cb905c4828cd3a6c3b4616197aeca8",
   "scope": "explicit main-source Spring MVC controller mappings; excludes management/framework and implicit HEAD/OPTIONS",
   "routes": [
+    {"method":"GET","path":"/admin/blog-comments/replies/hide-audits/of/blog/{blogId}","controller":"AdminBlogCommentsController","handler":"listReplyHideAudits","preAuthorize":"hasRole('ADMIN')"},
     {"method":"GET","path":"/admin/blog-comments/replies/{replyId}/hide-audit","controller":"AdminBlogCommentsController","handler":"queryReplyHideAudit","preAuthorize":"hasRole('ADMIN')"},
     {"method":"POST","path":"/user/code","controller":"UserController","handler":"sendCode","preAuthorize":""},
     {"method":"POST","path":"/user/login","controller":"UserController","handler":"login","preAuthorize":""},

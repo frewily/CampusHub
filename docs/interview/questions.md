@@ -1,5 +1,7 @@
 # CampusHub 面试追问与验证路线
 
+7Q追问：为什么beforeId必须是审计ID而非replyId？多取一行后游标取哪行？正好size条还应hasNext吗？动态被外部移除为何返回保留元数据而不是404？低ID晚提交能否漏过已翻游标？V014重复执行为何不修同名错索引，DDL为何先备份审查？复现[7Q用例](../refactor/39-phase-7q-reply-audit-pages.md)，区分51条导入元数据与51次实际隐藏。
+
 7P追问：为什么审计查询不先检查回复是否存在？原操作人失去ADMIN后还能读取吗？status=2却无审计该返回什么？为什么五个ID必须是字符串？只读RR与7O锁定当前读有什么差别？写事务未提交、回滚、提交到旧快照之后，各会读到什么？如何证明没有修改计数或混入V008？先复现[7P范围](../refactor/38-phase-7p-reply-audit-query.md)，不把AI辅助测试当作脱稿掌握。
 
 7N追问：为什么先查后写和单独Redis锁不够？为什么重复INSERT后用当前读而非普通RR快照？MyBatis与JPA的异常事务状态有什么区别？请求hash为什么不能直接拼接或hash原JSON？编号作用域、过期和回退怎么定义？编辑/撤回后重试为何不恢复正文？请先自己复现[7N用例](../refactor/36-phase-7n-blog-publication-keys.md)，不要把AI辅助测试数量当掌握证明。

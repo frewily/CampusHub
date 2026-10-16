@@ -13,6 +13,7 @@ import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
 import io.github.frewily.campushub.dto.request.BlogCommentHideAuditPageRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditPage;
 import io.github.frewily.campushub.dto.response.BlogReplyHideAuditResponse;
+import io.github.frewily.campushub.dto.response.BlogReplyHideAuditPage;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogCommentsMapper;
@@ -185,6 +186,10 @@ class BlogCommentsMySqlIT {
                     "db/migration/V013__add_blog_reply_hide_audit.sql");
             ScriptUtils.executeSqlScript(connection, replyHideAudit);
             ScriptUtils.executeSqlScript(connection, replyHideAudit);
+            ClassPathResource replyAuditPageIndex = new ClassPathResource(
+                    "db/migration/V014__add_blog_reply_hide_audit_page_index.sql");
+            ScriptUtils.executeSqlScript(connection, replyAuditPageIndex);
+            ScriptUtils.executeSqlScript(connection, replyAuditPageIndex);
         }
     }
 
@@ -252,6 +257,7 @@ class BlogCommentsMySqlIT {
                     || id.endsWith(".findFirstLevelHideAuditDetails")
                     || id.endsWith(".findDirectReplyHideAuditDetails")
                     || id.endsWith(".findHideAuditsByBlog")
+                    || id.endsWith(".findReplyHideAuditsByBlog")
                     || (id.endsWith(".findVisibleRoot") && EXPECT_READ_ONLY_REPLY_LIST.get())) {
                 assertTrue(TransactionSynchronizationManager.isActualTransactionActive(),
                         "comment listing must run inside a Spring transaction");
@@ -2441,6 +2447,350 @@ class BlogCommentsMySqlIT {
         assertNull(last.getNextBeforeId());
         assertEquals(Integer.valueOf(51), jdbc.queryForObject(
                 "SELECT COUNT(*) FROM tb_blog_comment_hide_audit WHERE blog_id=?", Integer.class, blogId));
+    }
+
+    @Test
+    void replyAuditPagesUseAuditIdCursorAcrossBlogsAndStaySeparateFromRootAuditPages() {
+        long blogId = blog(AUTHOR_ID, 3);
+        long otherBlog = blog(AUTHOR_ID, 1);
+        jdbc.execute("ALTER TABLE tb_blog_reply_hide_audit AUTO_INCREMENT=" + (LARGE_ID + 1100));
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "reply page root");
+        long createdFirst = comment(blogId, AUTHOR_ID + 1, root, root, 0, "created first");
+        long createdSecond = comment(blogId, AUTHOR_ID + 2, root, root, 0, "created second");
+        long createdLast = comment(blogId, AUTHOR_ID + 3, root, root, 0, "created last");
+        long otherRoot = comment(otherBlog, AUTHOR_ID, 0, 0, 0, "other blog root");
+        long otherReply = comment(otherBlog, AUTHOR_ID + 4, otherRoot, otherRoot, 0, "other blog reply");
+
+        service.hideComment(root, hideRequest("V008 root receipt"));
+        UserHolder.saveUser(user(AUTHOR_ID + 20));
+        service.hideReply(createdLast, hideRequest("hidden first"));
+        BlogReplyHideAuditResponse oldestAudit = service.queryReplyHideAudit(createdLast);
+        service.hideReply(otherReply, hideRequest("other blog receipt"));
+        service.hideReply(createdFirst, hideRequest("hidden second"));
+        BlogReplyHideAuditResponse middleAudit = service.queryReplyHideAudit(createdFirst);
+        service.hideReply(createdSecond, hideRequest("hidden last"));
+        BlogReplyHideAuditResponse newestAudit = service.queryReplyHideAudit(createdSecond);
+
+        BlogReplyHideAuditPage first = service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 2));
+        assertEquals(Arrays.asList(newestAudit, middleAudit), first.getItems());
+        assertTrue(first.isHasNext());
+        assertEquals(middleAudit.getId(), first.getNextBeforeId());
+        assertNotEquals(middleAudit.getReplyId(), first.getNextBeforeId(),
+                "the cursor must identify an audit row, not its reply");
+        BlogReplyHideAuditPage second = service.listReplyHideAudits(blogId,
+                hideAuditPageRequest(Long.valueOf(first.getNextBeforeId()), 2));
+        assertEquals(Collections.singletonList(oldestAudit), second.getItems());
+        assertFalse(second.isHasNext());
+        assertNull(second.getNextBeforeId());
+        assertEquals(Arrays.asList(newestAudit, middleAudit, oldestAudit),
+                service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 3)).getItems());
+        assertNotEquals(newestAudit.getReplyId(), newestAudit.getId());
+        assertEquals(0, service.listReplyHideAudits(blogId,
+                hideAuditPageRequest(Long.valueOf(oldestAudit.getId()), 20)).getItems().size());
+        BlogCommentHideAuditPage rootPage = service.listHideAudits(blogId, hideAuditPageRequest(null, 20));
+        assertEquals(1, rootPage.getItems().size());
+        assertEquals(Long.toString(root), rootPage.getItems().get(0).getCommentId());
+        assertEquals(3, service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20)).getItems().size());
+        assertEquals(1, service.listReplyHideAudits(otherBlog, hideAuditPageRequest(null, 20)).getItems().size());
+    }
+
+    @Test
+    void replyAuditPagesDefaultToTwentyAndCapAtFiftyUsingImportedMetadata() {
+        long blogId = LARGE_ID + 710;
+        for (int index = 0; index < 51; index++) {
+            jdbc.update("INSERT INTO tb_blog_reply_hide_audit(id,reply_id,blog_id,root_comment_id,operator_user_id,reason,from_status,to_status) "
+                            + "VALUES(?,?,?,?,?,'synthetic imported reply audit',0,2)",
+                    LARGE_ID + 1200 + index, LARGE_ID + 1300 + index, blogId,
+                    LARGE_ID + 1400 + index, LARGE_ID + 1500);
+        }
+        BlogCommentHideAuditPageRequest defaultRequest = new BlogCommentHideAuditPageRequest();
+        BlogReplyHideAuditPage defaultPage = service.listReplyHideAudits(blogId, defaultRequest);
+        assertEquals(Integer.valueOf(20), defaultRequest.getSize());
+        assertEquals(20, defaultPage.getItems().size());
+        assertTrue(defaultPage.isHasNext());
+        assertEquals(defaultPage.getItems().get(19).getId(), defaultPage.getNextBeforeId());
+
+        BlogCommentHideAuditPageRequest maximumRequest = hideAuditPageRequest(null, 50);
+        BlogReplyHideAuditPage maximumPage = service.listReplyHideAudits(blogId, maximumRequest);
+        assertEquals(50, maximumPage.getItems().size());
+        assertTrue(maximumPage.isHasNext());
+        assertEquals(maximumPage.getItems().get(49).getId(), maximumPage.getNextBeforeId());
+        BlogReplyHideAuditPage last = service.listReplyHideAudits(blogId,
+                hideAuditPageRequest(Long.valueOf(maximumPage.getNextBeforeId()), 50));
+        assertEquals(1, last.getItems().size());
+        assertFalse(last.isHasNext());
+        assertNull(last.getNextBeforeId());
+        assertEquals(Integer.valueOf(51), jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE blog_id=?", Integer.class, blogId));
+    }
+
+    @Test
+    void replyAuditPagesReturnEmptyForMissingBlogAndSurviveDeletingEveryRelatedEntity() {
+        long blogId = blog(AUTHOR_ID, 2);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "removable audit root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "removable audit reply");
+        long actor = LARGE_ID + 1600;
+        jdbc.update("INSERT INTO tb_user(id,phone,nick_name) VALUES(?,'00000000816','reply page actor')", actor);
+        UserHolder.saveUser(user(actor));
+        service.hideReply(reply, hideRequest("retained independent reply metadata"));
+        BlogReplyHideAuditResponse audit = service.queryReplyHideAudit(reply);
+
+        for (long missing : new long[]{Long.MAX_VALUE, blogId + 9999}) {
+            BlogReplyHideAuditPage empty = service.listReplyHideAudits(missing, hideAuditPageRequest(null, 20));
+            assertTrue(empty.getItems().isEmpty());
+            assertFalse(empty.isHasNext());
+            assertNull(empty.getNextBeforeId());
+        }
+        assertTrue(service.listReplyHideAudits(blogId, hideAuditPageRequest(1L, 20)).getItems().isEmpty());
+        jdbc.update("DELETE FROM tb_blog_comments WHERE id=?", reply);
+        jdbc.update("DELETE FROM tb_blog_comments WHERE id=?", root);
+        jdbc.update("DELETE FROM tb_blog WHERE id=?", blogId);
+        jdbc.update("DELETE FROM tb_user WHERE id=?", actor);
+        UserHolder.saveUser(user(AUTHOR_ID));
+        BlogReplyHideAuditPage retained = service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20));
+        assertEquals(Collections.singletonList(audit), retained.getItems());
+        assertEquals("retained independent reply metadata", retained.getItems().get(0).getReason());
+    }
+
+    @Test
+    void replyAuditPageIsReadOnlyAndDoesNotChangeStatusCounterOrAudit() {
+        long blogId = blog(AUTHOR_ID, 2);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "read-only page root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "read-only page reply");
+        service.hideReply(reply, hideRequest("stable page metadata"));
+        BlogReplyHideAuditResponse before = service.queryReplyHideAudit(reply);
+        Integer statusBefore = mapper.selectById(reply).getStatus();
+        Integer counterBefore = blogCounter(blogId);
+        jdbc.execute("CREATE TRIGGER reject_reply_audit_page_update BEFORE UPDATE ON tb_blog_reply_hide_audit "
+                + "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='reply audit page is read only'");
+        try {
+            BlogReplyHideAuditPage page = service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20));
+            assertEquals(Collections.singletonList(before), page.getItems());
+            assertEquals(before, service.queryReplyHideAudit(reply));
+            assertEquals(statusBefore, mapper.selectById(reply).getStatus());
+            assertEquals(counterBefore, blogCounter(blogId));
+            assertEquals(1, replyAuditCount(reply));
+        } finally {
+            dropTrigger("reject_reply_audit_page_update");
+        }
+    }
+
+    @Test
+    void replyAuditPageSqlFailureIsGenericAndV013IsRestored() {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "page SQL failure root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "page SQL failure reply");
+        service.hideReply(reply, hideRequest("retained during table rename"));
+        jdbc.execute("RENAME TABLE tb_blog_reply_hide_audit TO tb_blog_reply_hide_audit_saved");
+        boolean renamed = true;
+        try {
+            BusinessException failure = assertThrows(BusinessException.class,
+                    () -> service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20)));
+            assertEquals(ErrorCode.INTERNAL_ERROR, failure.getErrorCode());
+            assertEquals(500, failure.getErrorCode().getHttpStatus().value());
+            assertNull(failure.getCause());
+            assertFalse(failure.getMessage().contains("tb_blog_reply_hide_audit"));
+        } finally {
+            if (renamed) {
+                jdbc.execute("RENAME TABLE tb_blog_reply_hide_audit_saved TO tb_blog_reply_hide_audit");
+                renamed = false;
+            }
+        }
+        assertEquals("retained during table rename",
+                service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20)).getItems().get(0).getReason());
+    }
+
+    @Test
+    void replyAuditPageDoesNotWaitForOrExposeUncommittedHideAndReadsItAfterCommit() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "page commit boundary root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "page commit boundary reply");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            AFTER_REPLY_HIDE_AUDIT_INSERT.set(() -> {
+                runIndependent(executor, AUTHOR_ID + 10, () -> {
+                    BlogReplyHideAuditPage page = service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20));
+                    assertTrue(page.getItems().isEmpty());
+                    assertFalse(page.isHasNext());
+                });
+                return 1;
+            });
+            service.hideReply(reply, hideRequest("page committed reply metadata"));
+            assertNull(AFTER_REPLY_HIDE_AUDIT_INSERT.get());
+            runIndependent(executor, AUTHOR_ID + 10, () -> {
+                BlogReplyHideAuditPage page = service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20));
+                assertEquals(1, page.getItems().size());
+                assertEquals(Long.toString(reply), page.getItems().get(0).getReplyId());
+                assertEquals("page committed reply metadata", page.getItems().get(0).getReason());
+            });
+            assertEquals(Integer.valueOf(2), mapper.selectById(reply).getStatus());
+            assertEquals(Integer.valueOf(0), blogCounter(blogId));
+        } finally {
+            AFTER_REPLY_HIDE_AUDIT_INSERT.set(null);
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void replyAuditPageNeverExposesAuditWhenHideInsertReportsZeroAndRollsBack() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "page rollback root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "page rollback reply");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            AFTER_REPLY_HIDE_AUDIT_INSERT.set(() -> {
+                runIndependent(executor, AUTHOR_ID + 10,
+                        () -> assertTrue(service.listReplyHideAudits(blogId,
+                                hideAuditPageRequest(null, 20)).getItems().isEmpty()));
+                return 0;
+            });
+            BusinessException failure = assertThrows(BusinessException.class,
+                    () -> service.hideReply(reply, hideRequest("synthetic insert count zero")));
+            assertEquals(ErrorCode.OPERATION_FAILED, failure.getErrorCode());
+            assertEquals(422, failure.getErrorCode().getHttpStatus().value());
+            assertNull(AFTER_REPLY_HIDE_AUDIT_INSERT.get());
+            runIndependent(executor, AUTHOR_ID + 10,
+                    () -> assertTrue(service.listReplyHideAudits(blogId,
+                            hideAuditPageRequest(null, 20)).getItems().isEmpty()));
+            assertEquals(0, replyAuditCount(reply));
+            assertEquals(Integer.valueOf(0), mapper.selectById(reply).getStatus());
+            assertEquals(Integer.valueOf(1), blogCounter(blogId));
+        } finally {
+            AFTER_REPLY_HIDE_AUDIT_INSERT.set(null);
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void replyAuditPageKeepsOldRepeatableReadSnapshotAfterIndependentHideCommit() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "page snapshot root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "page snapshot reply");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            TransactionTemplate repeatableRead = new TransactionTemplate(
+                    context.getBean(DataSourceTransactionManager.class));
+            repeatableRead.setReadOnly(true);
+            repeatableRead.setIsolationLevel(Connection.TRANSACTION_REPEATABLE_READ);
+            repeatableRead.execute(status -> {
+                assertTrue(service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20)).getItems().isEmpty(),
+                        "establish the old repeatable-read snapshot");
+                runIndependent(executor, AUTHOR_ID + 10,
+                        () -> service.hideReply(reply, hideRequest("snapshot page winner")));
+                assertTrue(service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20)).getItems().isEmpty(),
+                        "the old page snapshot must not reveal the later commit");
+                status.setRollbackOnly();
+                return null;
+            });
+            runIndependent(executor, AUTHOR_ID + 10, () -> {
+                BlogReplyHideAuditPage page = service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20));
+                assertEquals(1, page.getItems().size());
+                assertEquals("snapshot page winner", page.getItems().get(0).getReason());
+            });
+            assertEquals(1, replyAuditCount(reply));
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void replyAuditPageOrdinarySelectReadsCommittedMetadataWhileAnotherConnectionHoldsUpdateLock() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "page locked metadata root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "page locked metadata reply");
+        service.hideReply(reply, hideRequest("committed page reason"));
+        BlogReplyHideAuditResponse committed = service.queryReplyHideAudit(reply);
+        CountDownLatch updateHeld = new CountDownLatch(1);
+        CountDownLatch releaseUpdate = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<?> locker = null;
+        try {
+            locker = executor.submit(() -> {
+                UserHolder.saveUser(user(AUTHOR_ID + 20));
+                try (Connection connection = datasource.getConnection();
+                     PreparedStatement update = connection.prepareStatement(
+                             "UPDATE tb_blog_reply_hide_audit SET reason='uncommitted page replacement' WHERE reply_id=?")) {
+                    connection.setAutoCommit(false);
+                    update.setLong(1, reply);
+                    assertEquals(1, update.executeUpdate());
+                    updateHeld.countDown();
+                    assertTrue(releaseUpdate.await(10, TimeUnit.SECONDS));
+                    connection.rollback();
+                } catch (Exception error) {
+                    throw new AssertionError("could not hold the private reply audit row update", error);
+                } finally {
+                    UserHolder.removeUser();
+                }
+            });
+            assertTrue(updateHeld.await(5, TimeUnit.SECONDS), "audit UPDATE did not acquire its row lock");
+            Future<BlogReplyHideAuditPage> query = executor.submit(() -> {
+                UserHolder.saveUser(user(AUTHOR_ID + 21));
+                try { return service.listReplyHideAudits(blogId, hideAuditPageRequest(null, 20)); }
+                finally { UserHolder.removeUser(); }
+            });
+            BlogReplyHideAuditPage page = query.get(5, TimeUnit.SECONDS);
+            assertEquals(Collections.singletonList(committed), page.getItems(),
+                    "ordinary page SELECT should see committed metadata without waiting for the updater");
+        } finally {
+            releaseUpdate.countDown();
+            try {
+                if (locker != null) locker.get(10, TimeUnit.SECONDS);
+            } finally {
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+            }
+        }
+        assertEquals(committed, service.queryReplyHideAudit(reply));
+    }
+
+    @Test
+    void replyAuditPageIndexMigrationRepeatsPreservesDataAndDoesNotRepairWrongShape() throws Exception {
+        long blogId = blog(AUTHOR_ID, 1);
+        long root = comment(blogId, AUTHOR_ID, 0, 0, 0, "V014 fixture root");
+        long reply = comment(blogId, AUTHOR_ID + 1, root, root, 0, "V014 fixture reply");
+        service.hideReply(reply, hideRequest("V014 preserves this audit"));
+        BlogReplyHideAuditResponse before = service.queryReplyHideAudit(reply);
+        ClassPathResource migration = new ClassPathResource("db/migration/V014__add_blog_reply_hide_audit_page_index.sql");
+        try (Connection connection = datasource.getConnection()) {
+            ScriptUtils.executeSqlScript(connection, migration);
+            ScriptUtils.executeSqlScript(connection, migration);
+        }
+        assertEquals(Arrays.asList("blog_id", "id"), replyAuditPageIndexColumns());
+        assertEquals(before, service.queryReplyHideAudit(reply));
+
+        try (Connection connection = datasource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE DATABASE reply_audit_page_missing_v013_test");
+            try {
+                statement.execute("USE reply_audit_page_missing_v013_test");
+                assertThrows(org.springframework.jdbc.datasource.init.ScriptStatementFailedException.class,
+                        () -> ScriptUtils.executeSqlScript(connection, migration));
+            } finally {
+                statement.execute("DROP DATABASE reply_audit_page_missing_v013_test");
+            }
+        }
+
+        jdbc.execute("DROP INDEX idx_blog_reply_hide_audit_page ON tb_blog_reply_hide_audit");
+        try {
+            jdbc.execute("CREATE INDEX idx_blog_reply_hide_audit_page ON tb_blog_reply_hide_audit(id)");
+            try (Connection connection = datasource.getConnection()) {
+                ScriptUtils.executeSqlScript(connection, migration);
+                ScriptUtils.executeSqlScript(connection, migration);
+            }
+            assertEquals(Collections.singletonList("id"), replyAuditPageIndexColumns());
+            assertEquals(before, service.queryReplyHideAudit(reply));
+        } finally {
+            jdbc.execute("DROP INDEX idx_blog_reply_hide_audit_page ON tb_blog_reply_hide_audit");
+            jdbc.execute("CREATE INDEX idx_blog_reply_hide_audit_page ON tb_blog_reply_hide_audit(blog_id,id)");
+        }
+    }
+
+    private static List<String> replyAuditPageIndexColumns() {
+        return jdbc.queryForList("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=DATABASE() "
+                + "AND TABLE_NAME='tb_blog_reply_hide_audit' AND INDEX_NAME='idx_blog_reply_hide_audit_page' "
+                + "ORDER BY SEQ_IN_INDEX", String.class);
     }
 
     private static List<String> auditPageIndexColumns() {

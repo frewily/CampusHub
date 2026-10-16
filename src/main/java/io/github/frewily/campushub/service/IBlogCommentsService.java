@@ -10,6 +10,7 @@ import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
 import io.github.frewily.campushub.dto.response.BlogReplyHideAuditResponse;
+import io.github.frewily.campushub.dto.response.BlogReplyHideAuditPage;
 import io.github.frewily.campushub.dto.request.BlogCommentHideAuditPageRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditPage;
 
@@ -33,6 +34,8 @@ public interface IBlogCommentsService extends IService<BlogComments> {
     BlogCommentHideAuditResponse queryHideAudit(Long commentId);
 
     BlogReplyHideAuditResponse queryReplyHideAudit(Long replyId);
+
+    BlogReplyHideAuditPage listReplyHideAudits(Long blogId, BlogCommentHideAuditPageRequest request);
 
     BlogCommentHideAuditPage listHideAudits(Long blogId, BlogCommentHideAuditPageRequest request);
 }
