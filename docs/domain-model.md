@@ -1,5 +1,7 @@
 # CampusHub 领域模型
 
+Phase7P补[单条回复隐藏审计](refactor/38-phase-7p-reply-audit-query.md)：ADMIN只读V013保留的九字段元数据，不join当前回复/根/动态/操作人；五个ID为字符串，缺记录404，不从旧状态推断历史。V008根审计读取仍独立；无新DDL、分页、导出或恢复。学习见[回复审计读取](learning/reply-hide-audit-query.md)，验证以本阶段记录为准。
+
 Phase7N增加[发布请求账本](refactor/36-phase-7n-blog-publication-keys.md)：V012以当前用户/可选请求编号记录有效创建请求摘要与原成功ID，与动态/Feed意图同事务。账本不是正文历史或当前可见性，保留成功编号，不随撤回删除；无编号创建仍可能重复，不代表全部写接口都幂等。
 
 Phase 7O 增加[ADMIN 隐藏直接回复](refactor/37-phase-7o-direct-reply-moderation.md)：合法直接回复0→2、动态comments减一和独立V013审计同事务；根隐藏/撤回不阻止管理该回复。选定本机验证已完成。
@@ -109,7 +111,7 @@ Store 保存名称、分类、图片、地址、坐标、营业时间和展示�
 
 7H 已增加 `GET /admin/blog-comments/hide-audits/of/blog/{blogId}`，仅 ADMIN 可读，按一个 blog 过滤并使用 `id < beforeId`、`id DESC` 游标及默认 20/最大 50 条分页。每页在只读 REPEATABLE READ 事务中执行参数化普通 SELECT，5 秒查询超时，以 `size+1` lookahead 得到 hasNext；nextBeforeId 仅在还有下一页时取最后返回审计 ID 字符串。审计 DTO 仍为 8 个字段；空/缺失 blog 与无审计统一成功返回空页，不 join 当前业务行。V009 增加候选 `(blog_id,id)` 索引，名字检查可重复执行但不修复同名错误形状，依赖 V008 表先创建；DDL 与行保留已在隔离 MySQL 验证，不代表生产迁移或性能提升。ID 分配次序不是提交顺序，因此各页独立快照，不保证跨页无遗漏/冻结视图，不作 SLA 或性能结论。范围、验证证据与部署约束见[7H 阶段记录](refactor/30-phase-7h-comment-audit-pages.md)。
 
-7O 的 `POST /admin/blog-comments/replies/{replyId}/hide` 是 ADMIN-only 直接回复隐藏入口。reason复用请求DTO：非空白、最多255个Java UTF-16单元；操作人来自会话，成功为200 `Result.ok()`且无data。写事务门禁在任何SQL之前；按候选回复→锁动态→锁同动态规范根（parent_id=answer_id=0，不限根状态）→锁目标回复的顺序，用锁定当前读复核目标。仅接受 parent_id>0、answer_id=parent_id、status=0/2 的直接回复。首次0→2、动态comments按零下限减一、V013插入一条专用审计同事务；任一写入不为1返回422并回滚，DataAccessException转不带cause的通用500。只有status=2且有匹配reply/blog/root、from=0/to=2的本用途审计才重复200，不写、不扣、不覆盖首次操作人/原因；旧status=2无此审计为404。1/3/NULL、非法或多级关系、缺动态/根/回复均404。隐藏或撤回根、已撤回动态下仍能隐藏存在且关系正确的回复。作者不能撤回status=2回复。保留正文、liked、关系、根和兄弟，不级联。计数是写入维护的派生值，不是当前可见行数保证，不回填历史。V013独立表唯一约束reply_id；不加外键、内容快照、TTL、恢复、举报、通知或审计读取路由，7G/7H的V008根评论审计API不包含回复审计。部署/回退见[7O记录](refactor/37-phase-7o-direct-reply-moderation.md)，学习见[直接回复隐藏笔记](learning/direct-reply-moderation.md)；选定本机验证已完成。
+7O 的 `POST /admin/blog-comments/replies/{replyId}/hide` 是 ADMIN-only 直接回复隐藏入口。reason复用请求DTO：非空白、最多255个Java UTF-16单元；操作人来自会话，成功为200 `Result.ok()`且无data。写事务门禁在任何SQL之前；按候选回复→锁动态→锁同动态规范根（parent_id=answer_id=0，不限根状态）→锁目标回复的顺序，用锁定当前读复核目标。仅接受 parent_id>0、answer_id=parent_id、status=0/2 的直接回复。首次0→2、动态comments按零下限减一、V013插入一条专用审计同事务；任一写入不为1返回422并回滚，DataAccessException转不带cause的通用500。只有status=2且有匹配reply/blog/root、from=0/to=2的本用途审计才重复200，不写、不扣、不覆盖首次操作人/原因；旧status=2无此审计为404。1/3/NULL、非法或多级关系、缺动态/根/回复均404。隐藏或撤回根、已撤回动态下仍能隐藏存在且关系正确的回复。作者不能撤回status=2回复。保留正文、liked、关系、根和兄弟，不级联。计数是写入维护的派生值，不是当前可见行数保证，不回填历史。V013独立表唯一约束reply_id；不加外键、内容快照、TTL、恢复、举报、通知；7O当时没有审计读取，7P单条读取见文首，7G/7H的V008根评论审计API不包含回复审计。部署/回退见[7O记录](refactor/37-phase-7o-direct-reply-moderation.md)，学习见[直接回复隐藏笔记](learning/direct-reply-moderation.md)；选定本机验证已完成。
 
 `Follow` 只表示账号关注账号，禁止自己关注自己；同一 `(follower_id, followee_id)` 只能存在一次。MySQL 保存关系事实，Redis 集合或有序集合只能作为查询加速，结构必须统一。
 
@@ -145,7 +147,7 @@ Notification 只定义为未来独立模块。只有在订单状态、活动结�
 | 编辑动态（7J） | 不允许 | 仅本人 | 仅本人 | 仅本人；无管理员覆盖 |
 | 隐藏正常一级评论（7F） | 不允许 | 不允许 | 不允许 | 允许；作者身份不影响管理权限 |
 | 隐藏合法直接回复（7O） | 不允许 | 不允许 | 不允许 | 允许；父根可见性不影响该管理操作 |
-| 读取隐藏审计（7G 单条/7H 按动态分页） | 不允许 | 不允许 | 不允许 | 只读；不受原操作人身份影响 |
+| 读取隐藏审计（7G根单条/7H根分页/7P回复单条） | 不允许 | 不允许 | 不允许 | 只读；须为当前ADMIN，不以原操作人身份代替权限 |
 | 签到、参与活动、查看订单 | 不允许 | 仅本人 | 以用户身份仅本人 | 仅管理接口，不能冒充用户下单 |
 | 创建或修改门店 | 不允许 | 不允许 | 仅有效成员所属 Merchant 的 Store | 允许审核和平台管理 |
 | 创建、上下架活动 | 不允许 | 不允许 | 仅所属 Store | 允许审核和平台管理 |

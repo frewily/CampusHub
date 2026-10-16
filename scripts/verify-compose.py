@@ -983,6 +983,125 @@ def verify_direct_reply_moderation(base):
     check('Reply hide real status/counter/audit SQL errors and zero-row 422 roll back all state; four concurrent HTTP retries commit one hide and receipt')
 
 
+def verify_reply_hide_audit_query(base):
+    """Read retained V013 metadata through real roles, independently from current content and V008."""
+    blog_id, root_id, reply_id, sibling_id, operator_id, audit_id = (
+        9007199254900001, 9007199254900003, 9007199254900007,
+        9007199254900011, 9007199254900005, 9007199254900009)
+    actors = ((900120, 'ADMIN'), (900121, 'USER'), (900122, 'MERCHANT'),
+              (900123, 'ADMIN'), (900124, None), (operator_id, 'ADMIN'))
+    headers = {}
+    for index, (user_id, role) in enumerate(actors):
+        sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(%d,'%011d','synthetic-reply-audit-reader');" %
+            (user_id, 900120 + index))
+        if role:
+            sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (user_id, role))
+        token = 'synthetic-reply-audit-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[user_id] = {'authorization': token, 'Content-Type': 'application/json'}
+    sql("UPDATE tb_user SET status='DISABLED' WHERE id=900123;"
+        "INSERT INTO tb_blog(id,shop_id,user_id,title,images,content,liked,comments) "
+        "VALUES(%d,NULL,900121,'synthetic retained audit post','','private post text',17,3);"
+        "INSERT INTO tb_blog_comments(id,user_id,blog_id,parent_id,answer_id,content,status) VALUES"
+        "(%d,900121,%d,0,0,'private retained root',0),"
+        "(%d,900121,%d,%d,%d,'private retained target',0),"
+        "(%d,900122,%d,%d,%d,'private retained sibling',0);"
+        "ALTER TABLE tb_blog_reply_hide_audit AUTO_INCREMENT=%d;" %
+        (blog_id, root_id, blog_id, reply_id, blog_id, root_id, root_id,
+         sibling_id, blog_id, root_id, root_id, audit_id))
+    admin = headers[900120]
+    route = '/admin/blog-comments/replies/%d/hide-audit' % reply_id
+    hide = '/admin/blog-comments/replies/%d/hide' % reply_id
+    request(base, hide, 200, 'POST', b'{"reason":"original synthetic reply reason"}', headers[operator_id])
+    request(base, route, 401)
+    for user_id in (900121, 900122):
+        request(base, route, 403, headers=headers[user_id])
+    for user_id in (900123, 900124):
+        request(base, route, 401, headers=headers[user_id])
+    sql("UPDATE tb_user_role SET role='USER' WHERE user_id=%d;" % operator_id)
+    request(base, route, 403, headers=headers[operator_id])
+    sql("UPDATE tb_user_role SET role='ADMIN' WHERE user_id=%d;" % operator_id)
+    for invalid in ('0', '-1', 'bad', '9223372036854775808'):
+        request(base, '/admin/blog-comments/replies/' + invalid + '/hide-audit', 400, headers=admin)
+
+    def read():
+        body, _ = request(base, route, headers=admin)
+        result = json.loads(body)
+        assert set(result) == {'success', 'data'} and result['success'] is True
+        data = result['data']
+        assert set(data) == {'id', 'replyId', 'blogId', 'rootCommentId', 'operatorUserId',
+                             'reason', 'fromStatus', 'toStatus', 'createTime'}
+        for field, expected in (('id', audit_id), ('replyId', reply_id), ('blogId', blog_id),
+                                ('rootCommentId', root_id), ('operatorUserId', operator_id)):
+            assert isinstance(data[field], str) and data[field] == str(expected)
+        assert data['reason'] == 'original synthetic reply reason'
+        assert data['fromStatus'] == 0 and data['toStatus'] == 2
+        expected_time = sql("SELECT DATE_FORMAT(create_time,'%Y-%m-%dT%H:%i:%s') "
+                            'FROM tb_blog_reply_hide_audit WHERE reply_id=' + str(reply_id) + ';')
+        assert data['createTime'] == expected_time
+        return data
+
+    first = read()
+    request(base, hide, 200, 'POST', b'{"reason":"later reason must not replace"}', admin)
+    assert read() == first
+    assert sql('SELECT comments FROM tb_blog WHERE id=%d;' % blog_id) == '2'
+    assert sql('SELECT status FROM tb_blog_comments WHERE id=%d;' % sibling_id) == '0'
+    request(base, '/admin/blog-comments/%d/hide-audit' % reply_id, 404, headers=admin)
+    request(base, '/admin/blog-comments/replies/%d/hide-audit' % root_id, 404, headers=admin)
+    page, _ = request(base, '/admin/blog-comments/hide-audits/of/blog/%d' % blog_id, headers=admin)
+    assert json.loads(page)['data'] == {'items': [], 'hasNext': False}
+    request(base, '/admin/blog-comments/%d/hide' % root_id, 200, 'POST',
+            b'{"reason":"independent root reason"}', admin)
+    request(base, '/admin/blog-comments/replies/%d/hide-audit' % root_id, 404, headers=admin)
+    page, _ = request(base, '/admin/blog-comments/hide-audits/of/blog/%d' % blog_id, headers=admin)
+    assert [item['commentId'] for item in json.loads(page)['data']['items']] == [str(root_id)]
+    sql((ROOT / 'src/main/resources/db/migration/V013__add_blog_reply_hide_audit.sql').read_text('utf-8'))
+    assert read() == first
+    check('Reply audit GET: real ADMIN/current-role isolation, five lossless large string IDs, exact nine-field metadata, first receipt retention and V008 separation')
+
+    for state in (0, 2, 3):
+        missing = sql("INSERT INTO tb_blog_comments(user_id,blog_id,parent_id,answer_id,content,status) "
+                      "VALUES(900121,%d,%d,%d,'synthetic no receipt',%d); SELECT LAST_INSERT_ID();" %
+                      (blog_id, root_id, root_id, state))
+        request(base, '/admin/blog-comments/replies/' + missing + '/hide-audit', 404, headers=admin)
+        assert sql('SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE reply_id=%s;' % missing) == '0'
+    request(base, '/admin/blog-comments/replies/9223372036854775807/hide-audit', 404, headers=admin)
+    before = sql('SELECT * FROM tb_blog WHERE id=%d; SELECT * FROM tb_blog_comments WHERE blog_id=%d ORDER BY id;'
+                 'SELECT * FROM tb_blog_reply_hide_audit WHERE reply_id=%d;' % (blog_id, blog_id, reply_id))
+    triggers = []
+    try:
+        for suffix, table in (('reply', 'tb_blog_comments'), ('post', 'tb_blog'), ('audit', 'tb_blog_reply_hide_audit')):
+            name = 'synthetic_reply_audit_readonly_' + suffix
+            sql('CREATE TRIGGER ' + name + ' BEFORE UPDATE ON ' + table + " FOR EACH ROW "
+                "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic private unexpected update';")
+            triggers.append(name)
+        assert read() == first and read() == first
+        assert sql('SELECT * FROM tb_blog WHERE id=%d; SELECT * FROM tb_blog_comments WHERE blog_id=%d ORDER BY id;'
+                   'SELECT * FROM tb_blog_reply_hide_audit WHERE reply_id=%d;' % (blog_id, blog_id, reply_id)) == before
+    finally:
+        for name in triggers:
+            sql('DROP TRIGGER ' + name + ';')
+    sql('RENAME TABLE tb_blog_reply_hide_audit TO synthetic_reply_audit_query_unavailable;')
+    try:
+        body, _ = request(base, route, 500, headers=admin)
+        error = json.loads(body)
+        assert error['success'] is False and error['errorCode'] == 'INTERNAL_ERROR'
+        assert error['errorMsg'] == '服务器异常' and 'data' not in error
+        request(base, '/admin/blog-comments/%d/hide-audit' % root_id, headers=admin)
+    finally:
+        sql('RENAME TABLE synthetic_reply_audit_query_unavailable TO tb_blog_reply_hide_audit;')
+    assert read() == first
+    # Only rows explicitly created by this helper in the owned private project; retained audit is not a join.
+    sql('DELETE FROM tb_blog_comments WHERE blog_id=%d; DELETE FROM tb_blog WHERE id=%d;'
+        'DELETE FROM tb_user_role WHERE user_id=%d; DELETE FROM tb_user WHERE id=%d;' %
+        (blog_id, blog_id, operator_id, operator_id))
+    request(base, route, 401, headers=headers[operator_id])
+    assert read() == first
+    assert sql('SELECT COUNT(*) FROM tb_blog_reply_hide_audit WHERE reply_id=%d;' % reply_id) == '1'
+    check('Reply audit reads never synthesize legacy history or write state/counts; SQL fault is generic 500; retained metadata survives removal of synthetic reply/root/post/operator')
+
+
 def verify_comment_hide_audit_query(base, tokens):
     """Single-record metadata query, role isolation and retained-record semantics on target MySQL."""
     blog_id, root_id, operator_id, audit_id = (9007199254745001, 9007199254745003,
@@ -1831,6 +1950,7 @@ def main():
         verify_first_level_withdrawal(base, tokens)
         verify_first_level_moderation(base, tokens)
         verify_direct_reply_moderation(base)
+        verify_reply_hide_audit_query(base)
         verify_comment_hide_audit_query(base, tokens)
         verify_comment_hide_audit_pages(base, tokens)
         verify_post_author_edit(base, tokens)

@@ -13,6 +13,7 @@ import io.github.frewily.campushub.dto.request.BlogCommentHideRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentItem;
 import io.github.frewily.campushub.dto.response.BlogCommentPage;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
+import io.github.frewily.campushub.dto.response.BlogReplyHideAuditResponse;
 import io.github.frewily.campushub.dto.request.BlogCommentHideAuditPageRequest;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditPage;
 import io.github.frewily.campushub.exception.BusinessException;
@@ -233,6 +234,25 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
             // ADMIN-only HTTP entry; read the retained audit, not current comment/post/profile data.
             // Ordinary snapshot SELECT must neither wait for the hide writer nor expose its uncommitted audit.
             BlogCommentHideAuditResponse audit = baseMapper.findFirstLevelHideAuditDetails(commentId);
+            if (audit == null) throw new BusinessException(ErrorCode.NOT_FOUND);
+            return audit;
+        } catch (DataAccessException error) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public BlogReplyHideAuditResponse queryReplyHideAudit(Long replyId) {
+        validateCommentId(replyId);
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null || user.getId() <= 0) {
+            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED);
+        }
+        try {
+            // ADMIN-only HTTP entry. Read retained metadata, not current reply/root/post/account state.
+            // An ordinary RR snapshot must not wait for the hide writer or expose an uncommitted receipt.
+            BlogReplyHideAuditResponse audit = baseMapper.findDirectReplyHideAuditDetails(replyId);
             if (audit == null) throw new BusinessException(ErrorCode.NOT_FOUND);
             return audit;
         } catch (DataAccessException error) {

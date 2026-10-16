@@ -260,7 +260,9 @@
 
 ## 5 原始目标的剩余范围
 
-Phase 7O（2026-10-15，基线 `f7cf685b7924f4e6a8723ce2ea950a29c5322c9c`）：新增 ADMIN-only `POST /admin/blog-comments/replies/{replyId}/hide`，仅管理一层直接回复。V013独立 `tb_blog_reply_hide_audit`不混用V008根审计；当前49个应用映射、13个Controller，管理员评论Controller为4条。134项定向、470项Java8默认统计（4原设计跳过）、113项显式IT、44组目标Compose通过，隔离资源清理独立复核完成。初始HTTP mock的404只证明旧路由缺失；整合时补齐旧Admin数量、接口表新路由与mock读取核验，没有放宽生产校验。仍无恢复、回复审计读取、举报、通知或多级回复；完整锁序、原子回滚、计数边界、部署和回退见[Phase 7O](37-phase-7o-direct-reply-moderation.md)。提交后独立Luna审查，再普通推送与读回，最终SHA与同步状态以交付对话为准。
+Phase7P（2026-10-16，基线 `71c1fadef701f617ec7c9f6ca22874f355d70854`）：选择7O的最小只读闭环，新增ADMIN单条回复隐藏审计读取，九字段元数据、五个字符串ID，V013与V008读取互不混入。不新增迁移、回复审计分页、导出、恢复或通知；当前50条应用映射/13个Controller，管理员评论Controller5条。144项定向、480项Java8默认统计（4原设计跳过）、122项显式IT和46组Compose通过，隔离资源清理独立复核完成。范围/快照/保留/部署见[7P记录](38-phase-7p-reply-audit-query.md)；提交后新Luna独立审查、普通推送并读回，最终状态以交付对话为准。
+
+Phase 7O（2026-10-15，基线 `f7cf685b7924f4e6a8723ce2ea950a29c5322c9c`）：新增 ADMIN-only `POST /admin/blog-comments/replies/{replyId}/hide`，仅管理一层直接回复。V013独立 `tb_blog_reply_hide_audit`不混用V008根审计；7O当时49个应用映射、13个Controller，管理员评论Controller为4条。134项定向、470项Java8默认统计（4原设计跳过）、113项显式IT、44组目标Compose通过，隔离资源清理独立复核完成。初始HTTP mock的404只证明旧路由缺失；整合时补齐旧Admin数量、接口表新路由与mock读取核验，没有放宽生产校验。7O当时无恢复、回复审计读取、举报、通知或多级回复；完整锁序、原子回滚、计数边界、部署和回退见[Phase 7O](37-phase-7o-direct-reply-moderation.md)。提交后独立Luna审查，再普通推送与读回，最终SHA与同步状态以交付对话为准。
 
 Phase7N：选择可选发布编号的最小重试闭环；同用户/编号/有效内容返回原成功ID，变化内容409，无编号旧路径不变。V012账本占位/完成与动态/Feed意图同事务，成功账本不自动过期；四请求锁升级死锁经真实MySQL复现后改为共享当前读。最终81项定向、458项默认统计（4设计跳过）、101项显式IT、41组目标Compose通过，资源清理独立确认；不追加所有创建接口幂等、清理协议或全Feed重建。部署/回退、当前读与本轮验证见[7N记录](36-phase-7n-blog-publication-keys.md)，提交后独立Luna审查再推送，最终状态在交付对话报告。
 

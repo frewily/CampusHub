@@ -3,6 +3,7 @@ package io.github.frewily.campushub.mapper;
 import io.github.frewily.campushub.entity.BlogComments;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import io.github.frewily.campushub.dto.response.BlogCommentHideAuditResponse;
+import io.github.frewily.campushub.dto.response.BlogReplyHideAuditResponse;
 import org.apache.ibatis.annotations.Param;
 import java.util.List;
 
@@ -37,6 +38,7 @@ public interface BlogCommentsMapper extends BaseMapper<BlogComments> {
     int insertFirstLevelHideAudit(@Param("commentId") Long commentId, @Param("blogId") Long blogId,
                                  @Param("operatorUserId") Long operatorUserId, @Param("reason") String reason);
     BlogComments findModeratableDirectReply(@Param("replyId") Long replyId);
+    BlogReplyHideAuditResponse findDirectReplyHideAuditDetails(@Param("replyId") Long replyId);
     Long lockDirectReplyRoot(@Param("rootId") Long rootId, @Param("blogId") Long blogId);
     BlogComments lockModeratableDirectReply(@Param("replyId") Long replyId, @Param("blogId") Long blogId,
                                             @Param("rootId") Long rootId);

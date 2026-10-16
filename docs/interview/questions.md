@@ -1,5 +1,7 @@
 # CampusHub 面试追问与验证路线
 
+7P追问：为什么审计查询不先检查回复是否存在？原操作人失去ADMIN后还能读取吗？status=2却无审计该返回什么？为什么五个ID必须是字符串？只读RR与7O锁定当前读有什么差别？写事务未提交、回滚、提交到旧快照之后，各会读到什么？如何证明没有修改计数或混入V008？先复现[7P范围](../refactor/38-phase-7p-reply-audit-query.md)，不把AI辅助测试当作脱稿掌握。
+
 7N追问：为什么先查后写和单独Redis锁不够？为什么重复INSERT后用当前读而非普通RR快照？MyBatis与JPA的异常事务状态有什么区别？请求hash为什么不能直接拼接或hash原JSON？编号作用域、过期和回退怎么定义？编辑/撤回后重试为何不恢复正文？请先自己复现[7N用例](../refactor/36-phase-7n-blog-publication-keys.md)，不要把AI辅助测试数量当掌握证明。
 
 7M追问：为什么内容保存和收件意图必须同事务？为什么事务门禁要早于第一条SQL？为何afterCommit不确认DB待办？Redis返回false与null有什么区别？为什么重试不能刷新score？为何不需要租约仍不等于恰好一次？客户端POST重试、Redis丢失、暂停后台或回退旧版会怎样？先独立复现再核对[7M证据](../refactor/35-phase-7m-blog-feed-delivery.md)。

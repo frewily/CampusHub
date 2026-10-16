@@ -1,6 +1,8 @@
 # CampusHub
 
-Phase 7O 增加 ADMIN 直接回复隐藏 `POST /admin/blog-comments/replies/{replyId}/hide`；V013 使用独立回复审计表。当前源码映射为49条/13个Controller，其中`AdminBlogCommentsController`4条。134项定向通过；Java 8 clean package 470项（0失败/错误、4项原设计跳过）、113项显式IT（0失败/错误/skip）和目标Compose 44组均通过。本阶段选定本机验证及清理完成；阶段证据见[7O记录](docs/refactor/37-phase-7o-direct-reply-moderation.md)与[学习笔记](docs/learning/direct-reply-moderation.md)，个人掌握仍需独立确认。
+Phase7P补[单条回复隐藏审计读取](docs/refactor/38-phase-7p-reply-audit-query.md)：仅ADMIN查询V013保留元数据，五个ID用字符串返回；不join当前内容/用户、不修改状态或计数。当前50条应用映射/13个Controller，管理员评论Controller5条，不增加DDL或分页/导出/恢复。144项定向、480项Java8默认统计（4原设计跳过）、122项显式IT及46组Compose通过，隔离资源清理独立复核完成；不代表生产或个人掌握。[学习笔记](docs/learning/reply-hide-audit-query.md)说明快照与保留语义，最终提交/审查/同步状态以交付对话为准。
+
+Phase 7O 增加 ADMIN 直接回复隐藏 `POST /admin/blog-comments/replies/{replyId}/hide`；V013 使用独立回复审计表。7O当时49条映射/13个Controller，其中管理员评论Controller4条；134项定向、470项Java8默认统计（4项原设计跳过）、113项显式IT和44组Compose通过。这些是7O历史证据，非7P结果；见[7O记录](docs/refactor/37-phase-7o-direct-reply-moderation.md)与[学习笔记](docs/learning/direct-reply-moderation.md)，个人掌握仍需独立确认。
 
 Phase7N补[可选发布请求编号](docs/refactor/36-phase-7n-blog-publication-keys.md)：`POST /blog`携带合法 `Idempotency-Key` 时，同用户/编号/有效内容重试返回原ID，不再次建动态或投递任务；变更内容409，无编号的旧路径不变。V012必须先审查迁移再升级，账本持续保留；回退忽略编号的旧应用会失去保证。[学习笔记](docs/learning/blog-publication-keys.md)与[决策](docs/adr/0004-blog-publication-keys.md)说明边界。
 
@@ -34,7 +36,7 @@ HTTP → Spring Security（Redis Token + 数据库账号/角色）→ Controller
 - USER / MERCHANT / ADMIN 权限与商户资源归属检查；采用可失效的 Redis Token，不是 JWT。
 - 门店、校园动态、关注、Feed、签到和优惠活动沿用合理的遗留模块；不是所有遗留接口都已完成 DTO 改造。
 - Phase 7A 支持不关联门店的校园动态：POST /blog 的 shopId 可省略/null，提供则为正数；7I 当前语义进一步允许这种动态省略或提供空白 images，归一化后保存空字符串。关联门店动态仍要求非空白图片；7I 选定本轮实现与验证完成。一级评论由 7B 单独增加。
-- Phase 7B/7C 支持一级评论和一层直接回复的创建/可见游标读取，关系由服务端派生，写入与计数同事务；7D/7E 支持本人回复/一级评论逻辑撤回（保留原文、重复不扣计数），所有角色均仅本人。根撤回不改/扣回复，关闭其下新请求的回复列表/创建，回复作者仍可独立撤回；7F 支持 ADMIN 隐藏正常一级评论并事务写入审计；7G 单条查询与 7H 按动态分页查询均限定为根评论审计只读读取；7O 增加 ADMIN 隐藏合法直接回复并写入独立审计。仍无多级回复、级联/物理删除、恢复、举报工作流、通知或完整评价系统。
+- Phase 7B/7C 支持一级评论和一层直接回复的创建/可见游标读取，关系由服务端派生，写入与计数同事务；7D/7E 支持本人回复/一级评论逻辑撤回（保留原文、重复不扣计数），所有角色均仅本人。根撤回不改/扣回复，关闭其下新请求的回复列表/创建，回复作者仍可独立撤回；7F 支持 ADMIN 隐藏正常一级评论并事务写入审计；7G 单条查询与 7H 按动态分页查询均限定为根评论审计只读读取；7O 增加 ADMIN 隐藏合法直接回复并写入独立审计，7P 增加该审计的单条只读查询。仍无多级回复、级联/物理删除、恢复、举报工作流、通知或完整评价系统。
 - 库存、资格、时间窗口、一人一单与请求重放由 Redis Lua 校验。`ACCEPTED` 只代表进入 Stream，不代表订单落库或支付。
 - 消费者支持 pending 恢复、有限重试、失败归档和运维前向重放；数据库有唯一约束。保留 Redis Stream，不引入专业 MQ，见 [ADR 0001](docs/adr/0001-order-message-broker.md)。
 - 本人已落库未支付订单支持查询/取消，取消与 outbox 同事务；Redis 补偿独立恢复。不包含支付、退款或自动超时取消。

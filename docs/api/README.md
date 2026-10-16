@@ -1,6 +1,8 @@
 # CampusHub 当前 API 目录
 
-Phase 7O 新增 ADMIN-only `POST /admin/blog-comments/replies/{replyId}/hide`，通过 V013 独立记录直接回复隐藏审计。源码与机器清单当前为 **49 个显式 method/path 映射、13 个 Controller**；AdminBlogCommentsController 当前 4 条。选定本机验证完成，证据见[7O记录](../refactor/37-phase-7o-direct-reply-moderation.md)；此前各阶段的路由数均是其当时的历史统计。
+Phase7P新增ADMIN-only `GET /admin/blog-comments/replies/{replyId}/hide-audit`，只读V013单条保留元数据。当前50个显式method/path映射、13个Controller，管理员评论Controller5条；不新增迁移，不改变V008根审计接口。目录5项检查及选定本机验证通过，证据和语义见[7P记录](../refactor/38-phase-7p-reply-audit-query.md)。
+
+Phase 7O 新增 ADMIN-only `POST /admin/blog-comments/replies/{replyId}/hide`，通过V013独立记录回复审计；7O当时49条映射/13个Controller，管理员评论Controller4条。历史证据见[7O记录](../refactor/37-phase-7o-direct-reply-moderation.md)。
 
 Phase7N为POST/blog新增可选 `Idempotency-Key` 请求头；同用户/编号/有效创建内容重试返回原ID，不重新创建或投递，变化内容409，无编号路径不变。V012、身份校验、保留和回退边界见[7N记录](../refactor/36-phase-7n-blog-publication-keys.md)；其48/13是7N当时的历史统计。
 
@@ -10,7 +12,7 @@ Phase7L修正既有关注Feed的同时间组偏移累计，响应形状与48条�
 
 Phase 7K 新增作者本人 `DELETE /blog/{id}` 逻辑撤回，7K当时48条应用映射、13个Controller；可见性、评论/审核保留及不可直接回退旧应用的要求见[7K记录](../refactor/33-phase-7k-post-author-withdrawal.md)。下段7J是目录演进历史。
 
-机器清单的 `source_revision` 在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 初建时人工记录；这是目录来源，不表示该提交包含后续路由，也不随每阶段改写。参数/响应说明随业务阶段更新：7A 校园动态，7B 一级评论，7C 直接回复，7D/7E 本人回复/一级评论撤回，7F 管理员隐藏一级评论，7G 单条隐藏审计查询，7H 按动态分页读取隐藏审计，7I 纯文字校园动态发布语义，7J 作者编辑，7O 管理员隐藏直接回复，见相应阶段记录。机器清单当前记录 **49 个显式 method/path 映射**（含健康和图片），来自 13 个 Controller。两个 Actuator GET 管理路由另列，不混入应用端数量；7F 的44、7G的45、7H的46、7J的47及7N的48都是各阶段历史基数。
+机器清单的 `source_revision` 在应用基线 `68aa03bd86cb905c4828cd3a6c3b4616197aeca8` 初建时人工记录；这是目录来源，不表示该提交包含后续路由，也不随每阶段改写。参数/响应说明随业务阶段更新：7A 校园动态，7B 一级评论，7C 直接回复，7D/7E 本人回复/一级评论撤回，7F 管理员隐藏一级评论，7G 单条隐藏审计查询，7H 按动态分页读取隐藏审计，7I 纯文字校园动态发布语义，7J 作者编辑，7O 管理员隐藏直接回复，7P 单条回复审计读取，见相应阶段记录。机器清单当前记录 **50 个显式 method/path 映射**（含健康和图片），来自 13 个 Controller。两个 Actuator GET 管理路由另列，不混入应用端数量；7F 的44、7G的45、7H的46、7J的47及7N的48都是各阶段历史基数。
 
 - [逐接口目录](endpoints.md)：方法、路径、身份/资源限制、参数、响应与缺失资源语义，链接 Controller、Service 和模型。
 - [机器清单](routes.json)：method/path、Controller、handler 与声明的 `preAuthorize` 原文，用于回归。空字符串仅表示没有该注解，**不代表匿名可访问**；仍受 SecurityConfig 和服务层授权约束。
