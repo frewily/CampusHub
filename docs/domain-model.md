@@ -1,5 +1,7 @@
 # CampusHub 领域模型
 
+Phase7S提取merchant的门店分类查询切片，Controller仅依赖查询用例，缓存JSON与MyBatis查询由适配器承担。ShopType实体/响应和Mapper暂留原包，保留tb_shop_type、公开GET及旧缓存；并未完成Merchant/Store全模块迁移或新增分类管理。范围见[7S记录](refactor/41-phase-7s-shop-type-module.md)。
+
 Phase7R将签到迁入 `engagement` 首个业务切片：api→纯Java应用服务→存储端口→Redis适配器，移出登录服务；保留原月度Bitmap、JVM默认时区、当天未签为0与不跨月累计的语义。没有新增实体、表、积分、补签或通知；其他模块仍待渐进拆分。范围见[7R记录](refactor/40-phase-7r-check-in-module.md)。
 
 Phase7Q补[按动态分页读取回复隐藏审计](refactor/39-phase-7q-reply-audit-pages.md)：ADMIN只读V013元数据，按审计ID倒序游标，默认20/最大50，多取一行判后页；缺当前业务行仍可读保留审计。V014仅候选(blog_id,id)索引，不回填或修复历史，不承诺性能或跨页冻结。V008根审计仍独立；学习见[回复审计游标](learning/reply-hide-audit-pagination.md)。

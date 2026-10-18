@@ -49,11 +49,13 @@ Controller：[ShopController.java](../../src/main/java/io/github/frewily/campush
 
 ## 门店类型
 
-Controller：[ShopTypeController.java](../../src/main/java/io/github/frewily/campushub/controller/ShopTypeController.java)；Service：[IShopTypeService.java](../../src/main/java/io/github/frewily/campushub/service/IShopTypeService.java)、[ShopTypeServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/ShopTypeServiceImpl.java)；模型：[ShopType.java](../../src/main/java/io/github/frewily/campushub/entity/ShopType.java)。
+Controller：[ShopTypeController.java](../../src/main/java/io/github/frewily/campushub/merchant/api/ShopTypeController.java)；应用服务：[ShopTypeQueryService.java](../../src/main/java/io/github/frewily/campushub/merchant/application/ShopTypeQueryService.java)；端口：[ShopTypeRepository.java](../../src/main/java/io/github/frewily/campushub/merchant/application/ShopTypeRepository.java)、[ShopTypeCache.java](../../src/main/java/io/github/frewily/campushub/merchant/application/ShopTypeCache.java)；适配器：[MyBatisShopTypeRepository.java](../../src/main/java/io/github/frewily/campushub/merchant/infrastructure/MyBatisShopTypeRepository.java)、[RedisShopTypeCache.java](../../src/main/java/io/github/frewily/campushub/merchant/infrastructure/RedisShopTypeCache.java)。模型[ShopType.java](../../src/main/java/io/github/frewily/campushub/entity/ShopType.java)与[ShopTypeMapper.java](../../src/main/java/io/github/frewily/campushub/mapper/ShopTypeMapper.java)仍在旧包，MyBatis扫描/别名配置不改。
 
 | Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
 |---|---|---|---|---|
-| GET | `/shop-type/list` | [`queryTypeList`](../../src/main/java/io/github/frewily/campushub/controller/ShopTypeController.java#L21)；公开 | 无参数 | `List<ShopType>` Entity（`createTime`、`updateTime` 被 `@JsonIgnore`）；按 sort 升序；空列表为空数组 |
+| GET | `/shop-type/list` | `merchant.api.ShopTypeController.queryTypeList`；公开 | 无参数；无角色/商户成员门槛，失效身份不关闭公开读取 | `List<ShopType>` Entity；ID仍为JSON数字，时间字段仍忽略；数据库回源按sort升序（NULL先，相同sort不保证次序），缓存命中保留缓存次序；空列表为空数组 |
+
+7S只提取查询边界：缓存仍为 `cache:shop:type`，缺失/空字符串/空白回源，非空白用原Hutool JSON解码，`[]`为命中而非回源；成功回源后按原JSON格式写30分钟TTL，命中不续期。服务内Redis/解码/SQL/缓存写异常仍走原通用500，不悄悄降级、忽略错误或改成成功；本轮不添加锁、TTL抖动、脏缓存修复、分页或分类写接口。契约与验证见[7S记录](../refactor/41-phase-7s-shop-type-module.md)。
 
 ## 优惠券与订单
 

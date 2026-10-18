@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase7S继续业务分包：[门店分类查询](docs/refactor/41-phase-7s-shop-type-module.md)迁入merchant，查询服务通过存储/缓存端口编排，不再向Controller暴露通用CRUD服务。公开接口、Entity响应、sort排序和旧Redis缓存契约保留，仍51条映射/14个Controller；无新迁移、分类写接口或缓存降级规则。[学习笔记](docs/learning/shop-type-module.md)说明过渡边界；这不是完整商户模块或后台交付。
+
 Phase7R开始业务分包：[签到切片](docs/refactor/40-phase-7r-check-in-module.md)迁入engagement，原两个接口、身份权限、响应和月度Redis位图兼容；应用服务不再依赖登录服务或用户Mapper。仍为51条应用映射，拆为14个Controller；无新迁移、积分、补签或跨月连续规则，其他模块仍待渐进拆分。[学习笔记](docs/learning/check-in-module.md)说明依赖边界；验证与最终提交/审查/同步状态分别以阶段记录和交付对话为准，个人掌握仍需独立确认。
 
 Phase7Q补[按动态分页读取回复隐藏审计](docs/refactor/39-phase-7q-reply-audit-pages.md)：仅ADMIN按一个blog读取V013，审计ID倒序游标、默认20/最大50、九字段元数据；不混V008，不更新状态/计数。7Q当时51条应用映射/13个Controller，管理员评论Controller6条。159项定向、495项Java8默认统计（4原设计跳过）、132项显式IT及48组Compose通过，隔离资源清理独立复核完成；非生产或个人掌握证明。新增V014候选索引，已有库先备份核结构并审查应用再升级；无跨页冻结、性能结论、全局列表、导出或恢复。[学习笔记](docs/learning/reply-hide-audit-pagination.md)说明边界，最终提交/审查/同步状态以交付对话为准。
@@ -38,7 +40,7 @@ HTTP → Spring Security（Redis Token + 数据库账号/角色）→ Controller
 ```
 
 - USER / MERCHANT / ADMIN 权限与商户资源归属检查；采用可失效的 Redis Token，不是 JWT。
-- 门店、校园动态、关注、Feed和优惠活动沿用合理的遗留模块；签到已作为engagement首个业务切片拆分，保留旧数据格式。不是所有遗留接口都已完成 DTO 改造或业务分包。
+- 门店、校园动态、关注、Feed和优惠活动沿用合理的遗留模块；签到已拆为engagement切片，分类查询已拆入merchant，均保留旧数据格式。不是所有遗留接口都已完成 DTO 改造或业务分包。
 - Phase 7A 支持不关联门店的校园动态：POST /blog 的 shopId 可省略/null，提供则为正数；7I 当前语义进一步允许这种动态省略或提供空白 images，归一化后保存空字符串。关联门店动态仍要求非空白图片；7I 选定本轮实现与验证完成。一级评论由 7B 单独增加。
 - Phase 7B/7C 支持一级评论和一层直接回复的创建/可见游标读取，关系由服务端派生，写入与计数同事务；7D/7E 支持本人回复/一级评论逻辑撤回（保留原文、重复不扣计数），所有角色均仅本人。根撤回不改/扣回复，关闭其下新请求的回复列表/创建，回复作者仍可独立撤回；7F 支持 ADMIN 隐藏正常一级评论并事务写入审计；7G 单条查询与 7H 按动态分页查询均限定为根评论审计只读读取；7O 增加 ADMIN 隐藏合法直接回复并写入独立审计，7P/7Q分别支持该审计的单条/按动态分页只读查询。仍无多级回复、级联/物理删除、恢复、举报工作流、通知或完整评价系统。
 - 库存、资格、时间窗口、一人一单与请求重放由 Redis Lua 校验。`ACCEPTED` 只代表进入 Stream，不代表订单落库或支付。

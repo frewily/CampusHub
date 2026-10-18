@@ -1,21 +1,19 @@
-package io.github.frewily.campushub.controller;
-
+package io.github.frewily.campushub.merchant.api;
 
 import io.github.frewily.campushub.dto.Result;
-import io.github.frewily.campushub.entity.ShopType;
-import io.github.frewily.campushub.service.IShopTypeService;
+import io.github.frewily.campushub.merchant.application.ShopTypeQueryService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import javax.annotation.Resource;
-import java.util.List;
-
 @RestController
 @RequestMapping("/shop-type")
 public class ShopTypeController {
-    @Resource
-    private IShopTypeService typeService;
+    private final ShopTypeQueryService typeService;
+
+    public ShopTypeController(ShopTypeQueryService typeService) {
+        this.typeService = typeService;
+    }
 
     @GetMapping("list")
     public Result queryTypeList() {

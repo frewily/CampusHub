@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7S把既有 `GET /shop-type/list` 移入merchant.api.ShopTypeController；简单类名、handler、公开策略与机器清单不变，仍51条映射/14个Controller。详细缓存/响应/排序与验证边界见[7S记录](../refactor/41-phase-7s-shop-type-module.md)，源码链接已更新，不把包移动当作新增接口。
+
 Phase7R将既有签到两个路由迁入engagement业务包：仍是51条应用映射，现为14个Controller；URL、handler名、权限和响应不变。新调用链、时区与兼容范围见[7R记录](../refactor/40-phase-7r-check-in-module.md)，目录扫描覆盖整个主源码根包，而不是仅扫描旧controller包。
 
 Phase7Q新增ADMIN-only `GET /admin/blog-comments/replies/hide-audits/of/blog/{blogId}`，只读V013按动态审计ID游标分页；默认20/最大50，不join当前实体。7Q当时51条应用映射、13个Controller，管理员评论Controller6条；V014仅候选索引，不改V008。目录5项及选定本机验证通过，证据/契约/迁移见[7Q记录](../refactor/39-phase-7q-reply-audit-pages.md)。

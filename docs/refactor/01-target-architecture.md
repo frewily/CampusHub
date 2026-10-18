@@ -19,6 +19,8 @@ CampusHub 的当前目标是可运行、可测试、可解释的模块化单体�
 
 Phase7R开始落地首个有限业务切片：`io.github.frewily.campushub.engagement` 下分api/application/infrastructure/config，仅接管既有签到。CheckInService为纯Java应用服务，通过CheckInStore访问Redis适配器，保留原HTTP和位图格式；仍复用旧shared类型所在的dto/utils/security包，其他业务继续技术分层，不把这个切片称为全仓库模块化完成。范围见[7R记录](40-phase-7r-check-in-module.md)。
 
+Phase7S提取merchant下的分类查询，api→ShopTypeQueryService→ShopTypeRepository/ShopTypeCache→MyBatis/Redis适配器；应用编排不依赖Spring、MyBatis或Hutool，不暴露IService。为保留响应及扫描兼容，暂时复用旧entity.ShopType和mapper.ShopTypeMapper；不是全部领域/持久化类型已隔离，Store/商户成员/后台也未整体搬迁。范围见[7S记录](41-phase-7s-shop-type-module.md)。
+
 ```text
 com.campushub
 ├── identity       用户、认证、角色、会话和账号状态

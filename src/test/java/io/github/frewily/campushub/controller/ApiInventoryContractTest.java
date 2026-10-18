@@ -236,6 +236,18 @@ class ApiInventoryContractTest {
         assertTrue(rows(documented).contains(canonical(expected)), "withdrawal missing from inventory");
     }
 
+    @Test
+    void categoryReadIsStillPublicAfterMovingToTheMerchantPackage() {
+        assertTrue(controllerTypes.contains(io.github.frewily.campushub.merchant.api.ShopTypeController.class));
+        ObjectNode expected = JSON.createObjectNode();
+        expected.put("method", "GET"); expected.put("path", "/shop-type/list");
+        expected.put("controller", "ShopTypeController"); expected.put("handler", "queryTypeList");
+        expected.put("preAuthorize", "");
+        assertTrue(actual.contains(canonical(expected)));
+        assertTrue(rows(documented).contains(canonical(expected)));
+        assertEquals(1L, actual.stream().filter(row -> row.contains("\"ShopTypeController\"")).count());
+    }
+
     private static void assertCommentRoute(String method, String path, String handler, String guard) {
         ObjectNode expected = JSON.createObjectNode();
         expected.put("method", method); expected.put("path", path);

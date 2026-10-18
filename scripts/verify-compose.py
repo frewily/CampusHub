@@ -166,6 +166,77 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_shop_type_module(base, tokens):
+    """Only this fresh project's categories/cache are manipulated; retain the legacy public read contract."""
+    key = 'cache:shop:type'
+    fixture_ids = {995201, 995202, 995203, 995204}
+    sql("INSERT INTO tb_shop_type(id,name,icon,sort) VALUES"
+        "(995201,'synthetic-type-late','late.svg',9),(995202,'synthetic-type-early','early.svg',2),"
+        "(995203,'synthetic-type-null','null.svg',NULL),(995204,'synthetic-type-tie','tie.svg',2);")
+    redis('DEL', key)
+    body, _ = request(base, '/shop-type/list')
+    payload = json.loads(body)
+    assert payload['success'] is True
+    items = payload['data']
+    own = [row for row in items if row['id'] in fixture_ids]
+    assert len(own) == 4 and own[0]['id'] == 995203 and own[-1]['id'] == 995201
+    assert {row['id'] for row in own[1:3]} == {995202, 995204}, 'equal sort values have no promised tie order'
+    for row in own:
+        assert type(row['id']) is int
+        expected_fields = {'id', 'name', 'icon'} | ({'sort'} if row['id'] != 995203 else set())
+        assert set(row) == expected_fields, 'preserve entity JSON and ignored timestamps'
+    raw = redis('GET', key)
+    assert len(json.loads(raw)) == len(items) and 1790 <= int(redis('TTL', key)) <= 1800
+    for token in tokens:  # The initial synthetic USER and ADMIN; this endpoint has no participation guard.
+        request(base, '/shop-type/list', headers={'authorization': token})
+    for user_id, role, status in ((995210, 'MERCHANT', 'ACTIVE'), (995211, 'USER', 'DISABLED'), (995212, None, 'ACTIVE')):
+        sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'%011d','synthetic-type-reader','%s');" %
+            (user_id, user_id, status))
+        if role:
+            sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (user_id, role))
+        token = 'synthetic-type-reader-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        request(base, '/shop-type/list', headers={'authorization': token})
+    request(base, '/shop-type/list', headers={'authorization': 'synthetic-expired-' + uuid.uuid4().hex})
+    check('merchant categories: actual public roles, sort/NULL/tie contract, numeric IDs, hidden timestamps and legacy cache key/TTL')
+
+    def generic_failure():
+        body, _ = request(base, '/shop-type/list', 500)
+        result = json.loads(body)
+        assert result['success'] is False and result['errorCode'] == 'INTERNAL_ERROR'
+        assert 'shop_type' not in result.get('errorMsg', '') and 'SQL' not in result.get('errorMsg', '')
+
+    sql('RENAME TABLE tb_shop_type TO phase7s_owned_shop_type_fault;')
+    try:
+        redis('EXPIRE', key, '120')
+        body, _ = request(base, '/shop-type/list')
+        assert json.loads(body)['data'] == items and redis('GET', key) == raw
+        assert 110 <= int(redis('TTL', key)) <= 120, 'cache hit must not reset TTL'
+        redis('SET', key, '[]')
+        body, _ = request(base, '/shop-type/list')
+        assert json.loads(body)['data'] == [] and redis('GET', key) == '[]'
+        redis('SET', key, '{broken')
+        generic_failure()
+        assert redis('GET', key) == '{broken'
+        redis('SET', key, ' ')
+        generic_failure()
+        # The shared command helper strips text whitespace; compare the exact stored byte instead.
+        assert redis('STRLEN', key) == '1' and redis('BITFIELD', key, 'GET', 'u8', '0') == '32', \
+            'SQL failure must preserve the single ASCII-space cache value'
+    finally:
+        sql('RENAME TABLE phase7s_owned_shop_type_fault TO tb_shop_type;')
+        redis('DEL', key)
+    redis('SET', key, ' ')
+    body, _ = request(base, '/shop-type/list')
+    restored = json.loads(body)['data']
+    assert {row['id'] for row in restored if row['id'] in fixture_ids} == fixture_ids
+    assert 1790 <= int(redis('TTL', key)) <= 1800
+    sql('DELETE FROM tb_shop_type WHERE id IN (995201,995202,995203,995204);')
+    redis('DEL', key)
+    check('merchant categories: cache hit and empty hit skip unavailable SQL; malformed JSON/SQL faults stay generic; blank cache refills after recovery')
+
+
 def verify_check_in_module(base):
     """Exercise the moved controller and real monthly bitmap without changing existing business rules."""
     actors = ((995101, ('USER',)), (995102, ('MERCHANT',)), (995103, ('ADMIN', 'USER')),
@@ -2145,6 +2216,7 @@ def main():
         for user, token in zip((900001, 900002), tokens):
             redis("HSET", "login:token:" + token, "id", str(user), "nickName", "synthetic")
             redis("EXPIRE", "login:token:" + token, "600")
+        verify_shop_type_module(base, tokens)
         verify_check_in_module(base)
         verify_campus_posts(base, tokens)
         verify_text_only_campus_posts(base, tokens)

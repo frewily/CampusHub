@@ -260,6 +260,8 @@
 
 ## 5 原始目标的剩余范围
 
+Phase7S（2026-10-18，基线 `dc0af44f79803b614bf78dab159bb91a1164935a`）：继续既定业务分包，仅提取门店分类公开查询到merchant，移除该用例的旧Controller/IService接口/实现。保留URL、响应、sort、缓存键/JSON/TTL/失败语义；Entity/Mapper暂留旧包。51条映射/14个Controller、V001–V014不变；无分类写、管理后台、缓存故障降级或全量merchant迁移。验证与回退见[7S记录](41-phase-7s-shop-type-module.md)，按阶段闭环提交、独立Luna审查、普通推送并读回后停止。
+
 Phase7R（2026-10-18，基线 `fb88a6fadd695534693cc8fa63ae72c2957aa3b6`）：选择既定业务分包方向的首个有限切片，把签到从UserController/IUserService/UserServiceImpl移入engagement。保留两个URL、身份权限、响应、Redis键和位偏移；应用服务只依赖Clock与存储端口，不新增schema/迁移/TTL/积分/补签。当前仍51条映射，Controller因拆分为14个；其余模块仍未完整分包。验证与回退边界见[7R记录](40-phase-7r-check-in-module.md)，提交后新Luna审查、普通推送并读回，最终状态在交付对话报告。
 
 Phase7Q（2026-10-16，基线 `a43baff37ce240530bdc720837d1dce334625afb`）：选择ADMIN按一个动态分页读取V013回复审计，复用九字段元数据和通用游标约束。新增V014候选(blog_id,id)索引，51条应用映射/13个Controller，管理员评论Controller6条；不改隐藏写流程、V008根审计与7P单条，不提供全局列表、导出、恢复、冻结快照或性能结论。159项定向、495项Java8默认统计（4原设计跳过）、132项显式IT和48组Compose通过，隔离资源清理独立复核完成。范围及备份/迁移边界见[7Q记录](39-phase-7q-reply-audit-pages.md)；提交后新Luna独立审查、普通推送与读回，最终状态以交付对话为准。
