@@ -1,6 +1,8 @@
 # CampusHub
 
-Phase7Q补[按动态分页读取回复隐藏审计](docs/refactor/39-phase-7q-reply-audit-pages.md)：仅ADMIN按一个blog读取V013，审计ID倒序游标、默认20/最大50、九字段元数据；不混V008，不更新状态/计数。当前51条应用映射/13个Controller，管理员评论Controller6条。159项定向、495项Java8默认统计（4原设计跳过）、132项显式IT及48组Compose通过，隔离资源清理独立复核完成；非生产或个人掌握证明。新增V014候选索引，已有库先备份核结构并审查应用再升级；无跨页冻结、性能结论、全局列表、导出或恢复。[学习笔记](docs/learning/reply-hide-audit-pagination.md)说明边界，最终提交/审查/同步状态以交付对话为准。
+Phase7R开始业务分包：[签到切片](docs/refactor/40-phase-7r-check-in-module.md)迁入engagement，原两个接口、身份权限、响应和月度Redis位图兼容；应用服务不再依赖登录服务或用户Mapper。仍为51条应用映射，拆为14个Controller；无新迁移、积分、补签或跨月连续规则，其他模块仍待渐进拆分。[学习笔记](docs/learning/check-in-module.md)说明依赖边界；验证与最终提交/审查/同步状态分别以阶段记录和交付对话为准，个人掌握仍需独立确认。
+
+Phase7Q补[按动态分页读取回复隐藏审计](docs/refactor/39-phase-7q-reply-audit-pages.md)：仅ADMIN按一个blog读取V013，审计ID倒序游标、默认20/最大50、九字段元数据；不混V008，不更新状态/计数。7Q当时51条应用映射/13个Controller，管理员评论Controller6条。159项定向、495项Java8默认统计（4原设计跳过）、132项显式IT及48组Compose通过，隔离资源清理独立复核完成；非生产或个人掌握证明。新增V014候选索引，已有库先备份核结构并审查应用再升级；无跨页冻结、性能结论、全局列表、导出或恢复。[学习笔记](docs/learning/reply-hide-audit-pagination.md)说明边界，最终提交/审查/同步状态以交付对话为准。
 
 Phase7P补[单条回复隐藏审计读取](docs/refactor/38-phase-7p-reply-audit-query.md)，仅ADMIN、不join当前实体。7P当时50条映射/13个Controller，管理员评论Controller5条；144项定向、480项Java8默认统计（4原设计跳过）、122项显式IT及46组Compose通过。这些是7P历史证据，非7Q结果，不代表生产或个人掌握；[学习笔记](docs/learning/reply-hide-audit-query.md)保留当时只读快照边界。
 
@@ -36,7 +38,7 @@ HTTP → Spring Security（Redis Token + 数据库账号/角色）→ Controller
 ```
 
 - USER / MERCHANT / ADMIN 权限与商户资源归属检查；采用可失效的 Redis Token，不是 JWT。
-- 门店、校园动态、关注、Feed、签到和优惠活动沿用合理的遗留模块；不是所有遗留接口都已完成 DTO 改造。
+- 门店、校园动态、关注、Feed和优惠活动沿用合理的遗留模块；签到已作为engagement首个业务切片拆分，保留旧数据格式。不是所有遗留接口都已完成 DTO 改造或业务分包。
 - Phase 7A 支持不关联门店的校园动态：POST /blog 的 shopId 可省略/null，提供则为正数；7I 当前语义进一步允许这种动态省略或提供空白 images，归一化后保存空字符串。关联门店动态仍要求非空白图片；7I 选定本轮实现与验证完成。一级评论由 7B 单独增加。
 - Phase 7B/7C 支持一级评论和一层直接回复的创建/可见游标读取，关系由服务端派生，写入与计数同事务；7D/7E 支持本人回复/一级评论逻辑撤回（保留原文、重复不扣计数），所有角色均仅本人。根撤回不改/扣回复，关闭其下新请求的回复列表/创建，回复作者仍可独立撤回；7F 支持 ADMIN 隐藏正常一级评论并事务写入审计；7G 单条查询与 7H 按动态分页查询均限定为根评论审计只读读取；7O 增加 ADMIN 隐藏合法直接回复并写入独立审计，7P/7Q分别支持该审计的单条/按动态分页只读查询。仍无多级回复、级联/物理删除、恢复、举报工作流、通知或完整评价系统。
 - 库存、资格、时间窗口、一人一单与请求重放由 Redis Lua 校验。`ACCEPTED` 只代表进入 Stream，不代表订单落库或支付。
@@ -193,7 +195,7 @@ python3 scripts/verify-business-diagnostics.py
 
 ## API 与设计文档
 
-- [当前 API 目录](docs/api/README.md)、[48 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：来自 13 个 Controller，另列两个 Actuator GET 管理路由；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
+- [当前 API 目录](docs/api/README.md)、[51 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：来自 14 个 Controller，另列两个 Actuator GET 管理路由；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
 - [Phase 7A 校园动态](docs/refactor/23-phase-7a-campus-posts.md)、[可选门店关联与发布/回退](docs/learning/campus-post-store-association.md)。
 - [Phase 7B 一级评论](docs/refactor/24-phase-7b-comments.md)、[一级评论与游标分页学习笔记](docs/learning/first-level-comments-and-cursors.md)。
 - [Phase 7C 直接回复](docs/refactor/25-phase-7c-comment-replies.md)、[关系派生、锁顺序与可见性](docs/learning/direct-comment-replies.md)。
@@ -214,7 +216,7 @@ python3 scripts/verify-business-diagnostics.py
 - [Phase 6B 验证记录](docs/refactor/17-phase-6b-business-diagnostics.md)、[质量覆盖矩阵](docs/refactor/phase-6b-quality-matrix.md)、[业务诊断笔记](docs/learning/business-diagnostics.md)。
 - [Phase 6C 验证记录](docs/refactor/18-phase-6c-performance.md)、[性能报告与原始证据](docs/performance/README.md)、[事实限定的面试材料](docs/interview/README.md)。
 - [项目故事](docs/interview/project-story.md)、[面试追问](docs/interview/questions.md)、[事实限定的简历要点](docs/interview/resume-points.md)。
-- [Phase 6D 交付盘点与剩余范围](docs/refactor/19-phase-6d-delivery.md)：当时仅有重点 API 契约，6F 已补当前显式路由目录；完整商户/管理后台、评论评价、通知及业务模块分包仍未交付。当时缺少的选定抢购负载已由 [Phase 6E2](docs/refactor/21-phase-6e2-flash-sale-results.md) 补验，不能用 6C 读取结果替代，也不把有限批次当成容量验收。
+- [Phase 6D 交付盘点与剩余范围](docs/refactor/19-phase-6d-delivery.md)：当时仅有重点 API 契约，6F 已补当前显式路由目录；完整商户/管理后台、完整评价、通知与全量业务分包仍未交付，7R仅拆首个签到切片。当时缺少的选定抢购负载已由 [Phase 6E2](docs/refactor/21-phase-6e2-flash-sale-results.md) 补验，不能用 6C 读取结果替代，也不把有限批次当成容量验收。
 
 `GET /shop/search` 匿名可访问，支持 `keyword,typeId,minPrice,maxPrice,minScore,x,y,radiusMeters,sort,page,size`。详细取值/单位以搜索契约为准；`data` 为 `items,total,page,size,sort,hasNext`，ID 为字符串。HTTP routes、表名和大部分 Redis key 保留；门店详情缓存已切换 `cache:shop:v2:`，不支持新旧缓存写入程序混跑的一致性保证。
 

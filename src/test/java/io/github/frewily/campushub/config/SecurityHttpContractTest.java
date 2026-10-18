@@ -1,6 +1,8 @@
 package io.github.frewily.campushub.config;
 
 import io.github.frewily.campushub.controller.UserController;
+import io.github.frewily.campushub.engagement.api.CheckInController;
+import io.github.frewily.campushub.engagement.application.CheckInService;
 import io.github.frewily.campushub.controller.ShopController;
 import io.github.frewily.campushub.controller.VoucherController;
 import io.github.frewily.campushub.controller.BlogController;
@@ -60,6 +62,8 @@ class SecurityHttpContractTest {
     @MockBean
     private IUserService userService;
     @MockBean
+    private CheckInService checkInService;
+    @MockBean
     private IUserInfoService userInfoService;
     @MockBean
     private IShopService shopService;
@@ -82,6 +86,7 @@ class SecurityHttpContractTest {
     @EnableAutoConfiguration
     @Import({
             UserController.class,
+            CheckInController.class,
             ShopController.class,
             VoucherController.class,
             BlogController.class,

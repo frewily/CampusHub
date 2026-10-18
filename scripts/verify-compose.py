@@ -166,6 +166,62 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_check_in_module(base):
+    """Exercise the moved controller and real monthly bitmap without changing existing business rules."""
+    actors = ((995101, ('USER',)), (995102, ('MERCHANT',)), (995103, ('ADMIN', 'USER')),
+              (995104, ('USER',)), (995105, ()))
+    headers = {}
+    for user_id, roles in actors:
+        sql("INSERT INTO tb_user(id,phone,nick_name) VALUES(%d,'%011d','synthetic-check-in');" % (user_id, user_id))
+        for role in roles:
+            sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (user_id, role))
+        token = 'synthetic-check-in-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[user_id] = {'authorization': token}
+    sql("UPDATE tb_user SET status='DISABLED' WHERE id=995104;")
+    stamp = compose('exec', '-T', 'app', 'date', '+%Y%m%d')
+    assert re.fullmatch(r'[0-9]{8}', stamp)
+    month, day = stamp[:6], int(stamp[6:])
+    user_key, merchant_key = 'sign:995101:' + month, 'sign:995102:' + month
+    assert redis('EXISTS', user_key, merchant_key) == '0'
+    for path, method in (('/user/sign', 'POST'), ('/user/sign/count', 'GET')):
+        body, _ = request(base, path, 401, method)
+        assert json.loads(body)['errorCode'] == 'AUTHENTICATION_FAILED'
+        for user_id, expected in ((995103, 403), (995104, 401), (995105, 401)):
+            request(base, path, expected, method, headers=headers[user_id])
+    body, _ = request(base, '/user/sign/count', headers=headers[995101])
+    assert json.loads(body)['data'] == 0
+    for _ in range(2):
+        body, _ = request(base, '/user/sign?userId=995102', 200, 'POST', headers=headers[995101])
+        assert json.loads(body) == {'success': True}
+    body, _ = request(base, '/user/sign/count', headers=headers[995101])
+    assert json.loads(body)['data'] == 1
+    assert redis('BITCOUNT', user_key) == '1'
+    assert redis('GETBIT', user_key, str(day - 1)) == '1'
+    assert redis('TTL', user_key) == '-1'
+    assert redis('EXISTS', merchant_key) == '0'
+    assert redis('EXISTS', *('sign:%d:%s' % (actor, month) for actor in (995103, 995104, 995105))) == '0'
+    check('engagement check-in routes preserve identity, role denial, one-bit repeat and no expiry over real HTTP/Redis')
+    # Import the exact legacy key/offset format before invoking the new application service.
+    for offset in range(day):
+        redis('SETBIT', merchant_key, str(offset), '1')
+    historical = 'sign:995102:199901'
+    redis('SETBIT', historical, '30', '1')
+    body, _ = request(base, '/user/sign/count', headers=headers[995102])
+    assert json.loads(body)['data'] == day
+    request(base, '/user/sign', 200, 'POST', headers=headers[995102])
+    assert redis('BITCOUNT', merchant_key) == str(day)
+    assert redis('TTL', merchant_key) == '-1'
+    assert redis('GETBIT', historical, '30') == '1'
+    sql("INSERT INTO tb_user_role(user_id,role) VALUES(995102,'ADMIN');")
+    request(base, '/user/sign', 403, 'POST', headers=headers[995102])
+    request(base, '/user/sign/count', 403, headers=headers[995102])
+    assert redis('BITCOUNT', merchant_key) == str(day)
+    assert compose('exec', '-T', 'app', 'date', '+%Y%m%d') == stamp, 'rerun check-in fixture if it crosses midnight'
+    check('engagement reads preexisting monthly bitmaps and current roles without changing historical buckets')
+
+
 def verify_campus_posts(base, tokens):
     """Synthetic HTTP -> real DB/Redis acceptance, not a load or delivery guarantee."""
     sql("INSERT INTO tb_follow(user_id,follow_user_id) VALUES(900002,900001);")
@@ -2089,6 +2145,7 @@ def main():
         for user, token in zip((900001, 900002), tokens):
             redis("HSET", "login:token:" + token, "id", str(user), "nickName", "synthetic")
             redis("EXPIRE", "login:token:" + token, "600")
+        verify_check_in_module(base)
         verify_campus_posts(base, tokens)
         verify_text_only_campus_posts(base, tokens)
         verify_first_level_comments(base, tokens)

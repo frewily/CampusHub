@@ -13,7 +13,6 @@ import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
@@ -91,18 +90,6 @@ public class UserController {
         }
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
         return Result.ok(userDTO);
-    }
-
-    @PostMapping("/sign")
-    @PreAuthorize("@resourceAuthorization.canParticipateAsUser()")
-    public Result sign(){
-        return userService.sign();
-    }
-
-    @GetMapping("/sign/count")
-    @PreAuthorize("@resourceAuthorization.canParticipateAsUser()")
-    public Result signCount(){
-        return userService.signCount();
     }
 
 }

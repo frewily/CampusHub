@@ -17,6 +17,8 @@ CampusHub 的当前目标是可运行、可测试、可解释的模块化单体�
 
 代码最终按业务模块组织，每个模块内部再区分接口、应用服务、领域规则和基础设施。迁移期间允许旧包与新包共存，禁止一次性移动全部类。
 
+Phase7R开始落地首个有限业务切片：`io.github.frewily.campushub.engagement` 下分api/application/infrastructure/config，仅接管既有签到。CheckInService为纯Java应用服务，通过CheckInStore访问Redis适配器，保留原HTTP和位图格式；仍复用旧shared类型所在的dto/utils/security包，其他业务继续技术分层，不把这个切片称为全仓库模块化完成。范围见[7R记录](40-phase-7r-check-in-module.md)。
+
 ```text
 com.campushub
 ├── identity       用户、认证、角色、会话和账号状态

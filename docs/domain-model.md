@@ -1,5 +1,7 @@
 # CampusHub 领域模型
 
+Phase7R将签到迁入 `engagement` 首个业务切片：api→纯Java应用服务→存储端口→Redis适配器，移出登录服务；保留原月度Bitmap、JVM默认时区、当天未签为0与不跨月累计的语义。没有新增实体、表、积分、补签或通知；其他模块仍待渐进拆分。范围见[7R记录](refactor/40-phase-7r-check-in-module.md)。
+
 Phase7Q补[按动态分页读取回复隐藏审计](refactor/39-phase-7q-reply-audit-pages.md)：ADMIN只读V013元数据，按审计ID倒序游标，默认20/最大50，多取一行判后页；缺当前业务行仍可读保留审计。V014仅候选(blog_id,id)索引，不回填或修复历史，不承诺性能或跨页冻结。V008根审计仍独立；学习见[回复审计游标](learning/reply-hide-audit-pagination.md)。
 
 Phase7P补[单条回复隐藏审计](refactor/38-phase-7p-reply-audit-query.md)：ADMIN只读V013保留的九字段元数据，不join当前回复/根/动态/操作人；五个ID为字符串，缺记录404，不从旧状态推断历史。V008根审计读取仍独立；无新DDL、分页、导出或恢复。学习见[回复审计读取](learning/reply-hide-audit-query.md)，验证以本阶段记录为准。

@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自13个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由。7O增加直接回复隐藏，7P/7Q分别增加单条/按动态分页读取回复审计；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自14个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。7R将两个签到路由移入业务包的CheckInController，URL/权限/响应不变。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由。7O增加直接回复隐藏，7P/7Q分别增加单条/按动态分页读取回复审计；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
 
 ## 通用约定
 
@@ -22,8 +22,17 @@ Controller：[UserController.java](../../src/main/java/io/github/frewily/campush
 | GET | `/user/me` | [`me`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L73)；需认证 | 无参数 | `UserDTO`：`id`、`nickName`、`icon` |
 | GET | `/user/info/{id}` | [`info`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L79)；需认证，无角色限制 | Path `id` 为正数 | 有资料时 `UserInfoResponse`；无记录时成功且 data 为 null，不是 404 |
 | GET | `/user/{id}` | [`queryUserById`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L87)；需认证，无角色限制 | Path `id` 为正数 | 有用户时复制为 `UserDTO`；无用户时成功且 data 为 null，不是 404 |
-| POST | `/user/sign` | [`sign`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L98)；需认证；`canParticipateAsUser` 允许 USER/MERCHANT、拒绝 ADMIN | 无参数 | 成功，无 data |
-| GET | `/user/sign/count` | [`signCount`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L104)；需认证；允许 USER/MERCHANT、拒绝 ADMIN | 无参数 | 当前月连续签到天数整数；无签到为 `0` |
+
+## 签到（engagement）
+
+调用链：[CheckInController](../../src/main/java/io/github/frewily/campushub/engagement/api/CheckInController.java) → [CheckInService](../../src/main/java/io/github/frewily/campushub/engagement/application/CheckInService.java) → [CheckInStore](../../src/main/java/io/github/frewily/campushub/engagement/application/CheckInStore.java) → [RedisCheckInStore](../../src/main/java/io/github/frewily/campushub/engagement/infrastructure/RedisCheckInStore.java)。身份来自会话；应用服务只依赖存储端口和Clock，无用户Mapper或登录服务依赖。生产按JVM默认时区取当天，每次操作仅捕获一次日期。
+
+| Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
+|---|---|---|---|---|
+| POST | `/user/sign` | `CheckInController.sign`；需认证；`canParticipateAsUser` 允许 USER/MERCHANT、拒绝 ADMIN（含混合角色） | 无参数；忽略外部userId，身份取会话 | 成功，无 data；同日重复只设置同一位 |
+| GET | `/user/sign/count` | `CheckInController.signCount`；需认证；同上 | 无参数 | 本月截至今天连续签到天数整数；今天未签、无签到为 `0`，不跨月累计 |
+
+Redis仍为 `sign:{userId}:yyyyMM`，SETBIT偏移day-1；BITFIELD读取月初到今天的unsigned(day)位，再统计末尾连续1。无新TTL、SQL或迁移，不引入积分、补签、跨月连续签到及历史数据清理。
 
 ## 门店与搜索
 

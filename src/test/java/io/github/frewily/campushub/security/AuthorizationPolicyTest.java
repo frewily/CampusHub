@@ -2,7 +2,7 @@ package io.github.frewily.campushub.security;
 
 import io.github.frewily.campushub.controller.ShopController;
 import io.github.frewily.campushub.controller.UploadController;
-import io.github.frewily.campushub.controller.UserController;
+import io.github.frewily.campushub.engagement.api.CheckInController;
 import io.github.frewily.campushub.controller.VoucherController;
 import io.github.frewily.campushub.controller.VoucherOrderController;
 import io.github.frewily.campushub.dto.request.ShopCreateRequest;
@@ -29,7 +29,9 @@ class AuthorizationPolicyTest {
                 "@resourceAuthorization.canManagePromotion(#voucher.shopId)");
         assertPolicy(VoucherOrderController.class, "seckillVoucher", new Class<?>[]{Long.class},
                 "@resourceAuthorization.canParticipateAsUser()");
-        assertPolicy(UserController.class, "sign", new Class<?>[0],
+        assertPolicy(CheckInController.class, "sign", new Class<?>[0],
+                "@resourceAuthorization.canParticipateAsUser()");
+        assertPolicy(CheckInController.class, "signCount", new Class<?>[0],
                 "@resourceAuthorization.canParticipateAsUser()");
         assertPolicy(UploadController.class, "deleteBlogImg", new Class<?>[]{String.class},
                 "hasRole('ADMIN')");

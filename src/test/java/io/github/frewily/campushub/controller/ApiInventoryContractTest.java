@@ -121,7 +121,7 @@ class ApiInventoryContractTest {
     @Test
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
-        assertEquals(13, controllerTypes.size());
+        assertEquals(14, controllerTypes.size());
         assertEquals(51, actual.size());
         assertBlogEditRoute();
         assertCommentRoute("POST", "/blog-comments", "createComment",
@@ -205,6 +205,20 @@ class ApiInventoryContractTest {
     @Test
     void blogEditRouteIsRegisteredAndDocumentedWithItsRoleGuard() {
         assertBlogEditRoute();
+    }
+
+    @Test
+    void checkInRoutesAreDiscoveredOutsideTheLegacyControllerPackage() {
+        assertTrue(controllerTypes.contains(io.github.frewily.campushub.engagement.api.CheckInController.class));
+        for (String[] mapping : new String[][]{{"POST", "/user/sign", "sign"}, {"GET", "/user/sign/count", "signCount"}}) {
+            ObjectNode expected = JSON.createObjectNode();
+            expected.put("method", mapping[0]); expected.put("path", mapping[1]);
+            expected.put("controller", "CheckInController"); expected.put("handler", mapping[2]);
+            expected.put("preAuthorize", "@resourceAuthorization.canParticipateAsUser()");
+            assertTrue(actual.contains(canonical(expected)));
+            assertTrue(rows(documented).contains(canonical(expected)));
+        }
+        assertEquals(2L, actual.stream().filter(row -> row.contains("\"CheckInController\"")).count());
     }
 
     private static void assertBlogEditRoute() {
