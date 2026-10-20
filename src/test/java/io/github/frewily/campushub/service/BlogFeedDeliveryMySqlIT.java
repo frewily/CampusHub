@@ -245,11 +245,10 @@ class BlogFeedDeliveryMySqlIT {
         @SuppressWarnings("unchecked")
         ZSetOperations<String, String> feedOperations() { return mock(ZSetOperations.class); }
 
-        @Bean FollowServiceImpl followService(FollowMapper followMapper, StringRedisTemplate redis, IUserService users) {
+        @Bean FollowServiceImpl followService(FollowMapper followMapper, StringRedisTemplate redis) {
             FollowServiceImpl service = new FollowServiceImpl();
             ReflectionTestUtils.setField(service, "baseMapper", followMapper);
             ReflectionTestUtils.setField(service, "stringRedisTemplate", redis);
-            ReflectionTestUtils.setField(service, "userService", users);
             return service;
         }
 

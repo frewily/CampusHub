@@ -260,6 +260,8 @@
 
 ## 5 原始目标的剩余范围
 
+Phase7T（2026-10-20，基线 `b4c4dd14f88c32d0935b2f3fa230dde077527c06`）：继续模块化单体分包，仅提取是否关注/共同关注到social。保持两个GET、正Long校验、认证身份、数字ID的UserDTO、MySQL事实COUNT与Redis ZSet交集语义；关注写入及动态发布链不改。当前51条映射/15个Controller，V001–V014不变；不添加回填、修复、分页、通知或强一致保证。证据与回退见[7T记录](42-phase-7t-follow-query-module.md)，按阶段闭环提交、独立Luna审查、普通推送读回后停止。
+
 Phase7S（2026-10-18，基线 `dc0af44f79803b614bf78dab159bb91a1164935a`）：继续既定业务分包，仅提取门店分类公开查询到merchant，移除该用例的旧Controller/IService接口/实现。保留URL、响应、sort、缓存键/JSON/TTL/失败语义；Entity/Mapper暂留旧包。51条映射/14个Controller、V001–V014不变；无分类写、管理后台、缓存故障降级或全量merchant迁移。验证与回退见[7S记录](41-phase-7s-shop-type-module.md)，按阶段闭环提交、独立Luna审查、普通推送并读回后停止。
 
 Phase7R（2026-10-18，基线 `fb88a6fadd695534693cc8fa63ae72c2957aa3b6`）：选择既定业务分包方向的首个有限切片，把签到从UserController/IUserService/UserServiceImpl移入engagement。保留两个URL、身份权限、响应、Redis键和位偏移；应用服务只依赖Clock与存储端口，不新增schema/迁移/TTL/积分/补签。当前仍51条映射，Controller因拆分为14个；其余模块仍未完整分包。验证与回退边界见[7R记录](40-phase-7r-check-in-module.md)，提交后新Luna审查、普通推送并读回，最终状态在交付对话报告。

@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase7T继续业务分包：[关注查询切片](docs/refactor/42-phase-7t-follow-query-module.md)把“是否关注/共同关注”迁入social；原两个GET、认证与响应保留，关注写入及动态投递链不改。当前51条映射/15个Controller；是否关注仍查MySQL，共同关注仍读旧ZSet交集，不新增重建、强一致快照或写入修复。[学习笔记](docs/learning/follow-query-module.md)说明过渡边界，不代表整个social或identity已迁移。
+
 Phase7S继续业务分包：[门店分类查询](docs/refactor/41-phase-7s-shop-type-module.md)迁入merchant，查询服务通过存储/缓存端口编排，不再向Controller暴露通用CRUD服务。公开接口、Entity响应、sort排序和旧Redis缓存契约保留，仍51条映射/14个Controller；无新迁移、分类写接口或缓存降级规则。[学习笔记](docs/learning/shop-type-module.md)说明过渡边界；这不是完整商户模块或后台交付。
 
 Phase7R开始业务分包：[签到切片](docs/refactor/40-phase-7r-check-in-module.md)迁入engagement，原两个接口、身份权限、响应和月度Redis位图兼容；应用服务不再依赖登录服务或用户Mapper。仍为51条应用映射，拆为14个Controller；无新迁移、积分、补签或跨月连续规则，其他模块仍待渐进拆分。[学习笔记](docs/learning/check-in-module.md)说明依赖边界；验证与最终提交/审查/同步状态分别以阶段记录和交付对话为准，个人掌握仍需独立确认。
@@ -197,7 +199,7 @@ python3 scripts/verify-business-diagnostics.py
 
 ## API 与设计文档
 
-- [当前 API 目录](docs/api/README.md)、[51 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：来自 14 个 Controller，另列两个 Actuator GET 管理路由；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
+- [当前 API 目录](docs/api/README.md)、[51 条逐接口说明](docs/api/endpoints.md)、[机器清单](docs/api/routes.json)：来自 15 个 Controller，另列两个 Actuator GET 管理路由；[Phase 6F 验证记录](docs/refactor/22-phase-6f-api-catalog.md)说明漂移检查的能力边界。
 - [Phase 7A 校园动态](docs/refactor/23-phase-7a-campus-posts.md)、[可选门店关联与发布/回退](docs/learning/campus-post-store-association.md)。
 - [Phase 7B 一级评论](docs/refactor/24-phase-7b-comments.md)、[一级评论与游标分页学习笔记](docs/learning/first-level-comments-and-cursors.md)。
 - [Phase 7C 直接回复](docs/refactor/25-phase-7c-comment-replies.md)、[关系派生、锁顺序与可见性](docs/learning/direct-comment-replies.md)。

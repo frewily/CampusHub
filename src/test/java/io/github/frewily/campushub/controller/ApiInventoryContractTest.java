@@ -121,7 +121,7 @@ class ApiInventoryContractTest {
     @Test
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
-        assertEquals(14, controllerTypes.size());
+        assertEquals(15, controllerTypes.size());
         assertEquals(51, actual.size());
         assertBlogEditRoute();
         assertCommentRoute("POST", "/blog-comments", "createComment",
@@ -219,6 +219,20 @@ class ApiInventoryContractTest {
             assertTrue(rows(documented).contains(canonical(expected)));
         }
         assertEquals(2L, actual.stream().filter(row -> row.contains("\"CheckInController\"")).count());
+    }
+
+    @Test
+    void followQueriesMoveWithoutChangingTheLegacyWriteRouteOrGuards() {
+        assertTrue(controllerTypes.contains(io.github.frewily.campushub.social.api.FollowQueryController.class));
+        for (String[] mapping : new String[][]{{"/follow/or/not/{id}", "isFollow"}, {"/follow/common/{id}", "common"}}) {
+            ObjectNode expected = JSON.createObjectNode();
+            expected.put("method", "GET"); expected.put("path", mapping[0]);
+            expected.put("controller", "FollowQueryController"); expected.put("handler", mapping[1]); expected.put("preAuthorize", "");
+            assertTrue(actual.contains(canonical(expected)));
+            assertTrue(rows(documented).contains(canonical(expected)));
+        }
+        assertEquals(2L, actual.stream().filter(row -> row.contains("\"FollowQueryController\"")).count());
+        assertEquals(1L, actual.stream().filter(row -> row.contains("\"FollowController\"")).count());
     }
 
     private static void assertBlogEditRoute() {

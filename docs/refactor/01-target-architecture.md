@@ -21,6 +21,8 @@ Phase7R开始落地首个有限业务切片：`io.github.frewily.campushub.engag
 
 Phase7S提取merchant下的分类查询，api→ShopTypeQueryService→ShopTypeRepository/ShopTypeCache→MyBatis/Redis适配器；应用编排不依赖Spring、MyBatis或Hutool，不暴露IService。为保留响应及扫描兼容，暂时复用旧entity.ShopType和mapper.ShopTypeMapper；不是全部领域/持久化类型已隔离，Store/商户成员/后台也未整体搬迁。范围见[7S记录](41-phase-7s-shop-type-module.md)。
 
+Phase7T提取social下的关注查询：FollowQueryController→FollowQueryService→关系事实/关注投影/用户资料三个读取端口。MyBatis、Redis和旧IUserService映射由适配器承担；纯编排仍复用UserDTO。Follow写入与Blog发布的旧IFollowService查询依赖保留，不在一次提交内迁移整个social、identity或Feed链；见[7T记录](42-phase-7t-follow-query-module.md)。
+
 ```text
 com.campushub
 ├── identity       用户、认证、角色、会话和账号状态

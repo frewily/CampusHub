@@ -1,5 +1,7 @@
 # CampusHub 领域模型
 
+Phase7T把关注的两个GET提取到social查询切片；是否关注仍读MySQL事实，共同关注仍读原ZSet投影并经旧用户服务生成UserDTO，不改变身份、状态或响应规则。关注写入与Feed发布依赖暂留旧包，不宣称跨库一致、投影重建或整个social迁移。范围见[7T记录](refactor/42-phase-7t-follow-query-module.md)。
+
 Phase7S提取merchant的门店分类查询切片，Controller仅依赖查询用例，缓存JSON与MyBatis查询由适配器承担。ShopType实体/响应和Mapper暂留原包，保留tb_shop_type、公开GET及旧缓存；并未完成Merchant/Store全模块迁移或新增分类管理。范围见[7S记录](refactor/41-phase-7s-shop-type-module.md)。
 
 Phase7R将签到迁入 `engagement` 首个业务切片：api→纯Java应用服务→存储端口→Redis适配器，移出登录服务；保留原月度Bitmap、JVM默认时区、当天未签为0与不跨月累计的语义。没有新增实体、表、积分、补签或通知；其他模块仍待渐进拆分。范围见[7R记录](refactor/40-phase-7r-check-in-module.md)。

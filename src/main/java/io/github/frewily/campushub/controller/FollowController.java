@@ -27,14 +27,4 @@ public class FollowController {
         return followService.follow(followUserId, isFollow);
     }
 
-    @GetMapping("/or/not/{id}")
-    public Result isFollow(@Positive(message = "用户ID必须为正数") @PathVariable("id") Long followUserId) {
-        return followService.isFollow(followUserId);
-    }
-
-    @GetMapping("/common/{id}")
-    public Result common(@Positive(message = "用户ID必须为正数") @PathVariable Long id) {
-        return followService.common(id);
-    }
-
 }

@@ -166,6 +166,105 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_follow_query_module(base):
+    """Read-only social slice over its own actors, relationships and legacy ZSet projection."""
+    roles = ((997101, 'USER', 'ACTIVE'), (997102, 'MERCHANT', 'ACTIVE'), (997103, 'ADMIN', 'ACTIVE'),
+             (997104, 'USER', 'DISABLED'), (997105, None, 'ACTIVE'), (997110, 'USER', 'ACTIVE'))
+    headers = {}
+    for index, (user_id, role, account_status) in enumerate(roles):
+        sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'000000%05d','synthetic-follow-reader','%s');" %
+            (user_id, 7100 + index, account_status))
+        if role:
+            sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (user_id, role))
+        token = 'synthetic-follow-query-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(user_id), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[user_id] = {'authorization': token}
+    shared, disabled_profile, missing = 9007199254741993, 9007199254741995, 9007199254741997
+    sql("INSERT INTO tb_user(id,phone,password,nick_name,icon,status) VALUES"
+        "(%d,'00000007110','synthetic-only','shared','shared.svg','ACTIVE'),"
+        "(%d,'00000007111','synthetic-only','retained-profile','retained.svg','DISABLED');" % (shared, disabled_profile))
+    for actor in (997101, 997102, 997103, 997110):
+        body, _ = request(base, '/follow/%d/true' % shared, 200, 'PUT', headers=headers[actor])
+        assert json.loads(body) == {'success': True}
+
+    def query(actor, route, expected=200):
+        body, _ = request(base, route, expected, headers=headers[actor])
+        return json.loads(body)
+
+    def assert_profiles(result, expected):
+        assert result['success'] is True
+        items = result['data']
+        assert {item['id'] for item in items} == set(expected)
+        for item in items:
+            assert set(item) == {'id', 'nickName', 'icon'} and type(item['id']) is int
+
+    for actor in (997101, 997102, 997103):
+        assert query(actor, '/follow/or/not/%d?userId=997105' % shared)['data'] is True
+        assert_profiles(query(actor, '/follow/common/997110?userId=997105'), {shared})
+    for route in ('/follow/or/not/%d' % shared, '/follow/common/997110'):
+        request(base, route, 401)
+        for actor in (997104, 997105):
+            assert query(actor, route, 401)['errorCode'] == 'AUTHENTICATION_FAILED'
+    for invalid in ('0', '-1', '9223372036854775808', 'not-a-number'):
+        for prefix in ('/follow/or/not/', '/follow/common/'):
+            assert query(997101, prefix + invalid, 400)['errorCode'] == 'VALIDATION_FAILED'
+    check('social follow queries: current roles and identity, positive Long validation, old write endpoint and numeric-ID UserDTO whitelist')
+
+    actor_key, target_key = 'follows:997101', 'follows:997110'
+    for key in (actor_key, target_key):
+        redis('ZADD', key, '12', str(disabled_profile), '13', str(missing))
+        redis('EXPIRE', key, '600')
+    before = {key: redis('ZRANGE', key, '0', '-1', 'WITHSCORES') for key in (actor_key, target_key)}
+    ttl = {key: int(redis('TTL', key)) for key in (actor_key, target_key)}
+    rows_sql = 'SELECT user_id,follow_user_id FROM tb_follow WHERE user_id IN (997101,997102,997103,997110) ORDER BY user_id,follow_user_id;'
+    rows_before = sql(rows_sql)
+    assert query(997101, '/follow/or/not/%d' % disabled_profile)['data'] is False
+    assert_profiles(query(997101, '/follow/common/997110'), {shared, disabled_profile})
+    assert_profiles(query(997101, '/follow/common/997101'), {shared, disabled_profile})
+    assert query(997101, '/follow/or/not/997101')['data'] is False
+    for key in before:
+        assert redis('ZRANGE', key, '0', '-1', 'WITHSCORES') == before[key]
+        assert ttl[key] - 30 <= int(redis('TTL', key)) <= ttl[key], 'query must not refresh or remove TTL'
+
+    def generic_failure(route, actor=997101):
+        result = query(actor, route, 500)
+        assert result['success'] is False and result['errorCode'] == 'INTERNAL_ERROR'
+        assert 'SQL' not in result.get('errorMsg', '') and 'follows:' not in result.get('errorMsg', '')
+
+    for key in (actor_key, target_key): redis('ZADD', key, '14', 'synthetic-not-a-long')
+    malformed = {key: redis('ZRANGE', key, '0', '-1', 'WITHSCORES') for key in before}
+    generic_failure('/follow/common/997110')
+    for key in before:
+        assert redis('ZRANGE', key, '0', '-1', 'WITHSCORES') == malformed[key]
+        redis('ZREM', key, 'synthetic-not-a-long')
+
+    admin_key = 'follows:997103'
+    redis('ZREM', admin_key, str(shared))
+    assert query(997103, '/follow/or/not/%d' % shared)['data'] is True
+    assert_profiles(query(997103, '/follow/common/997110'), set())
+    redis('SET', admin_key, 'synthetic-wrong-type')
+    try:
+        generic_failure('/follow/common/997110', 997103)
+        assert redis('GET', admin_key) == 'synthetic-wrong-type'
+        assert query(997103, '/follow/or/not/%d' % shared)['data'] is True
+    finally:
+        redis('DEL', admin_key)
+
+    sql('RENAME TABLE tb_follow TO phase7t_owned_follow_fault;')
+    try:
+        generic_failure('/follow/or/not/%d' % shared)
+        assert_profiles(query(997101, '/follow/common/997110'), {shared, disabled_profile})
+    finally:
+        sql('RENAME TABLE phase7t_owned_follow_fault TO tb_follow;')
+    assert sql(rows_sql) == rows_before
+    for key in before: assert redis('ZRANGE', key, '0', '-1', 'WITHSCORES') == before[key]
+    assert query(997101, '/follow/or/not/%d' % shared)['data'] is True
+    request(base, '/follow/%d/true' % shared, 200, 'PUT', headers=headers[997101])
+    assert sql(rows_sql) == rows_before
+    check('social follow queries: SQL truth vs Redis intersection, missing/disabled profiles, self reads, unchanged projection and sanitized faults/recovery without repair')
+
+
 def verify_shop_type_module(base, tokens):
     """Only this fresh project's categories/cache are manipulated; retain the legacy public read contract."""
     key = 'cache:shop:type'
@@ -2216,6 +2315,7 @@ def main():
         for user, token in zip((900001, 900002), tokens):
             redis("HSET", "login:token:" + token, "id", str(user), "nickName", "synthetic")
             redis("EXPIRE", "login:token:" + token, "600")
+        verify_follow_query_module(base)
         verify_shop_type_module(base, tokens)
         verify_check_in_module(base)
         verify_campus_posts(base, tokens)

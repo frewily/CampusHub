@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自14个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。7R将两个签到路由移入业务包的CheckInController，URL/权限/响应不变。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由。7O增加直接回复隐藏，7P/7Q分别增加单条/按动态分页读取回复审计；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自15个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。7T只把两个关注GET拆入FollowQueryController，原写入Controller保留PUT，URL/权限/响应不变。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
 
 ## 通用约定
 
@@ -179,13 +179,15 @@ Controller：[AdminBlogCommentsController.java](../../src/main/java/io/github/fr
 
 ## 关注
 
-Controller：[FollowController.java](../../src/main/java/io/github/frewily/campushub/controller/FollowController.java)；Service：[IFollowService.java](../../src/main/java/io/github/frewily/campushub/service/IFollowService.java)、[FollowServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/FollowServiceImpl.java)；模型：[Follow.java](../../src/main/java/io/github/frewily/campushub/entity/Follow.java)、[UserDTO.java](../../src/main/java/io/github/frewily/campushub/dto/UserDTO.java)。
+查询：[FollowQueryController.java](../../src/main/java/io/github/frewily/campushub/social/api/FollowQueryController.java)→[FollowQueryService.java](../../src/main/java/io/github/frewily/campushub/social/application/FollowQueryService.java)→[FollowLookupRepository](../../src/main/java/io/github/frewily/campushub/social/application/FollowLookupRepository.java)/[FollowProjectionReader](../../src/main/java/io/github/frewily/campushub/social/application/FollowProjectionReader.java)/[FollowUserReader](../../src/main/java/io/github/frewily/campushub/social/application/FollowUserReader.java)，由[MyBatis查询](../../src/main/java/io/github/frewily/campushub/social/infrastructure/MyBatisFollowLookupRepository.java)、[Redis投影读取](../../src/main/java/io/github/frewily/campushub/social/infrastructure/RedisFollowProjectionReader.java)、[旧用户服务桥接](../../src/main/java/io/github/frewily/campushub/social/infrastructure/LegacyFollowUserReader.java)实现。写入仍是[FollowController.java](../../src/main/java/io/github/frewily/campushub/controller/FollowController.java)→[IFollowService.java](../../src/main/java/io/github/frewily/campushub/service/IFollowService.java)/[FollowServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/FollowServiceImpl.java)；模型[Follow.java](../../src/main/java/io/github/frewily/campushub/entity/Follow.java)、[UserDTO.java](../../src/main/java/io/github/frewily/campushub/dto/UserDTO.java)保留。
 
 | Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
 |---|---|---|---|---|
 | PUT | `/follow/{id}/{isFollow}` | [`follow`](../../src/main/java/io/github/frewily/campushub/controller/FollowController.java#L24)；需认证；允许 USER、MERCHANT、ADMIN | Path `id` 目标用户 ID 正数；`isFollow` 转为 Boolean；无 body | 成功无 data；不能关注自己时 409；重复关注保持成功 |
-| GET | `/follow/or/not/{id}` | [`isFollow`](../../src/main/java/io/github/frewily/campushub/controller/FollowController.java#L31)；需认证 | Path `id` 正数 | Boolean；当前用户是否关注目标用户 |
-| GET | `/follow/common/{id}` | [`common`](../../src/main/java/io/github/frewily/campushub/controller/FollowController.java#L36)；需认证 | Path `id` 目标用户 ID 为正数 | 共同关注的 `List<UserDTO>`；任一关注集合为空或交集为空时返回空数组 |
+| GET | `/follow/or/not/{id}` | `FollowQueryController.isFollow`；需认证，无额外角色门槛 | Path `id` 正Java Long，当前用户取会话 | Boolean；按MySQL关系COUNT>0，不依据Redis或额外验证目标用户状态/存在性；无关系为false，不是404 |
+| GET | `/follow/common/{id}` | `FollowQueryController.common`；需认证，无额外角色门槛 | Path `id` 正Java Long，当前用户取会话 | 旧 `follows:{userId}` ZSet交集的 `List<UserDTO>`（id为数字，仅昵称/图标等DTO字段）；任一集合空/缺失或无交集返回空数组，缺失用户自然省略；无排序承诺 |
+
+有效USER/MERCHANT/ADMIN均可读，匿名、失效、停用或无有效角色身份401；非法参数400。自查不沿用写入“不能关注自己”的409规则。共同关注不是MySQL关系表交集，不从DB回填投影，也不因被展示账号停用就增加新过滤；坏member、WRONGTYPE或数据库异常维持通用500。查询不改关注关系/关注投影、分数或其TTL，认证过滤器仍可能照常续期会话。无分页、重建或跨MySQL/Redis一致快照；范围见[7T记录](../refactor/42-phase-7t-follow-query-module.md)。
 
 ## 图片上传与读取
 
