@@ -47,6 +47,8 @@ Phase7U进一步提取social关注写入：FollowController→FollowCommandServi
 
 Phase7V将Blog发布所需关注者读取改为social.application.FollowerReader，MyBatisFollowerReader承担原关系查询与ID映射；删除无调用方的旧IFollowService/FollowServiceImpl。以上7T/7U对旧桥接的描述是当时范围；当前发布只依赖返回ID列表的专用端口，但Blog其余业务仍在旧技术分层。未搬迁全部实体/Mapper或Feed服务，见[7V记录](44-phase-7v-follower-reader.md)。
 
+Phase7W提取promotion公开优惠券目录：VoucherQueryController→VoucherQueryService→VoucherQueryRepository→MyBatisVoucherQueryRepository，继续使用旧VoucherMapper/XML和Voucher Entity。查询只保留原上架状态/LEFT JOIN规则，旧券写入与限量活动/订单服务不搬迁；不是全部promotion分包。见[7W记录](45-phase-7w-voucher-query-module.md)。
+
 ## 3 目标业务模型
 
 ### 3.1 身份与权限

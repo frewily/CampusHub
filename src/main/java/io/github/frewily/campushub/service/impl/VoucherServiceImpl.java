@@ -16,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.access.prepost.PreAuthorize;
 
 import javax.annotation.Resource;
-import java.util.List;
 
 
 @Service
@@ -27,12 +26,6 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
     @Resource
     private FlashSaleRedisPublisher flashSaleRedisPublisher;
-
-    @Override
-    public Result queryVoucherOfShop(Long shopId) {
-        List<Voucher> vouchers = getBaseMapper().queryVoucherOfShop(shopId);
-        return Result.ok(vouchers);
-    }
 
     @Override
     @Transactional

@@ -121,8 +121,9 @@ class ApiInventoryContractTest {
     @Test
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
-        assertEquals(15, controllerTypes.size());
+        assertEquals(16, controllerTypes.size());
         assertEquals(51, actual.size());
+        assertVoucherQueryRoute();
         assertBlogEditRoute();
         assertCommentRoute("POST", "/blog-comments", "createComment",
                 "hasAnyRole('USER', 'MERCHANT', 'ADMIN')");
@@ -260,6 +261,18 @@ class ApiInventoryContractTest {
         assertTrue(actual.contains(canonical(expected)));
         assertTrue(rows(documented).contains(canonical(expected)));
         assertEquals(1L, actual.stream().filter(row -> row.contains("\"ShopTypeController\"")).count());
+    }
+
+    private static void assertVoucherQueryRoute() {
+        assertTrue(controllerTypes.contains(io.github.frewily.campushub.promotion.api.VoucherQueryController.class));
+        ObjectNode expected = JSON.createObjectNode();
+        expected.put("method", "GET"); expected.put("path", "/voucher/list/{shopId}");
+        expected.put("controller", "VoucherQueryController"); expected.put("handler", "queryVoucherOfShop");
+        expected.put("preAuthorize", "");
+        assertTrue(actual.contains(canonical(expected)), "voucher catalog mapping/guard changed");
+        assertTrue(rows(documented).contains(canonical(expected)), "voucher catalog route missing from inventory");
+        assertEquals(1L, actual.stream().filter(row -> row.contains("\"VoucherQueryController\"")).count());
+        assertEquals(2L, actual.stream().filter(row -> row.contains("\"VoucherController\"")).count());
     }
 
     private static void assertCommentRoute(String method, String path, String handler, String guard) {

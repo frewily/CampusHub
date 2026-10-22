@@ -260,6 +260,8 @@
 
 ## 5 原始目标的剩余范围
 
+Phase7W（2026-10-22，基线 `8bb0df3aa3af18b851d3b19e3ea3b9358b548d0e`）：仅提取公开门店优惠券列表到promotion，保留status=1、原LEFT JOIN列、Entity数字ID/金额和时间响应，正Long参数；不增加门店存在/活动时间/库存资格规则或缓存/排序/分页。旧创建/秒杀/订单链与V001–V014不变，51映射/16Controllers；范围与证据见[7W记录](45-phase-7w-voucher-query-module.md)，验证后提交、新Luna独立审查、普通推送读回后停止。
+
 Phase7V（2026-10-22，基线 `6904a30f5614fcf7217c3d850c50daafd8c317f1`）：迁移Blog发布使用的关注者读取到social专用FollowerReader，删除无调用方的旧关注CRUD桥接。MySQL按follow_user_id读取并映射user_id，调用仍在原发布事务/位置，保留异常与收件人语义；不加排序、用户过滤、分页、Redis查询、事务传播变化或投递策略。仍51条映射/15个Controller、V001–V014；实现和本机证据见[7V记录](44-phase-7v-follower-reader.md)，提交后独立Luna审查、普通推送读回后停止。
 
 Phase7U（2026-10-22，基线 `6a63085382d9736bcf2e86948b4674267d8679b5`）：继续既定业务分包，仅迁移PUT关注/取关到social。保留角色、会话身份、正Long/Boolean参数、重复关注刷新分数、重复取关不修复陈旧投影和MySQL提交后Redis失败的原边界；Blog发布源码及查询桥接保留。仍51条映射/15个Controller、V001–V014；不新增事务、补偿、目标用户校验、通知或全social迁移。验证与回退见[7U记录](43-phase-7u-follow-command-module.md)，按实现、验证、提交、新Luna独立审查、普通推送读回后停止。

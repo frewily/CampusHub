@@ -3,6 +3,8 @@ package io.github.frewily.campushub.config;
 import io.github.frewily.campushub.controller.UserController;
 import io.github.frewily.campushub.engagement.api.CheckInController;
 import io.github.frewily.campushub.engagement.application.CheckInService;
+import io.github.frewily.campushub.promotion.api.VoucherQueryController;
+import io.github.frewily.campushub.promotion.application.VoucherQueryService;
 import io.github.frewily.campushub.controller.ShopController;
 import io.github.frewily.campushub.controller.VoucherController;
 import io.github.frewily.campushub.controller.BlogController;
@@ -70,6 +72,8 @@ class SecurityHttpContractTest {
     @MockBean
     private IVoucherService voucherService;
     @MockBean
+    private VoucherQueryService voucherQueryService;
+    @MockBean
     private IBlogService blogService;
     @MockBean
     private BlogPublicationService blogPublicationService;
@@ -89,6 +93,7 @@ class SecurityHttpContractTest {
             CheckInController.class,
             ShopController.class,
             VoucherController.class,
+            VoucherQueryController.class,
             BlogController.class,
             BlogCommentsController.class,
             GlobalExceptionHandler.class,

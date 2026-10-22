@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.*;
 import javax.annotation.Resource;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
-import javax.validation.constraints.Positive;
 
 @RestController
 @RequestMapping("/voucher")
@@ -48,14 +47,4 @@ public class VoucherController {
         return Result.ok(entity.getId());
     }
 
-    /**
-     * 查询店铺的优惠券列表
-     * @param shopId 店铺id
-     * @return 优惠券列表
-     */
-    @GetMapping("/list/{shopId}")
-    public Result queryVoucherOfShop(
-            @Positive(message = "门店ID必须为正数") @PathVariable("shopId") Long shopId) {
-       return voucherService.queryVoucherOfShop(shopId);
-    }
 }

@@ -166,6 +166,65 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_voucher_query_module(base):
+    """Preserve the legacy XML catalog over synthetic rows, including its LEFT JOIN boundaries."""
+    shop, ordinary = 9007199254743993, 9007199254744001
+    sql("INSERT INTO tb_voucher(id,shop_id,title,sub_title,rules,pay_value,actual_value,type,status) VALUES"
+        "(%d,%d,'synthetic-ordinary','subtitle','rules',9007199254741993,9007199254742993,0,1),"
+        "(998302,%d,'synthetic-expired','s','r',1,2,1,1),"
+        "(998303,%d,'synthetic-future','s','r',1,2,1,1),"
+        "(998304,%d,'synthetic-no-stock-row','s','r',1,2,1,1),"
+        "(998305,%d,'synthetic-hidden','s','r',1,2,1,0),"
+        "(998306,%d,'synthetic-other-shop','s','r',1,2,0,1);" %
+        (ordinary, shop, shop, shop, shop, shop, shop + 1))
+    sql("INSERT INTO tb_seckill_voucher(voucher_id,stock,begin_time,end_time) VALUES"
+        "(998302,0,'2000-01-01 01:02:03','2000-01-02 02:03:04'),"
+        "(998303,7,'2035-01-01 03:04:05','2035-01-02 04:05:06');")
+    route = '/voucher/list/%d' % shop
+    expected = {ordinary, 998302, 998303, 998304}
+    snapshot_sql = 'SELECT * FROM tb_voucher WHERE shop_id IN (%d,%d) ORDER BY id;' % (shop, shop + 1)
+    stock_sql = 'SELECT * FROM tb_seckill_voucher WHERE voucher_id IN (998302,998303) ORDER BY voucher_id;'
+    before, stock_before = sql(snapshot_sql), sql(stock_sql)
+    body, _ = request(base, route)
+    result = json.loads(body)
+    assert result['success'] is True and {v['id'] for v in result['data']} == expected
+    items = {v['id']: v for v in result['data']}
+    base_fields = {'id', 'shopId', 'title', 'subTitle', 'rules', 'payValue', 'actualValue', 'type'}
+    assert set(items[ordinary]) == base_fields and set(items[998304]) == base_fields
+    assert type(items[ordinary]['id']) is int and items[ordinary]['shopId'] == shop
+    assert items[ordinary]['payValue'] == 9007199254741993 and items[ordinary]['actualValue'] == 9007199254742993
+    assert items[998302]['stock'] == 0 and items[998302]['beginTime'] == '2000-01-01T01:02:03'
+    assert items[998303]['endTime'] == '2035-01-02T04:05:06'
+    for row in items.values(): assert not ({'status', 'createTime', 'updateTime'} & set(row))
+    body, _ = request(base, '/voucher/list/%d' % (shop + 2)); assert json.loads(body)['data'] == []
+    for invalid in ('0', '-1', '9223372036854775808', 'bad'):
+        request(base, '/voucher/list/' + invalid, 400)
+    assert sql(snapshot_sql) == before and sql(stock_sql) == stock_before
+    sql('UPDATE tb_voucher SET status=0 WHERE id=998304;')
+    hidden_snapshot = sql(snapshot_sql)
+    body, _ = request(base, route); assert {v['id'] for v in json.loads(body)['data']} == expected - {998304}
+    assert sql(snapshot_sql) == hidden_snapshot and sql(stock_sql) == stock_before
+    sql('UPDATE tb_voucher SET status=1 WHERE id=998304;')
+    # Fixture UPDATE intentionally advances ON UPDATE timestamps; subsequent reads must preserve this baseline.
+    before = sql(snapshot_sql)
+    assert sql(stock_sql) == stock_before
+    check('promotion catalog: anonymous public read, numeric large IDs/amounts, status-only filtering, LEFT JOIN ordinary/missing/expired/zero/future stock, no shop-existence rule or cache')
+
+    for table, fault in (('tb_voucher', 'phase7w_owned_voucher_fault'),
+                         ('tb_seckill_voucher', 'phase7w_owned_stock_fault')):
+        sql('RENAME TABLE %s TO %s;' % (table, fault))
+        try:
+            body, _ = request(base, route, 500)
+            result = json.loads(body)
+            assert result['success'] is False and result['errorCode'] == 'INTERNAL_ERROR'
+            assert table not in result.get('errorMsg', '') and 'SQL' not in result.get('errorMsg', '')
+        finally:
+            sql('RENAME TABLE %s TO %s;' % (fault, table))
+    assert sql(snapshot_sql) == before and sql(stock_sql) == stock_before
+    body, _ = request(base, route); assert {v['id'] for v in json.loads(body)['data']} == expected
+    check('promotion catalog: either SQL table fault stays generic 500, no empty-success fallback or data writes, recovery reads the same rows')
+
+
 def verify_follower_reader_publication(base):
     """Private author/follower facts prove the publication adapter does not read Redis or join users."""
     author, active, disabled, missing, other = 997301, 997302, 997303, 997304, 997305
@@ -2476,6 +2535,7 @@ def main():
         base = verify_blog_publication_requests(base)
         # Existing campus-post scenarios assert the fresh database starts with zero posts.
         verify_follower_reader_publication(base)
+        verify_voucher_query_module(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

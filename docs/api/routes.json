@@ -45,7 +45,7 @@
     {"method":"GET","path":"/follow/common/{id}","controller":"FollowQueryController","handler":"common","preAuthorize":""},
     {"method":"POST","path":"/voucher","controller":"VoucherController","handler":"addVoucher","preAuthorize":"@resourceAuthorization.canManagePromotion(#voucher.shopId)"},
     {"method":"POST","path":"/voucher/seckill","controller":"VoucherController","handler":"addSeckillVoucher","preAuthorize":"@resourceAuthorization.canManagePromotion(#voucher.shopId)"},
-    {"method":"GET","path":"/voucher/list/{shopId}","controller":"VoucherController","handler":"queryVoucherOfShop","preAuthorize":""},
+    {"method":"GET","path":"/voucher/list/{shopId}","controller":"VoucherQueryController","handler":"queryVoucherOfShop","preAuthorize":""},
     {"method":"POST","path":"/voucher-order/seckill/{id}","controller":"VoucherOrderController","handler":"seckillVoucher","preAuthorize":"@resourceAuthorization.canParticipateAsUser()"},
     {"method":"GET","path":"/voucher-order/{id}","controller":"VoucherOrderController","handler":"queryMine","preAuthorize":"@resourceAuthorization.canParticipateAsUser()"},
     {"method":"POST","path":"/voucher-order/{id}/cancel","controller":"VoucherOrderController","handler":"cancelMine","preAuthorize":"@resourceAuthorization.canParticipateAsUser()"},

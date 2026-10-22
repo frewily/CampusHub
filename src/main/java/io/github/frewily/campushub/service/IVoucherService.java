@@ -6,8 +6,6 @@ import com.baomidou.mybatisplus.extension.service.IService;
 
 public interface IVoucherService extends IService<Voucher> {
 
-    Result queryVoucherOfShop(Long shopId);
-
     Result addVoucher(Voucher voucher);
 
     void addSeckillVoucher(Voucher voucher);
