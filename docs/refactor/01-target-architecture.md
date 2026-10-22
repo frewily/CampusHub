@@ -45,6 +45,8 @@ com.campushub
 
 Phase7U进一步提取social关注写入：FollowController→FollowCommandService→FollowCommandRepository/FollowProjectionWriter及Clock。MyBatis/Redis写入适配器保留原执行顺序、唯一键竞争处理和失败语义；旧IFollowService/FollowServiceImpl只留Blog发布所需通用关系查询桥接，entity/mapper仍暂留旧包，不宣称完整social/Feed迁移。范围见[7U记录](43-phase-7u-follow-command-module.md)。
 
+Phase7V将Blog发布所需关注者读取改为social.application.FollowerReader，MyBatisFollowerReader承担原关系查询与ID映射；删除无调用方的旧IFollowService/FollowServiceImpl。以上7T/7U对旧桥接的描述是当时范围；当前发布只依赖返回ID列表的专用端口，但Blog其余业务仍在旧技术分层。未搬迁全部实体/Mapper或Feed服务，见[7V记录](44-phase-7v-follower-reader.md)。
+
 ## 3 目标业务模型
 
 ### 3.1 身份与权限

@@ -9,14 +9,13 @@ import io.github.frewily.campushub.dto.ScrollResult;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.dto.request.BlogEditRequest;
 import io.github.frewily.campushub.entity.Blog;
-import io.github.frewily.campushub.entity.Follow;
 import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.service.IBlogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import io.github.frewily.campushub.service.IFollowService;
+import io.github.frewily.campushub.social.application.FollowerReader;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.service.BlogFeedDeliveryService;
 import io.github.frewily.campushub.utils.RedisConstants;
@@ -45,7 +44,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     private StringRedisTemplate stringRedisTemplate;
 
     @Resource
-    private IFollowService followService;
+    private FollowerReader followerReader;
 
     @Resource
     private Validator validator;
@@ -240,8 +239,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             if (!save(blog) || blog.getId() == null || blog.getId() <= 0) {
                 throw new BusinessException(ErrorCode.OPERATION_FAILED, "动态发布失败");
             }
-            List<Long> recipients = followService.query().eq("follow_user_id", user.getId()).list()
-                    .stream().map(Follow::getUserId).collect(Collectors.toList());
+            List<Long> recipients = followerReader.findFollowerIds(user.getId());
             blogFeedDeliveryService.enqueue(blog.getId(), recipients, System.currentTimeMillis());
             return Result.ok(blog.getId());
         } catch (DataAccessException failure) {

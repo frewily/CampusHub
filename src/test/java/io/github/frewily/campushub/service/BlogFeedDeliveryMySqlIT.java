@@ -16,7 +16,8 @@ import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.mapper.FollowMapper;
 import io.github.frewily.campushub.service.BlogPublicationService;
 import io.github.frewily.campushub.service.impl.BlogServiceImpl;
-import io.github.frewily.campushub.service.impl.FollowServiceImpl;
+import io.github.frewily.campushub.social.application.FollowerReader;
+import io.github.frewily.campushub.social.infrastructure.MyBatisFollowerReader;
 import io.github.frewily.campushub.utils.RedisConstants;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.apache.ibatis.executor.Executor;
@@ -245,10 +246,8 @@ class BlogFeedDeliveryMySqlIT {
         @SuppressWarnings("unchecked")
         ZSetOperations<String, String> feedOperations() { return mock(ZSetOperations.class); }
 
-        @Bean FollowServiceImpl followService(FollowMapper followMapper, StringRedisTemplate redis) {
-            FollowServiceImpl service = new FollowServiceImpl();
-            ReflectionTestUtils.setField(service, "baseMapper", followMapper);
-            return service;
+        @Bean FollowerReader followerReader(FollowMapper mapper) {
+            return new MyBatisFollowerReader(mapper);
         }
 
         @Bean BlogFeedDeliveryService blogFeedDeliveryService(
@@ -864,7 +863,7 @@ class BlogFeedDeliveryMySqlIT {
     void bypassedTransactionProxyIsRejectedBeforeAnyPostOrIntentWrite() {
         BlogServiceImpl unproxied = new BlogServiceImpl();
         ReflectionTestUtils.setField(unproxied, "baseMapper", blogMapper);
-        ReflectionTestUtils.setField(unproxied, "followService", context.getBean(FollowServiceImpl.class));
+        ReflectionTestUtils.setField(unproxied, "followerReader", context.getBean(FollowerReader.class));
         ReflectionTestUtils.setField(unproxied, "blogFeedDeliveryService", deliveryService);
         assertThrows(IllegalStateException.class, () -> unproxied.saveBlog(post("must require transaction first")));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM tb_blog", Integer.class));

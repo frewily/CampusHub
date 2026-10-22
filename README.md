@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase7V继续业务分包：[发布关注者读取端口](docs/refactor/44-phase-7v-follower-reader.md)替换Blog发布对旧关注CRUD服务的依赖，移除无调用方的IFollowService/FollowServiceImpl。仍按MySQL关系读取收件人，不新增用户状态过滤、Redis回源、排序或补偿；发布事务与Feed规则保留，51条映射/15个Controller、V001–V014不变。[学习笔记](docs/learning/follower-reader.md)说明跨模块读取边界，个人掌握仍需独立确认。
+
 Phase7U继续业务分包：[关注写入切片](docs/refactor/43-phase-7u-follow-command-module.md)把PUT关注/取关迁入social，通过关系写端口、投影写端口与Clock编排。原URL、角色、自关注409、重复关注刷新分数和重复取关不修复投影的规则保留；仍51条映射/15个Controller、V001–V014。Blog发布仍用旧关注查询桥接，不新增事务、自动补偿或通知。[学习笔记](docs/learning/follow-command-module.md)区分结构拆分与一致性改造，个人掌握仍需独立确认。
 
 Phase7T继续业务分包：[关注查询切片](docs/refactor/42-phase-7t-follow-query-module.md)把“是否关注/共同关注”迁入social；原两个GET、认证与响应保留，关注写入及动态投递链不改。当前51条映射/15个Controller；是否关注仍查MySQL，共同关注仍读旧ZSet交集，不新增重建、强一致快照或写入修复。[学习笔记](docs/learning/follow-query-module.md)说明过渡边界，不代表整个social或identity已迁移。

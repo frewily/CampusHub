@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7V仅调整发布内部依赖为social.FollowerReader，移除旧关注CRUD桥接；无新增路由/权限/响应变化，仍51条映射/15个Controller。当前内部链及验证见[7V记录](../refactor/44-phase-7v-follower-reader.md)，以下阶段描述保留历史范围。
+
 Phase7U将PUT关注/取关迁到social.api.FollowController→FollowCommandService；简单Controller名、handler、路由与角色注解不变，机器清单无需修改。仍51条映射/15个Controller；兼容语义及本轮验证见[7U记录](../refactor/43-phase-7u-follow-command-module.md)。以下7T等段落保留当时的阶段范围。
 
 Phase7T把两个既有关注GET迁入social.api.FollowQueryController：URL、handler、认证要求与响应不变，机器清单仅改两个处理器归属。当前51条应用映射/15个Controller；原FollowController只留PUT写入口，细节与证据见[7T记录](../refactor/42-phase-7t-follow-query-module.md)。

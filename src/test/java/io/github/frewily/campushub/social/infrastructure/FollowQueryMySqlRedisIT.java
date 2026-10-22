@@ -63,6 +63,7 @@ class FollowQueryMySqlRedisIT {
     private static FollowQueryService service;
     private static FollowCommandService commandService;
     private static MyBatisFollowCommandRepository commandRepository;
+    private static MyBatisFollowerReader followerReader;
     private static final long COMMAND_CLOCK_MILLIS = Instant.parse("2026-10-21T12:34:56.789Z").toEpochMilli();
 
     @BeforeAll
@@ -92,6 +93,7 @@ class FollowQueryMySqlRedisIT {
             sessionFactory = sessionFactoryBean.getObject();
             SqlSessionTemplate sessions = new SqlSessionTemplate(sessionFactory);
             FollowMapper followMapper = sessions.getMapper(FollowMapper.class);
+            followerReader = new MyBatisFollowerReader(followMapper);
             commandRepository = new MyBatisFollowCommandRepository(followMapper);
             commandService = new FollowCommandService(commandRepository, new RedisFollowProjectionWriter(redis),
                     Clock.fixed(Instant.ofEpochMilli(COMMAND_CLOCK_MILLIS), ZoneOffset.UTC));
@@ -195,6 +197,7 @@ class FollowQueryMySqlRedisIT {
         service = null;
         commandService = null;
         commandRepository = null;
+        followerReader = null;
         if (redisFactory != null) {
             try { redisFactory.destroy(); }
             catch (Exception | Error failure) { firstFailure = failure; }
@@ -438,6 +441,45 @@ class FollowQueryMySqlRedisIT {
             jdbc.execute("RENAME TABLE tb_follow_hidden TO tb_follow");
         }
         assertTrue(service.isFollow(91L, 901L));
+    }
+
+    @Test
+    void followerReaderUsesOnlyAuthorRelationshipFactsWithoutUserOrRedisFiltering() {
+        assertTrue(followerReader.findFollowerIds(2000L).isEmpty());
+        insertFollow(3001L, 2000L);
+        insertFollow(3002L, 2000L);
+        insertFollow(3003L, 2000L);
+        insertFollow(3004L, 2001L);
+        insertUser(3003L, "disabled-follower", "retained.svg");
+        jdbc.update("UPDATE tb_user SET status='DISABLED' WHERE id=3003");
+        OWNED_REDIS_IDS.add(2000L);
+        redis.opsForValue().set("follows:2000", "synthetic-unread-projection");
+        List<Map<String, Object>> before = followRows();
+
+        List<Long> ids = followerReader.findFollowerIds(2000L);
+
+        assertEquals(3, ids.size());
+        assertEquals(new HashSet<>(Arrays.asList(3001L, 3002L, 3003L)), new HashSet<>(ids));
+        assertEquals(before, followRows());
+        assertEquals("synthetic-unread-projection", redis.opsForValue().get("follows:2000"));
+    }
+
+    @Test
+    void followerReaderPropagatesSqlFaultWithoutMutatingFactsOrProjection() {
+        insertFollow(3101L, 2100L);
+        setFollows(2100L, "3101");
+        List<Map<String, Object>> rows = followRows();
+        Map<String, Double> projection = zset("follows:2100");
+        jdbc.execute("RENAME TABLE tb_follow TO phase7v_owned_follow_fault");
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class,
+                    () -> followerReader.findFollowerIds(2100L));
+            assertEquals(projection, zset("follows:2100"));
+        } finally {
+            jdbc.execute("RENAME TABLE phase7v_owned_follow_fault TO tb_follow");
+        }
+        assertEquals(rows, followRows());
+        assertEquals(Arrays.asList(3101L), followerReader.findFollowerIds(2100L));
     }
 
     @Test

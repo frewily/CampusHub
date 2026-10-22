@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class FollowQueryAdaptersTest {
-    /** Moved from the old FollowServiceImplTest with its canonical ZSet regression assertions retained. */
+    /** Retains the canonical ZSet regression assertions from the legacy follow adapter coverage. */
     @Test
     @SuppressWarnings("unchecked")
     void shouldIntersectTheSameSortedSetStructureUsedForFollowing() {

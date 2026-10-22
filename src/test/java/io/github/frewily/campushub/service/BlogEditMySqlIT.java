@@ -10,9 +10,9 @@ import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.service.impl.BlogServiceImpl;
-import io.github.frewily.campushub.service.IFollowService;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.service.BlogFeedDeliveryService;
+import io.github.frewily.campushub.social.application.FollowerReader;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.mapping.MappedStatement;
@@ -201,8 +201,8 @@ class BlogEditMySqlIT {
         }
 
         @Bean
-        IFollowService followService() {
-            return mock(IFollowService.class);
+        FollowerReader followerReader() {
+            return mock(FollowerReader.class);
         }
 
         @Bean

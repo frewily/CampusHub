@@ -6,8 +6,8 @@ import io.github.frewily.campushub.entity.Blog;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogMapper;
-import io.github.frewily.campushub.service.IFollowService;
 import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.social.application.FollowerReader;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,7 +28,7 @@ class BlogEditServiceTest {
     private static final long OWNER_ID = 9007199254740993L;
     private BlogMapper mapper;
     private IUserService userService;
-    private IFollowService followService;
+    private FollowerReader followerReader;
     private StringRedisTemplate stringRedisTemplate;
     private BlogServiceImpl service;
 
@@ -36,13 +36,13 @@ class BlogEditServiceTest {
     void setUp() {
         mapper = mock(BlogMapper.class);
         userService = mock(IUserService.class);
-        followService = mock(IFollowService.class);
+        followerReader = mock(FollowerReader.class);
         stringRedisTemplate = mock(StringRedisTemplate.class);
         service = new BlogServiceImpl();
         ReflectionTestUtils.setField(service, "baseMapper", mapper);
         ReflectionTestUtils.setField(service, "validator", validator());
         ReflectionTestUtils.setField(service, "userService", userService);
-        ReflectionTestUtils.setField(service, "followService", followService);
+        ReflectionTestUtils.setField(service, "followerReader", followerReader);
         ReflectionTestUtils.setField(service, "stringRedisTemplate", stringRedisTemplate);
         saveUser(OWNER_ID);
     }
@@ -81,7 +81,7 @@ class BlogEditServiceTest {
     }
 
     private void assertNoOtherResourceInteractions() {
-        verifyNoInteractions(userService, followService, stringRedisTemplate);
+        verifyNoInteractions(userService, followerReader, stringRedisTemplate);
     }
 
     @Test

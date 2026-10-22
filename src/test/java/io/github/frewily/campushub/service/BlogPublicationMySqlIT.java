@@ -6,20 +6,18 @@ import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerIntercept
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.annotation.DbType;
-import com.baomidou.mybatisplus.extension.conditions.query.QueryChainWrapper;
 import io.github.frewily.campushub.dto.ApiModelMapper;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.dto.request.BlogCreateRequest;
 import io.github.frewily.campushub.entity.Blog;
-import io.github.frewily.campushub.entity.Follow;
 import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.mapper.BlogFeedDeliveryMapper;
 import io.github.frewily.campushub.service.impl.BlogServiceImpl;
-import io.github.frewily.campushub.service.IFollowService;
 import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.social.application.FollowerReader;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -54,7 +52,7 @@ import javax.validation.ValidatorFactory;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-/** Real MySQL/MyBatis and BlogService acceptance; followService and Redis are mocked. */
+/** Real MySQL/MyBatis and BlogService acceptance; follower lookup and Redis are mocked. */
 class BlogPublicationMySqlIT {
     private static final long AUTHOR_ID = 701L;
 
@@ -65,8 +63,7 @@ class BlogPublicationMySqlIT {
     private static BlogMapper mapper;
     private static BlogServiceImpl blogService;
     private static IUserService userService;
-    private static IFollowService followService;
-    private static QueryChainWrapper<Follow> followQuery;
+    private static FollowerReader followerReader;
     private static StringRedisTemplate redis;
     private static ZSetOperations<String, String> zset;
     private static TransactionTemplate transactions;
@@ -162,18 +159,15 @@ class BlogPublicationMySqlIT {
         blogService = new BlogServiceImpl();
         ReflectionTestUtils.setField(blogService, "baseMapper", mapper);
         userService = mock(IUserService.class);
-        followService = mock(IFollowService.class);
-        followQuery = mock(QueryChainWrapper.class);
+        followerReader = mock(FollowerReader.class);
         redis = mock(StringRedisTemplate.class);
         zset = mock(ZSetOperations.class);
         ReflectionTestUtils.setField(blogService, "userService", userService);
-        ReflectionTestUtils.setField(blogService, "followService", followService);
+        ReflectionTestUtils.setField(blogService, "followerReader", followerReader);
         ReflectionTestUtils.setField(blogService, "stringRedisTemplate", redis);
         ReflectionTestUtils.setField(blogService, "blogFeedDeliveryService",
                 new BlogFeedDeliveryService(sessions.getMapper(BlogFeedDeliveryMapper.class), redis, false));
-        when(followService.query()).thenReturn(followQuery);
-        when(followQuery.eq("follow_user_id", AUTHOR_ID)).thenReturn(followQuery);
-        when(followQuery.list()).thenReturn(Collections.emptyList());
+        when(followerReader.findFollowerIds(AUTHOR_ID)).thenReturn(Collections.emptyList());
         when(redis.opsForZSet()).thenReturn(zset);
         when(zset.score(anyString(), anyString())).thenReturn(null);
 
@@ -185,7 +179,7 @@ class BlogPublicationMySqlIT {
     void seedLegacyPostThenRunNullableMigrationTwice() throws Exception {
         org.mockito.Mockito.reset(zset);
         when(zset.score(anyString(), anyString())).thenReturn(null);
-        when(followQuery.list()).thenReturn(Collections.emptyList());
+        when(followerReader.findFollowerIds(AUTHOR_ID)).thenReturn(Collections.emptyList());
         jdbc.execute("DELETE FROM tb_blog_feed_delivery");
         jdbc.execute("DELETE FROM tb_blog");
         jdbc.execute("ALTER TABLE tb_blog AUTO_INCREMENT=1");
@@ -270,8 +264,7 @@ class BlogPublicationMySqlIT {
 
     @Test
     void committedPostIsNotMisreportedAsFailureWhenRecipientFeedWriteFails() {
-        when(followQuery.list()).thenReturn(Collections.singletonList(
-                new Follow().setUserId(702L).setFollowUserId(AUTHOR_ID)));
+        when(followerReader.findFollowerIds(AUTHOR_ID)).thenReturn(Collections.singletonList(702L));
         when(zset.add(eq("feed:702"), anyString(), anyDouble())).thenThrow(
                 new org.springframework.data.redis.RedisConnectionFailureException("synthetic feed write failure"));
         Blog post = ApiModelMapper.toBlog(request(null, "durable post", "synthetic durable content"));
@@ -365,8 +358,7 @@ class BlogPublicationMySqlIT {
 
     @Test
     void emptyImagesReadThroughDetailHotOwnAndProjectedFeedWithoutPlaceholderOrMutation() {
-        Follow followerRelation = new Follow().setUserId(702L).setFollowUserId(AUTHOR_ID);
-        when(followQuery.list()).thenReturn(Collections.singletonList(followerRelation));
+        when(followerReader.findFollowerIds(AUTHOR_ID)).thenReturn(Collections.singletonList(702L));
         BlogCreateRequest request = request(null, "text-only reads", "plain text without a picture");
         request.setImages(null);
         Blog post = ApiModelMapper.toBlog(request);

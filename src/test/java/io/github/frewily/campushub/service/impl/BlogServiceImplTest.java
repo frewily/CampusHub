@@ -1,14 +1,12 @@
 package io.github.frewily.campushub.service.impl;
 
-import com.baomidou.mybatisplus.extension.conditions.query.QueryChainWrapper;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.Blog;
-import io.github.frewily.campushub.entity.Follow;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogMapper;
-import io.github.frewily.campushub.service.IFollowService;
 import io.github.frewily.campushub.service.BlogFeedDeliveryService;
+import io.github.frewily.campushub.social.application.FollowerReader;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,9 +38,7 @@ class BlogServiceImplTest {
     @Mock
     private BlogMapper blogMapper;
     @Mock
-    private IFollowService followService;
-    @Mock
-    private QueryChainWrapper<Follow> followQuery;
+    private FollowerReader followerReader;
     @Mock
     private StringRedisTemplate stringRedisTemplate;
     @Mock
@@ -59,7 +55,7 @@ class BlogServiceImplTest {
         TransactionSynchronizationManager.setActualTransactionActive(true);
         blogService = new BlogServiceImpl();
         ReflectionTestUtils.setField(blogService, "baseMapper", blogMapper);
-        ReflectionTestUtils.setField(blogService, "followService", followService);
+        ReflectionTestUtils.setField(blogService, "followerReader", followerReader);
         ReflectionTestUtils.setField(blogService, "stringRedisTemplate", stringRedisTemplate);
         ReflectionTestUtils.setField(blogService, "blogFeedDeliveryService", deliveryService);
 
@@ -79,7 +75,7 @@ class BlogServiceImplTest {
         TransactionSynchronizationManager.clear();
         assertThrows(IllegalStateException.class,
                 () -> blogService.saveBlog(new Blog().setTitle("must require transaction")));
-        verifyNoInteractions(blogMapper, followService, stringRedisTemplate, deliveryService);
+        verifyNoInteractions(blogMapper, followerReader, stringRedisTemplate, deliveryService);
     }
 
     @Test
@@ -87,7 +83,7 @@ class BlogServiceImplTest {
         TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
         assertThrows(IllegalStateException.class,
                 () -> blogService.saveBlog(new Blog().setTitle("must require writable transaction")));
-        verifyNoInteractions(blogMapper, followService, stringRedisTemplate, deliveryService);
+        verifyNoInteractions(blogMapper, followerReader, stringRedisTemplate, deliveryService);
     }
 
     @Test
@@ -102,21 +98,17 @@ class BlogServiceImplTest {
         UserHolder.removeUser();
         assertEquals(ErrorCode.AUTHENTICATION_FAILED, assertThrows(BusinessException.class,
                 () -> blogService.saveBlog(new Blog().setTitle("must authenticate"))).getErrorCode());
-        verifyNoInteractions(blogMapper, followService, stringRedisTemplate, deliveryService);
+        verifyNoInteractions(blogMapper, followerReader, stringRedisTemplate, deliveryService);
     }
 
     @Test
     void shouldEnqueuePostForEachFollowersOwnFeedWithoutWritingRedisInThePublisher() {
-        Follow firstFollower = new Follow().setUserId(42L);
-        Follow secondFollower = new Follow().setUserId(84L);
         when(blogMapper.insert(any(Blog.class))).thenAnswer(invocation -> {
             Blog blog = invocation.getArgument(0);
             blog.setId(100L);
             return 1;
         });
-        when(followService.query()).thenReturn(followQuery);
-        when(followQuery.eq("follow_user_id", 7L)).thenReturn(followQuery);
-        when(followQuery.list()).thenReturn(Arrays.asList(firstFollower, secondFollower));
+        when(followerReader.findFollowerIds(7L)).thenReturn(Arrays.asList(42L, 84L));
 
         Blog blog = new Blog().setShopId(1L).setTitle("Campus post").setUserId(999L).setWithdrawn(1);
         blogService.saveBlog(blog);
@@ -129,16 +121,12 @@ class BlogServiceImplTest {
 
     @Test
     void shouldAcceptNullShopIdAndEnqueueTheSameRecipientSnapshot() {
-        Follow firstFollower = new Follow().setUserId(42L);
-        Follow secondFollower = new Follow().setUserId(84L);
         when(blogMapper.insert(any(Blog.class))).thenAnswer(invocation -> {
             Blog saved = invocation.getArgument(0);
             saved.setId(101L);
             return 1;
         });
-        when(followService.query()).thenReturn(followQuery);
-        when(followQuery.eq("follow_user_id", 7L)).thenReturn(followQuery);
-        when(followQuery.list()).thenReturn(Arrays.asList(firstFollower, secondFollower));
+        when(followerReader.findFollowerIds(7L)).thenReturn(Arrays.asList(42L, 84L));
 
         Blog blog = new Blog().setShopId(null).setTitle("Campus post").setUserId(999L);
         blogService.saveBlog(blog);
@@ -155,7 +143,7 @@ class BlogServiceImplTest {
 
         assertThrows(BusinessException.class, () -> blogService.saveBlog(blog));
 
-        verifyNoInteractions(blogMapper, followService, stringRedisTemplate);
+        verifyNoInteractions(blogMapper, followerReader, stringRedisTemplate);
     }
 
     @Test
@@ -167,6 +155,6 @@ class BlogServiceImplTest {
 
         assertEquals(ErrorCode.OPERATION_FAILED, exception.getErrorCode());
         verify(blogMapper).insert(any(Blog.class));
-        verifyNoInteractions(followService, stringRedisTemplate);
+        verifyNoInteractions(followerReader, stringRedisTemplate);
     }
 }

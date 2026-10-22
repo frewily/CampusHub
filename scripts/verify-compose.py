@@ -166,6 +166,61 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_follower_reader_publication(base):
+    """Private author/follower facts prove the publication adapter does not read Redis or join users."""
+    author, active, disabled, missing, other = 997301, 997302, 997303, 997304, 997305
+    for index, (actor, status) in enumerate(((author, 'ACTIVE'), (active, 'ACTIVE'), (disabled, 'DISABLED'), (other, 'ACTIVE'))):
+        sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'000000%05d','synthetic-follower-port','%s');" %
+            (actor, 7300 + index, status))
+    sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'USER');" % author)
+    sql('INSERT INTO tb_follow(user_id,follow_user_id) VALUES(%d,%d),(%d,%d),(%d,%d),(%d,%d);' %
+        (active, author, disabled, author, missing, author, other, active))
+    token = 'synthetic-follower-port-' + uuid.uuid4().hex
+    redis('HSET', 'login:token:' + token, 'id', str(author), 'nickName', 'synthetic')
+    redis('EXPIRE', 'login:token:' + token, '600')
+    headers = {'authorization': token, 'Content-Type': 'application/json'}
+    follows_key = 'follows:%d' % author
+    redis('SET', follows_key, 'synthetic-unread-projection')
+    for recipient in (active, disabled, missing):
+        redis('SET', 'feed:%d' % recipient, 'synthetic-hold-intent')
+    relation_sql = 'SELECT user_id,follow_user_id FROM tb_follow WHERE follow_user_id=%d ORDER BY user_id;' % author
+    relations_before = sql(relation_sql)
+
+    def publish(title, expected=200):
+        body, _ = request(base, '/blog', expected, 'POST', json.dumps(
+            {'title': title, 'content': 'synthetic follower reader body'}).encode(), headers)
+        result = json.loads(body)
+        if expected == 200:
+            assert result['success'] is True
+            return int(result['data'])
+        assert result['success'] is False and result['errorCode'] == 'INTERNAL_ERROR'
+        assert 'tb_follow' not in result.get('errorMsg', '') and 'SQL' not in result.get('errorMsg', '')
+
+    try:
+        first = publish('synthetic follower port audience')
+        assert sql('SELECT GROUP_CONCAT(recipient_user_id ORDER BY recipient_user_id) FROM tb_blog_feed_delivery WHERE blog_id=%d;' % first) == \
+            ','.join(map(str, (active, disabled, missing)))
+        assert sql('SELECT COUNT(DISTINCT score_millis) FROM tb_blog_feed_delivery WHERE blog_id=%d;' % first) == '1'
+        assert redis('GET', follows_key) == 'synthetic-unread-projection'
+        assert sql(relation_sql) == relations_before
+        check('follower port publication: SQL audience only, author isolation, retained missing/disabled followers, unread Redis follows and original per-post score')
+
+        sql('RENAME TABLE tb_follow TO phase7v_owned_follower_fault;')
+        try:
+            publish('synthetic follower port rollback', 500)
+        finally:
+            sql('RENAME TABLE phase7v_owned_follower_fault TO tb_follow;')
+        assert sql("SELECT COUNT(*) FROM tb_blog WHERE user_id=%d AND title='synthetic follower port rollback';" % author) == '0'
+        assert sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE recipient_user_id IN (%d,%d,%d);' %
+                   (active, disabled, missing)) == '3'
+        assert sql(relation_sql) == relations_before
+        second = publish('synthetic follower port recovered')
+        assert sql('SELECT COUNT(*) FROM tb_blog_feed_delivery WHERE blog_id=%d;' % second) == '3'
+        check('follower port SQL failure: generic HTTP 500 rolls back the new post without orphan intent; restored adapter publishes again')
+    finally:
+        redis('DEL', follows_key, *('feed:%d' % recipient for recipient in (active, disabled, missing)))
+
+
 def verify_follow_command_module(base):
     """Exercise only this project's synthetic follow facts and projections; no new consistency promise."""
     headers = {}
@@ -2419,6 +2474,8 @@ def main():
         verify_follow_feed_cursor(base)
         base = verify_blog_feed_delivery(base)
         base = verify_blog_publication_requests(base)
+        # Existing campus-post scenarios assert the fresh database starts with zero posts.
+        verify_follower_reader_publication(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

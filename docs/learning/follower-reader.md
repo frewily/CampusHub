@@ -1,0 +1,13 @@
+# 发布者不需要一个关注CRUD服务
+
+7T迁读、7U迁写以后，旧关注服务只剩Blog发布的一处查询依赖。7V用FollowerReader.findFollowerIds(authorId)表达真正需要的能力：从关系事实读取作者的关注者ID，而非暴露IService或持久化Follow对象给发布者。
+
+MyBatisFollowerReader保留原SELECT关系条件follow_user_id=authorId和逐行user_id映射，不加排序、分页、去重、用户表join或状态筛选，也不读Redis关注ZSet。遗留异常/空列表规则保留；读接口不应偷偷承担投影修复。当前实现返回顺序来自Mapper列表，不据此承诺数据库稳定排序。
+
+Blog仍在同一个可写发布事务中，先写动态、再读关注者、再写固定分数投递意图。适配器不另加事务注解，Spring Mapper参与调用方事务；关系查询SQL失败仍沿原DataAccessException映射到通用500，事务回滚动态与意图。原Feed投递服务仍负责校验/去重与提交后尝试/后台恢复；不在读取端口重复实现这些规则。
+
+删除旧IFollowService/FollowServiceImpl前必须查全所有生产和测试调用点；测试中的通用QueryChainWrapper改成专用端口mock，但不删验证/事务/故障断言。真实投递IT需接真实Mapper适配器而非mock，证明Bean装配与事务仍可用。缺失/停用关注者仍被选入、Redis投影故障不影响事实读取、关系表故障回滚则由新合成HTTP场景验证。
+
+这个端口不是新HTTP接口，也不是完整content/social/Feed迁移。实体与Mapper仍留旧包，Blog仍有其他遗留依赖；不引入微服务、事件总线或新中间件。移除内部Java类型不保证外部二进制兼容，需clean构建完整jar。
+
+实际本机验证见[阶段记录](../refactor/44-phase-7v-follower-reader.md)，mock、组件、HTTP与生产证据分开。个人掌握仍需独立确认。
