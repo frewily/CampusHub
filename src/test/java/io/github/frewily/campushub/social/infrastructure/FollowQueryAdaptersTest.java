@@ -2,17 +2,23 @@ package io.github.frewily.campushub.social.infrastructure;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.frewily.campushub.entity.Follow;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.mapper.FollowMapper;
 import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.social.application.FollowCommandService;
 import io.github.frewily.campushub.social.application.FollowQueryService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 
 import java.util.*;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -84,5 +90,120 @@ class FollowQueryAdaptersTest {
         assertSame(failure, assertThrows(RuntimeException.class, () -> new RedisFollowProjectionReader(redis).following(1L)));
         verify(zsets).range("follows:1", 0, -1);
         verifyNoMoreInteractions(zsets);
+    }
+
+    @Test
+    void commandRepositoryBindsActorAndTargetForExistsAndDelete() {
+        FollowMapper mapper = mock(FollowMapper.class);
+        when(mapper.selectCount(any())).thenReturn(1);
+        when(mapper.delete(any(QueryWrapper.class))).thenReturn(1);
+        MyBatisFollowCommandRepository repository = new MyBatisFollowCommandRepository(mapper);
+
+        assertTrue(repository.exists(9007199254740993L, 9L));
+        assertTrue(repository.delete(9007199254740993L, 9L));
+
+        ArgumentCaptor<QueryWrapper> queries = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(mapper).selectCount(queries.capture());
+        assertCommandRelationship(queries.getValue(), 9007199254740993L, 9L);
+        verify(mapper).delete(queries.capture());
+        assertCommandRelationship(queries.getValue(), 9007199254740993L, 9L);
+        verifyNoMoreInteractions(mapper);
+    }
+
+    @Test
+    void commandRepositoryCreatesRelationshipAndRecoversDuplicateUniqueKey() {
+        FollowMapper mapper = mock(FollowMapper.class);
+        when(mapper.insert(any(Follow.class))).thenReturn(1);
+        MyBatisFollowCommandRepository repository = new MyBatisFollowCommandRepository(mapper);
+
+        assertTrue(repository.create(41L, 42L));
+        ArgumentCaptor<Follow> created = ArgumentCaptor.forClass(Follow.class);
+        verify(mapper).insert(created.capture());
+        assertEquals(41L, created.getValue().getUserId());
+        assertEquals(42L, created.getValue().getFollowUserId());
+
+        reset(mapper);
+        when(mapper.insert(any(Follow.class))).thenThrow(new DuplicateKeyException("synthetic duplicate"));
+        assertTrue(repository.create(41L, 42L), "a concurrent insert of the unique relationship is successful recovery");
+        verify(mapper).insert(any(Follow.class));
+        verifyNoMoreInteractions(mapper);
+    }
+
+    @Test
+    void commandRepositoryPropagatesNonDuplicateSqlFailures() {
+        FollowMapper mapper = mock(FollowMapper.class);
+        IllegalStateException failure = new IllegalStateException("synthetic SQL failure");
+        when(mapper.insert(any(Follow.class))).thenThrow(failure);
+
+        assertSame(failure, assertThrows(IllegalStateException.class,
+                () -> new MyBatisFollowCommandRepository(mapper).create(41L, 42L)));
+    }
+
+    @Test
+    void zeroAffectedRowsAreNotReportedAsSuccessfulWrites() {
+        FollowMapper mapper = mock(FollowMapper.class);
+        when(mapper.selectCount(any())).thenReturn(0);
+        MyBatisFollowCommandRepository repository = new MyBatisFollowCommandRepository(mapper);
+        assertFalse(repository.exists(41L, 42L));
+        assertFalse(repository.create(41L, 42L));
+        assertFalse(repository.delete(41L, 42L));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void projectionWriterUsesCanonicalZsetKeyMemberAndExactScore() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ZSetOperations<String, String> zsets = mock(ZSetOperations.class);
+        when(redis.opsForZSet()).thenReturn(zsets);
+        RedisFollowProjectionWriter writer = new RedisFollowProjectionWriter(redis);
+
+        writer.add(9007199254740993L, 9007199254740994L, 1_792_598_400_123L);
+        writer.remove(9007199254740993L, 9007199254740994L);
+
+        verify(zsets).add("follows:9007199254740993", "9007199254740994", 1_792_598_400_123D);
+        verify(zsets).remove("follows:9007199254740993", "9007199254740994");
+        verifyNoMoreInteractions(zsets);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void projectionWriterPropagatesRedisFailures() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ZSetOperations<String, String> zsets = mock(ZSetOperations.class);
+        when(redis.opsForZSet()).thenReturn(zsets);
+        IllegalStateException failure = new IllegalStateException("synthetic Redis failure");
+        doThrow(failure).when(zsets).add("follows:41", "42", 100D);
+
+        assertSame(failure, assertThrows(IllegalStateException.class,
+                () -> new RedisFollowProjectionWriter(redis).add(41L, 42L, 100L)));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void repeatedFollowAdapterRegressionSkipsMapperInsertAndAddsCanonicalRedisProjection() {
+        FollowMapper mapper = mock(FollowMapper.class);
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ZSetOperations<String, String> zsets = mock(ZSetOperations.class);
+        when(mapper.selectCount(any())).thenReturn(1);
+        when(redis.opsForZSet()).thenReturn(zsets);
+        long score = 1_792_598_400_123L;
+        FollowCommandService service = new FollowCommandService(new MyBatisFollowCommandRepository(mapper),
+                new RedisFollowProjectionWriter(redis), Clock.fixed(Instant.ofEpochMilli(score), ZoneOffset.UTC));
+
+        service.follow(1L, 9L, true);
+
+        verify(mapper).selectCount(any());
+        verify(mapper, never()).insert(any(Follow.class));
+        verifyNoMoreInteractions(mapper);
+        verify(zsets).add("follows:1", "9", (double) score);
+        verifyNoMoreInteractions(zsets);
+    }
+
+    @SuppressWarnings("rawtypes")
+    private void assertCommandRelationship(QueryWrapper query, long actorId, long targetId) {
+        assertEquals("(user_id = #{ew.paramNameValuePairs.MPGENVAL1} AND follow_user_id = #{ew.paramNameValuePairs.MPGENVAL2})",
+                query.getSqlSegment().trim());
+        assertEquals(actorId, query.getParamNameValuePairs().get("MPGENVAL1"));
+        assertEquals(targetId, query.getParamNameValuePairs().get("MPGENVAL2"));
     }
 }

@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7U将PUT关注/取关迁到social.api.FollowController→FollowCommandService；简单Controller名、handler、路由与角色注解不变，机器清单无需修改。仍51条映射/15个Controller；兼容语义及本轮验证见[7U记录](../refactor/43-phase-7u-follow-command-module.md)。以下7T等段落保留当时的阶段范围。
+
 Phase7T把两个既有关注GET迁入social.api.FollowQueryController：URL、handler、认证要求与响应不变，机器清单仅改两个处理器归属。当前51条应用映射/15个Controller；原FollowController只留PUT写入口，细节与证据见[7T记录](../refactor/42-phase-7t-follow-query-module.md)。
 
 Phase7S把既有 `GET /shop-type/list` 移入merchant.api.ShopTypeController；简单类名、handler、公开策略与机器清单不变，仍51条映射/14个Controller。详细缓存/响应/排序与验证边界见[7S记录](../refactor/41-phase-7s-shop-type-module.md)，源码链接已更新，不把包移动当作新增接口。

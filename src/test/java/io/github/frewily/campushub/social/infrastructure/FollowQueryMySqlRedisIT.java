@@ -10,6 +10,7 @@ import io.github.frewily.campushub.mapper.UserMapper;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.service.impl.UserServiceImpl;
 import io.github.frewily.campushub.social.application.FollowQueryService;
+import io.github.frewily.campushub.social.application.FollowCommandService;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -31,7 +32,10 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -57,6 +61,9 @@ class FollowQueryMySqlRedisIT {
     private static MybatisSqlSessionFactoryBean sessionFactoryBean;
     private static SqlSessionFactory sessionFactory;
     private static FollowQueryService service;
+    private static FollowCommandService commandService;
+    private static MyBatisFollowCommandRepository commandRepository;
+    private static final long COMMAND_CLOCK_MILLIS = Instant.parse("2026-10-21T12:34:56.789Z").toEpochMilli();
 
     @BeforeAll
     static void startPrivateComponents() throws Exception {
@@ -85,6 +92,9 @@ class FollowQueryMySqlRedisIT {
             sessionFactory = sessionFactoryBean.getObject();
             SqlSessionTemplate sessions = new SqlSessionTemplate(sessionFactory);
             FollowMapper followMapper = sessions.getMapper(FollowMapper.class);
+            commandRepository = new MyBatisFollowCommandRepository(followMapper);
+            commandService = new FollowCommandService(commandRepository, new RedisFollowProjectionWriter(redis),
+                    Clock.fixed(Instant.ofEpochMilli(COMMAND_CLOCK_MILLIS), ZoneOffset.UTC));
             UserMapper userMapper = sessions.getMapper(UserMapper.class);
             IUserService userService = new UserServiceImpl();
             ReflectionTestUtils.setField(userService, "baseMapper", userMapper);
@@ -162,7 +172,8 @@ class FollowQueryMySqlRedisIT {
     private static void createSyntheticSchema() {
         jdbc.execute("CREATE TABLE tb_follow ("
                 + "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, user_id BIGINT NOT NULL, "
-                + "follow_user_id BIGINT NOT NULL, create_time DATETIME NULL"
+                + "follow_user_id BIGINT NOT NULL, create_time DATETIME NULL, "
+                + "UNIQUE KEY uk_user_follow(user_id,follow_user_id)"
                 + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         jdbc.execute("CREATE TABLE tb_user ("
                 + "id BIGINT NOT NULL PRIMARY KEY, phone VARCHAR(32), password VARCHAR(128), "
@@ -182,6 +193,8 @@ class FollowQueryMySqlRedisIT {
         sessionFactoryBean = null;
         sessionFactory = null;
         service = null;
+        commandService = null;
+        commandRepository = null;
         if (redisFactory != null) {
             try { redisFactory.destroy(); }
             catch (Exception | Error failure) { firstFailure = failure; }
@@ -425,5 +438,80 @@ class FollowQueryMySqlRedisIT {
             jdbc.execute("RENAME TABLE tb_follow_hidden TO tb_follow");
         }
         assertTrue(service.isFollow(91L, 901L));
+    }
+
+    @Test
+    void mysqlUniqueRelationshipRecoversDuplicateCreateAndProjectsSuccessfulFollow() {
+        long actor = 1001L;
+        long target = 2002L;
+        OWNED_REDIS_IDS.add(actor);
+
+        commandService.follow(actor, target, true);
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tb_follow WHERE user_id=? AND follow_user_id=?", Integer.class, actor, target));
+        assertTrue(commandRepository.create(actor, target), "duplicate unique-key insert is recovered as success");
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tb_follow WHERE user_id=? AND follow_user_id=?", Integer.class, actor, target));
+        assertEquals(Double.valueOf((double) COMMAND_CLOCK_MILLIS), zset("follows:" + actor).get(Long.toString(target)));
+    }
+
+    @Test
+    void successfulUnfollowDeletesMysqlRelationshipAndRedisProjection() {
+        long actor = 1101L;
+        long target = 2202L;
+        insertFollow(actor, target);
+        setFollows(actor, Long.toString(target));
+
+        commandService.follow(actor, target, false);
+
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tb_follow WHERE user_id=? AND follow_user_id=?", Integer.class, actor, target));
+        assertTrue(zset("follows:" + actor).isEmpty());
+    }
+
+    @Test
+    void redisWrongTypeFailureLeavesCommittedMysqlFollowRelationship() {
+        long actor = 1201L;
+        long target = 2302L;
+        OWNED_REDIS_IDS.add(actor);
+        redis.opsForValue().set("follows:" + actor, "synthetic-wrong-type");
+
+        assertThrows(RuntimeException.class, () -> commandService.follow(actor, target, true));
+
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tb_follow WHERE user_id=? AND follow_user_id=?", Integer.class, actor, target));
+        assertEquals("synthetic-wrong-type", redis.opsForValue().get("follows:" + actor));
+    }
+
+    @Test
+    void repeatedUnfollowDoesNotRepairAStaleRedisProjection() {
+        long actor = 1301L;
+        long target = 2402L;
+        setFollows(actor, Long.toString(target));
+        Map<String, Double> projectionBefore = zset("follows:" + actor);
+
+        commandService.follow(actor, target, false);
+
+        assertTrue(followRows().isEmpty());
+        assertEquals(projectionBefore, zset("follows:" + actor));
+    }
+
+    @Test
+    void followProjectionRefreshesScoreWithoutChangingExistingZsetTtl() {
+        long actor = 1401L;
+        long target = 2502L;
+        insertFollow(actor, target);
+        setFollows(actor, Long.toString(target));
+        redis.expire("follows:" + actor, 1200, TimeUnit.SECONDS);
+        Long ttlBefore = redis.getExpire("follows:" + actor, TimeUnit.SECONDS);
+
+        commandService.follow(actor, target, true);
+
+        assertEquals(Double.valueOf((double) COMMAND_CLOCK_MILLIS), zset("follows:" + actor).get(Long.toString(target)));
+        Long ttlAfter = redis.getExpire("follows:" + actor, TimeUnit.SECONDS);
+        assertNotNull(ttlBefore);
+        assertNotNull(ttlAfter);
+        assertTrue(ttlAfter <= ttlBefore && ttlAfter >= ttlBefore - 2,
+                "ZSET add refreshes the score but preserves the existing expiration");
     }
 }

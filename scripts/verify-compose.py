@@ -166,6 +166,89 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_follow_command_module(base):
+    """Exercise only this project's synthetic follow facts and projections; no new consistency promise."""
+    headers = {}
+    for index, (actor, role, status) in enumerate(((997201, 'USER', 'ACTIVE'), (997202, 'MERCHANT', 'ACTIVE'),
+            (997203, 'ADMIN', 'ACTIVE'), (997204, 'USER', 'DISABLED'), (997205, None, 'ACTIVE'))):
+        sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'000000%05d','synthetic-follow-command','%s');" %
+            (actor, 7200 + index, status))
+        if role:
+            sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (actor, role))
+        token = 'synthetic-follow-command-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(actor), 'nickName', 'synthetic')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[actor] = {'authorization': token}
+    target = 9007199254742993  # Intentionally no target user row: do not add an existence rule.
+
+    def write(actor, follow, expected=200, target_id=target):
+        body, _ = request(base, '/follow/%s/%s?userId=997205' % (target_id, follow), expected, 'PUT', headers=headers[actor])
+        result = json.loads(body)
+        if expected == 200:
+            assert result == {'success': True}
+        else:
+            assert result['success'] is False
+            assert result['errorCode'] == {400: 'VALIDATION_FAILED', 401: 'AUTHENTICATION_FAILED',
+                                            409: 'CONFLICT', 500: 'INTERNAL_ERROR'}[expected]
+        return result
+
+    def count(actor):
+        return sql('SELECT COUNT(*) FROM tb_follow WHERE user_id=%d AND follow_user_id=%d;' % (actor, target))
+
+    request(base, '/follow/%d/true' % target, 401, 'PUT')
+    for actor in (997204, 997205): write(actor, 'true', 401)
+    for invalid in ('0', '-1', '9223372036854775808', 'bad'):
+        write(997201, 'true', 400, invalid)
+    write(997201, 'not-boolean', 400)
+    for actor in (997201, 997202, 997203):
+        for flag in ('true', 'false'): write(actor, flag, 409, actor)
+        key = 'follows:%d' % actor
+        write(actor, 'true')
+        assert count(actor) == '1' and float(redis('ZSCORE', key, str(target))) > 1
+        redis('ZADD', key, '1', str(target))
+        redis('EXPIRE', key, '600')
+        before_ttl = int(redis('TTL', key))
+        write(actor, 'true')
+        assert count(actor) == '1' and float(redis('ZSCORE', key, str(target))) > 1
+        assert before_ttl - 30 <= int(redis('TTL', key)) <= before_ttl
+        write(actor, 'false')
+        assert count(actor) == '0' and redis('ZSCORE', key, str(target)) == ''
+        redis('ZADD', key, '7', str(target))  # Absent fact + stale projection stays stale on repeated unfollow.
+        write(actor, 'false')
+        assert count(actor) == '0' and redis('ZSCORE', key, str(target)) == '7'
+        redis('DEL', key)
+    assert count(997205) == '0', 'query actor must not replace authenticated actor'
+    check('social follow writes: three roles, session actor, positive Long/Boolean validation, self conflict, duplicate refresh/TTL and unchanged repeated-unfollow semantics')
+
+    key = 'follows:997201'
+    redis('SET', key, 'synthetic-wrong-type')
+    result = write(997201, 'true', 500)
+    assert count(997201) == '1' and redis('GET', key) == 'synthetic-wrong-type'
+    assert 'WRONGTYPE' not in result.get('errorMsg', '') and 'follows:' not in result.get('errorMsg', '')
+    redis('DEL', key)
+    write(997201, 'true')  # Repeated follow can refresh the projection after its earlier failure.
+    assert count(997201) == '1' and float(redis('ZSCORE', key, str(target))) > 1
+    redis('DEL', key)
+    redis('SET', key, 'synthetic-delete-fault')
+    write(997201, 'false', 500)
+    assert count(997201) == '0' and redis('GET', key) == 'synthetic-delete-fault'
+    write(997201, 'false')  # No deleted row, hence no Redis operation or automatic repair.
+    assert redis('GET', key) == 'synthetic-delete-fault'
+    redis('DEL', key)
+    redis('ZADD', key, '9', str(target))
+    sql('RENAME TABLE tb_follow TO phase7u_owned_follow_fault;')
+    try:
+        for flag in ('true', 'false'): write(997201, flag, 500)
+        assert redis('ZSCORE', key, str(target)) == '9'
+    finally:
+        sql('RENAME TABLE phase7u_owned_follow_fault TO tb_follow;')
+    assert count(997201) == '0'
+    write(997201, 'true')
+    write(997201, 'false')
+    assert count(997201) == '0' and redis('ZSCORE', key, str(target)) == ''
+    check('social follow writes: real Redis failures retain committed SQL, retry boundaries, SQL faults leave projection unchanged and recovery is usable')
+
+
 def verify_follow_query_module(base):
     """Read-only social slice over its own actors, relationships and legacy ZSet projection."""
     roles = ((997101, 'USER', 'ACTIVE'), (997102, 'MERCHANT', 'ACTIVE'), (997103, 'ADMIN', 'ACTIVE'),
@@ -2315,6 +2398,7 @@ def main():
         for user, token in zip((900001, 900002), tokens):
             redis("HSET", "login:token:" + token, "id", str(user), "nickName", "synthetic")
             redis("EXPIRE", "login:token:" + token, "600")
+        verify_follow_command_module(base)
         verify_follow_query_module(base)
         verify_shop_type_module(base, tokens)
         verify_check_in_module(base)

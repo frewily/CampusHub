@@ -248,7 +248,6 @@ class BlogFeedDeliveryMySqlIT {
         @Bean FollowServiceImpl followService(FollowMapper followMapper, StringRedisTemplate redis) {
             FollowServiceImpl service = new FollowServiceImpl();
             ReflectionTestUtils.setField(service, "baseMapper", followMapper);
-            ReflectionTestUtils.setField(service, "stringRedisTemplate", redis);
             return service;
         }
 

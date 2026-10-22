@@ -43,6 +43,8 @@ com.campushub
 - Redis、消息、文件和搜索实现放在基础设施边界，业务代码依赖接口或清晰的适配器。
 - 跨模块写操作通过应用服务完成；事件机制仅在确有异步或解耦收益时引入。
 
+Phase7U进一步提取social关注写入：FollowController→FollowCommandService→FollowCommandRepository/FollowProjectionWriter及Clock。MyBatis/Redis写入适配器保留原执行顺序、唯一键竞争处理和失败语义；旧IFollowService/FollowServiceImpl只留Blog发布所需通用关系查询桥接，entity/mapper仍暂留旧包，不宣称完整social/Feed迁移。范围见[7U记录](43-phase-7u-follow-command-module.md)。
+
 ## 3 目标业务模型
 
 ### 3.1 身份与权限
