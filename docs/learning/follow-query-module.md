@@ -1,5 +1,13 @@
 # 关注查询：区分事实与投影，再拆依赖
 
+## Phase7Y：去掉旧用户服务桥接
+
+以下7T内容保留当时范围。当前共同关注资料由social.infrastructure.MyBatisFollowUserReader(UserMapper)实现：selectBatchIds后沿用BeanUtil映射UserDTO。核对当前MyBatis-Plus 3.4.3字节码，IService.listByIds本来就直接委托该Mapper方法，因此不需要新增SQL或把登录服务搬入social。UserMapper/Entity仍是共享遗留类型，这不是完整模块隔离。
+
+缺失用户自然省略，停用目标仍返回；只保留id/nickName/icon。适配器不重排Mapper结果，但SQL没有ORDER BY，不能承诺输入顺序或固定展示顺序。无交集由原应用服务提前返回，不调用资料SELECT；有交集时SQL异常仍传播为通用500，不静默降级或修复。新增故障验证仅操作独立合成库，保留认证所需id/status/角色表，并在finally恢复phone列。
+
+结构拆分不等于隐私治理；若将来决定过滤停用目标，应另定产品契约，而不是夹带在适配器替换中。7Y无数据迁移，回退7X用完整clean构建包即可；不承诺删除的内部Java类型二进制兼容。具体本轮证据见[7Y记录](../refactor/47-phase-7y-follow-user-reader.md)。
+
 实际开发照着走：先对照三个关注接口的完整调用链→单独提取两个GET→把SQL、Redis和用户映射放进读取适配器→保留写入与发布链→用分歧数据和故障测试验证读语义未变→最终jar验收。继续条件是旧契约有证据且没有顺手改变一致性规则，不是“多了social目录”。
 
 可复制Prompt：只把isFollow/common从旧Follow服务提取为social查询用例，URL、认证、正Long校验和响应不变。是否关注读MySQL COUNT，共同关注读follows:{id} ZSet交集，经用户服务映射UserDTO；不分页、不回填、不改写关注或Feed链。保留已有回归断言并测试DB/Redis分歧、无交集、坏member、WRONGTYPE和SQL异常，明确只读边界。

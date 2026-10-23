@@ -530,6 +530,26 @@ def verify_follow_query_module(base):
     assert sql(rows_sql) == rows_before
     check('social follow queries: SQL truth vs Redis intersection, missing/disabled profiles, self reads, unchanged projection and sanitized faults/recovery without repair')
 
+    # Keep authentication's id/status/roles intact while the batch profile SELECT fails.
+    # The preceding repeated-follow request intentionally refreshed the shared member's score.
+    profile_projection_before = {key: redis('ZRANGE', key, '0', '-1', 'WITHSCORES') for key in before}
+    profiles_sql = ('SELECT id,phone,password,nick_name,icon,status,create_time,update_time '
+                    'FROM tb_user WHERE id IN (%d,%d) ORDER BY id;' % (shared, disabled_profile))
+    profiles_before = sql(profiles_sql)
+    sql('ALTER TABLE tb_user RENAME COLUMN phone TO phase7y_owned_phone_fault;')
+    try:
+        generic_failure('/follow/common/997110')
+        assert query(997101, '/follow/or/not/%d' % shared)['data'] is True
+        assert_profiles(query(997102, '/follow/common/997103'), set())
+    finally:
+        sql('ALTER TABLE tb_user RENAME COLUMN phase7y_owned_phone_fault TO phone;')
+    assert_profiles(query(997101, '/follow/common/997110'), {shared, disabled_profile})
+    assert sql(profiles_sql) == profiles_before
+    assert sql(rows_sql) == rows_before
+    for key in profile_projection_before:
+        assert redis('ZRANGE', key, '0', '-1', 'WITHSCORES') == profile_projection_before[key]
+    check('social batch profiles: SQL failure propagates, empty intersection skips profile SELECT, recovery preserves rows and projections')
+
 
 def verify_shop_type_module(base, tokens):
     """Only this fresh project's categories/cache are manipulated; retain the legacy public read contract."""

@@ -260,6 +260,8 @@
 
 ## 5 原始目标的剩余范围
 
+Phase7Y（2026-10-23，基线 `bffdbe796ac1ca647d42ed37da86adc9beefc8c6`）：仅替换共同关注用户资料读取适配器，移除social对IUserService的依赖。保留批量SELECT、缺失省略、停用目标可读、DTO白名单和异常传播，应用服务/Controller/Redis逻辑不变；无新路由、迁移、排序、隐私策略或缓存。范围及本轮验证见[7Y记录](47-phase-7y-follow-user-reader.md)，按验证、提交、新Luna独立审查、普通推送读回后停止。
+
 Phase7X（2026-10-23，基线 `b6376f3d0919f5d99a711eeb051b0200fd195dd8`）：仅迁移用户简档/资料的三个GET到identity；me仍读会话，另两个分别按ID查询原表并映射旧DTO。保留现有认证、正Long、数字ID、缺失无data成功、跨用户/停用目标/孤立资料行语义；不新增隐私策略、写接口、资料缓存或目标状态过滤。移除旧UserInfo服务，登录/验证码/登出及共享用户服务不改；51映射/17Controllers、V001–V014不变。范围与证据见[7X记录](46-phase-7x-user-profile-module.md)，验证、提交、新Luna独立审查、普通推送读回后停止。
 
 Phase7W（2026-10-22，基线 `8bb0df3aa3af18b851d3b19e3ea3b9358b548d0e`）：仅提取公开门店优惠券列表到promotion，保留status=1、原LEFT JOIN列、Entity数字ID/金额和时间响应，正Long参数；不增加门店存在/活动时间/库存资格规则或缓存/排序/分页。旧创建/秒杀/订单链与V001–V014不变，51映射/16Controllers；范围与证据见[7W记录](45-phase-7w-voucher-query-module.md)，验证后提交、新Luna独立审查、普通推送读回后停止。

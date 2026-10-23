@@ -53,6 +53,8 @@ Phase7X提取identity资料读取：UserProfileController处理会话me与两个
 
 ## 3 目标业务模型
 
+Phase7Y移除social的LegacyFollowUserReader，改由MyBatisFollowUserReader直接通过UserMapper.selectBatchIds读取共同关注资料。与旧IService.listByIds实际委托相同，保留DTO映射与数据库返回顺序，不新增排序或账号状态过滤；UserMapper/Entity暂留旧包，不建立跨模块写入口。以上7T旧用户桥接是历史描述；当前边界见[7Y记录](47-phase-7y-follow-user-reader.md)。
+
 ### 3.1 身份与权限
 
 - `User`：学生或普通平台用户，拥有账号状态和角色集合。

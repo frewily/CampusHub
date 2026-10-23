@@ -6,7 +6,7 @@ import io.github.frewily.campushub.entity.Follow;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.mapper.FollowMapper;
-import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.mapper.UserMapper;
 import io.github.frewily.campushub.social.application.FollowCommandService;
 import io.github.frewily.campushub.social.application.FollowQueryService;
 import org.junit.jupiter.api.Test;
@@ -30,14 +30,14 @@ class FollowQueryAdaptersTest {
     void shouldIntersectTheSameSortedSetStructureUsedForFollowing() {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         ZSetOperations<String, String> zsets = mock(ZSetOperations.class);
-        IUserService users = mock(IUserService.class);
+        UserMapper users = mock(UserMapper.class);
         FollowMapper mapper = mock(FollowMapper.class);
         when(redis.opsForZSet()).thenReturn(zsets);
         when(zsets.range("follows:1", 0, -1)).thenReturn(new LinkedHashSet<>(Arrays.asList("2", "3")));
         when(zsets.range("follows:9", 0, -1)).thenReturn(new LinkedHashSet<>(Arrays.asList("3", "4")));
-        when(users.listByIds(Arrays.asList(3L))).thenReturn(Arrays.asList(new User().setId(3L).setNickName("common")));
+        when(users.selectBatchIds(Arrays.asList(3L))).thenReturn(Arrays.asList(new User().setId(3L).setNickName("common")));
         FollowQueryService service = new FollowQueryService(new MyBatisFollowLookupRepository(mapper),
-                new RedisFollowProjectionReader(redis), new LegacyFollowUserReader(users));
+                new RedisFollowProjectionReader(redis), new MyBatisFollowUserReader(users));
         List<UserDTO> result = service.common(1L, 9L);
         assertNotNull(result, "common follows must come from the canonical ZSet data");
         assertEquals(1, result.size());
@@ -65,17 +65,40 @@ class FollowQueryAdaptersTest {
     }
 
     @Test
-    void profileBridgeRetainsOnlyUserDtoFieldsWithoutStatusFiltering() {
-        IUserService users = mock(IUserService.class);
-        when(users.listByIds(Arrays.asList(3L))).thenReturn(Arrays.asList(new User().setId(3L).setNickName("common")
-                .setIcon("icon.png").setPhone("00000000003").setPassword("synthetic-never-real").setStatus("DISABLED")));
-        UserDTO result = new LegacyFollowUserReader(users).findByIds(Arrays.asList(3L)).get(0);
+    void profileReaderRetainsOnlyUserDtoFieldsWithoutStatusFilteringOrReordering() {
+        UserMapper users = mock(UserMapper.class);
+        long largeId = 9007199254740993L;
+        List<Long> ids = Arrays.asList(3L, largeId, 4L);
+        when(users.selectBatchIds(ids)).thenReturn(Arrays.asList(
+                new User().setId(largeId).setNickName("large").setIcon("large.svg").setPhone("synthetic-phone")
+                        .setPassword("synthetic-never-real").setStatus("DISABLED"),
+                new User().setId(3L).setNickName("common").setIcon("icon.png").setStatus("ACTIVE")));
+        List<UserDTO> results = new MyBatisFollowUserReader(users).findByIds(ids);
+        assertEquals(2, results.size());
+        assertEquals(Arrays.asList(largeId, 3L), Arrays.asList(results.get(0).getId(), results.get(1).getId()),
+                "adapter retains mapper result order and naturally omits missing rows");
+        UserDTO result = results.get(0);
         Set<String> fields = new HashSet<>(); new ObjectMapper().valueToTree(result).fieldNames().forEachRemaining(fields::add);
         assertEquals(new HashSet<>(Arrays.asList("id", "nickName", "icon")), fields);
-        assertEquals(3L, result.getId());
-        assertEquals("common", result.getNickName());
-        assertEquals("icon.png", result.getIcon());
-        verify(users).listByIds(Arrays.asList(3L));
+        assertEquals(largeId, result.getId());
+        assertEquals("large", result.getNickName());
+        assertEquals("large.svg", result.getIcon());
+        assertEquals("common", results.get(1).getNickName());
+        assertEquals("icon.png", results.get(1).getIcon());
+        verify(users).selectBatchIds(ids);
+        verifyNoMoreInteractions(users);
+    }
+
+    @Test
+    void profileReaderPropagatesMapperFailuresAndOnlyReadsUsers() {
+        UserMapper users = mock(UserMapper.class);
+        List<Long> ids = Arrays.asList(41L, 42L);
+        IllegalStateException failure = new IllegalStateException("synthetic SQL failure");
+        when(users.selectBatchIds(ids)).thenThrow(failure);
+
+        assertSame(failure, assertThrows(IllegalStateException.class,
+                () -> new MyBatisFollowUserReader(users).findByIds(ids)));
+        verify(users).selectBatchIds(ids);
         verifyNoMoreInteractions(users);
     }
 

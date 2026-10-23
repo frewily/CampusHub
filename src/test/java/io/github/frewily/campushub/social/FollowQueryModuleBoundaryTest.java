@@ -2,12 +2,14 @@ package io.github.frewily.campushub.social;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import io.github.frewily.campushub.mapper.FollowMapper;
+import io.github.frewily.campushub.mapper.UserMapper;
 import io.github.frewily.campushub.social.api.FollowController;
 import io.github.frewily.campushub.social.api.FollowQueryController;
 import io.github.frewily.campushub.social.application.FollowCommandService;
 import io.github.frewily.campushub.social.application.FollowerReader;
 import io.github.frewily.campushub.social.application.FollowQueryService;
 import io.github.frewily.campushub.social.infrastructure.MyBatisFollowerReader;
+import io.github.frewily.campushub.social.infrastructure.MyBatisFollowUserReader;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -33,6 +35,9 @@ class FollowQueryModuleBoundaryTest {
                 FollowController.class.getDeclaredConstructors()[0].getParameterTypes());
         assertEquals(java.util.List.class, FollowerReader.class.getMethod("findFollowerIds", Long.class).getReturnType());
         assertArrayEquals(new Class<?>[]{FollowMapper.class}, MyBatisFollowerReader.class.getDeclaredConstructors()[0].getParameterTypes());
+        assertArrayEquals(new Class<?>[]{UserMapper.class}, MyBatisFollowUserReader.class.getDeclaredConstructors()[0].getParameterTypes());
+        assertThrows(ClassNotFoundException.class,
+                () -> Class.forName("io.github.frewily.campushub.social.infrastructure.LegacyFollowUserReader"));
     }
 
     @Test

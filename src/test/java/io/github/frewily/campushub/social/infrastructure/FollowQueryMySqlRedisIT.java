@@ -7,8 +7,6 @@ import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.mapper.FollowMapper;
 import io.github.frewily.campushub.mapper.UserMapper;
-import io.github.frewily.campushub.service.IUserService;
-import io.github.frewily.campushub.service.impl.UserServiceImpl;
 import io.github.frewily.campushub.social.application.FollowQueryService;
 import io.github.frewily.campushub.social.application.FollowCommandService;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -24,7 +22,6 @@ import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.mybatis.spring.SqlSessionTemplate;
 
 import java.net.ServerSocket;
@@ -46,7 +43,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Integration coverage for the real MySQL, Redis, and user-service adapters. */
+/** Integration coverage for the real MySQL, Redis, and batch user-reader adapters. */
 class FollowQueryMySqlRedisIT {
     @TempDir
     static Path directory;
@@ -98,12 +95,10 @@ class FollowQueryMySqlRedisIT {
             commandService = new FollowCommandService(commandRepository, new RedisFollowProjectionWriter(redis),
                     Clock.fixed(Instant.ofEpochMilli(COMMAND_CLOCK_MILLIS), ZoneOffset.UTC));
             UserMapper userMapper = sessions.getMapper(UserMapper.class);
-            IUserService userService = new UserServiceImpl();
-            ReflectionTestUtils.setField(userService, "baseMapper", userMapper);
             service = new FollowQueryService(
                     new MyBatisFollowLookupRepository(followMapper),
                     new RedisFollowProjectionReader(redis),
-                    new LegacyFollowUserReader(userService));
+                    new MyBatisFollowUserReader(userMapper));
         } catch (Exception | Error failure) {
             stopOwnedResources();
             throw failure;
@@ -355,6 +350,46 @@ class FollowQueryMySqlRedisIT {
         assertEquals(1, result.size());
         assertEquals(501L, result.get(0).getId());
         assertEquals("present", result.get(0).getNickName());
+    }
+
+    @Test
+    void commonReturnsDisabledUsersAndKeepsLargeIdsAndDtoProjection() {
+        long disabled = 9007199254740993L;
+        insertUser(disabled, "disabled", "disabled.svg");
+        jdbc.update("UPDATE tb_user SET status='DISABLED' WHERE id=?", disabled);
+        setFollows(53L, Long.toString(disabled));
+        setFollows(54L, Long.toString(disabled));
+
+        List<UserDTO> result = service.common(53L, 54L);
+
+        assertEquals(1, result.size());
+        assertEquals(disabled, result.get(0).getId());
+        assertEquals("disabled", result.get(0).getNickName());
+        assertEquals("disabled.svg", result.get(0).getIcon());
+        assertEquals(new HashSet<>(Arrays.asList("id", "nickName", "icon")),
+                cn.hutool.core.bean.BeanUtil.beanToMap(result.get(0)).keySet());
+    }
+
+    @Test
+    void commonPropagatesUserSqlFailureWithoutChangingFollowRowsOrRedis() {
+        insertUser(551L, "present", "present.svg");
+        insertFollow(5511L, 551L);
+        setFollows(55L, "551");
+        setFollows(56L, "551");
+        List<Map<String, Object>> rows = followRows();
+        Map<String, Double> first = zset("follows:55");
+        Map<String, Double> second = zset("follows:56");
+
+        jdbc.execute("RENAME TABLE tb_user TO phase7y_owned_user_fault");
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class, () -> service.common(55L, 56L));
+            assertEquals(rows, followRows());
+            assertEquals(first, zset("follows:55"));
+            assertEquals(second, zset("follows:56"));
+        } finally {
+            jdbc.execute("RENAME TABLE phase7y_owned_user_fault TO tb_user");
+        }
+        assertEquals(1, service.common(55L, 56L).size());
     }
 
     @Test
