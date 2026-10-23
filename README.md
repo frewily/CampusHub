@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase7Z继续收窄动态模块依赖：[作者与点赞人资料读取端口](docs/refactor/48-phase-7z-blog-user-reader.md)替代Blog对旧IUserService的依赖，保留数据库作者展示、Redis前五成员及FIELD顺序、缺失/停用资料和异常行为。51映射/17个Controller、V001–V014不变，不改点赞写入、Feed规则或登录；[学习笔记](docs/learning/blog-user-reader.md)说明内容读取与认证服务的边界，不代表完整content迁移。
+
 Phase7Y继续收窄依赖：[共同关注资料适配器](docs/refactor/47-phase-7y-follow-user-reader.md)直接使用UserMapper批量读取，移除social对旧IUserService的桥接；原交集、缺失省略、停用资料可读和三字段UserDTO保持。51条映射/17个Controller、V001–V014不变，不新增隐私规则、排序、缓存或产品功能；不是完整identity/social迁移。
 
 Phase7X继续业务分包：[用户资料读取切片](docs/refactor/46-phase-7x-user-profile-module.md)将三个用户GET迁入identity，区分会话简档与数据库查询，移除无调用方的旧UserInfo服务。51条映射/17个Controller、V001–V014不变；认证、数字ID、DTO白名单和缺失成功保留，不改验证码/登录/登出，也不新增目标状态或归属限制。[学习笔记](docs/learning/user-profile-module.md)说明会话、读取与隐私规则的边界，个人掌握仍需独立确认。

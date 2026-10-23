@@ -1,6 +1,5 @@
 package io.github.frewily.campushub.service.impl;
 
-import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -9,14 +8,13 @@ import io.github.frewily.campushub.dto.ScrollResult;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.dto.request.BlogEditRequest;
 import io.github.frewily.campushub.entity.Blog;
-import io.github.frewily.campushub.entity.User;
+import io.github.frewily.campushub.content.application.BlogUserReader;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.service.IBlogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import io.github.frewily.campushub.social.application.FollowerReader;
-import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.service.BlogFeedDeliveryService;
 import io.github.frewily.campushub.utils.RedisConstants;
 import io.github.frewily.campushub.utils.SystemConstants;
@@ -38,7 +36,7 @@ import static io.github.frewily.campushub.utils.RedisConstants.FEED_KEY;
 public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IBlogService {
 
     @Resource
-    private IUserService userService;
+    private BlogUserReader blogUserReader;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -125,7 +123,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     private void queryBlogUser(Blog blog) {
         Long userId = blog.getUserId();
-        User user = userService.getById(userId);
+        UserDTO user = blogUserReader.findAuthor(userId);
         blog.setName(user.getNickName());
         blog.setIcon(user.getIcon());
     }
@@ -186,34 +184,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             return Result.ok(Collections.emptyList());
         }
         List<Long> ids = top5.stream().map(Long::valueOf).collect(Collectors.toList());
-        /**
-         * .map(Long::valueOf)
-         * map 是转换操作，对流中的每个元素进行处理
-         * Long::valueOf 是方法引用，等同于 s -> Long.valueOf(s)
-         * 作用：将每个字符串类型的ID（如 "123"）转换为 Long 类型（如 123L）
-         * .collect(Collectors.toList())
-         * 将处理后的流收集成一个 List
-         * 最终得到 List<Long> 类型的用户ID列表
-         */
-        String idStr = StrUtil.join(",", ids);
-        List<UserDTO> userDTOS = userService.query()
-                .in("id", ids)
-                .last("ORDER BY FIELD(id," + idStr + ")").list()
-                .stream()
-                .map(user -> BeanUtil.copyProperties(user, UserDTO.class))
-                .collect(Collectors.toList());
-        /**
-         * .stream()
-         * 将查询结果转换成流，方便进行链式操作
-         * .map(user -> BeanUtil.copyProperties(user, UserDTO.class))
-         * map 对流中的每个 User 对象进行转换
-         * BeanUtil.copyProperties(user, UserDTO.class) 是 Hutool 工具类的方法
-         * 作用： 将 User 对象的属性复制到 UserDTO 对象中
-         * 这是一个对象转换操作，从数据库实体转换为数据传输对象
-         * .collect(Collectors.toList())
-         * 将转换后的流收集成 List
-         * 最终得到 List<UserDTO> 类型
-         */
+        List<UserDTO> userDTOS = blogUserReader.findLikers(ids);
         return Result.ok(userDTOS);
     }
 

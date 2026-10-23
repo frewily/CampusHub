@@ -10,7 +10,7 @@ import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.service.impl.BlogServiceImpl;
-import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.content.application.BlogUserReader;
 import io.github.frewily.campushub.service.BlogFeedDeliveryService;
 import io.github.frewily.campushub.social.application.FollowerReader;
 import io.github.frewily.campushub.utils.UserHolder;
@@ -196,8 +196,8 @@ class BlogEditMySqlIT {
         }
 
         @Bean
-        IUserService userService() {
-            return mock(IUserService.class);
+        BlogUserReader blogUserReader() {
+            return mock(BlogUserReader.class);
         }
 
         @Bean

@@ -76,6 +76,8 @@ Controller：[VoucherController.java](../../src/main/java/io/github/frewily/camp
 
 ## 动态
 
+Phase7Z：原BlogServiceImpl通过[BlogUserReader](../../src/main/java/io/github/frewily/campushub/content/application/BlogUserReader.java)和[MyBatisBlogUserReader](../../src/main/java/io/github/frewily/campushub/content/infrastructure/MyBatisBlogUserReader.java)获取作者/点赞人展示资料，不再依赖旧用户登录服务。详情/热门/Feed仍按数据库作者填name/icon（停用作者不自动过滤，缺失作者仍通用500）；点赞列表先取Redis正序前五成员，Long解析后按原FIELD顺序查询并映射三字段UserDTO，缺失行省略但不从第六名补位，停用目标仍可读。不新增排序规则、账号过滤或缓存，动态Entity响应及原认证要求不变。
+
 Controller：[BlogController.java](../../src/main/java/io/github/frewily/campushub/controller/BlogController.java)；Service：[IBlogService.java](../../src/main/java/io/github/frewily/campushub/service/IBlogService.java)、[BlogServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/BlogServiceImpl.java)；模型：[Blog.java](../../src/main/java/io/github/frewily/campushub/entity/Blog.java)、[BlogCreateRequest.java](../../src/main/java/io/github/frewily/campushub/dto/request/BlogCreateRequest.java)、[ScrollResult.java](../../src/main/java/io/github/frewily/campushub/dto/ScrollResult.java)、[UserDTO.java](../../src/main/java/io/github/frewily/campushub/dto/UserDTO.java)、[ApiModelMapper.java](../../src/main/java/io/github/frewily/campushub/dto/ApiModelMapper.java)。
 
 | Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |

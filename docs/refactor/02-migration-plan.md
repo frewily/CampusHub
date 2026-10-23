@@ -260,6 +260,8 @@
 
 ## 5 原始目标的剩余范围
 
+Phase7Z（2026-10-23，基线 `67dcc44f982789efdf49e1878adcd47464628198`）：仅把Blog作者/点赞人用户读取替换为content专用BlogUserReader端口。原作者缺失仍异常，停用目标不新过滤；原前五Redis成员、Long解析、FIELD排序、缺失省略不补位、UserDTO三字段不变。无路由/迁移、隐私规则或缓存变化，登录/点赞写入/Feed规则不改。范围和本轮证据见[7Z记录](48-phase-7z-blog-user-reader.md)，验证、提交、新Luna独立审查、普通推送读回后停止。
+
 Phase7Y（2026-10-23，基线 `bffdbe796ac1ca647d42ed37da86adc9beefc8c6`）：仅替换共同关注用户资料读取适配器，移除social对IUserService的依赖。保留批量SELECT、缺失省略、停用目标可读、DTO白名单和异常传播，应用服务/Controller/Redis逻辑不变；无新路由、迁移、排序、隐私策略或缓存。范围及本轮验证见[7Y记录](47-phase-7y-follow-user-reader.md)，按验证、提交、新Luna独立审查、普通推送读回后停止。
 
 Phase7X（2026-10-23，基线 `b6376f3d0919f5d99a711eeb051b0200fd195dd8`）：仅迁移用户简档/资料的三个GET到identity；me仍读会话，另两个分别按ID查询原表并映射旧DTO。保留现有认证、正Long、数字ID、缺失无data成功、跨用户/停用目标/孤立资料行语义；不新增隐私策略、写接口、资料缓存或目标状态过滤。移除旧UserInfo服务，登录/验证码/登出及共享用户服务不改；51映射/17Controllers、V001–V014不变。范围与证据见[7X记录](46-phase-7x-user-profile-module.md)，验证、提交、新Luna独立审查、普通推送读回后停止。

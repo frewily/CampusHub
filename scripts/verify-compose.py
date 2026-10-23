@@ -166,6 +166,102 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_blog_user_reader(base):
+    """Own post/profile fixtures; preserve enrichment and the existing Redis top-five selection."""
+    actor_ids = (992701, 992702, 992703)
+    # Reserve phones independently of older scenarios' 7100/7200/7300/8100 suffix ranges.
+    owned_phones = ['%011d' % number for number in (*actor_ids, *range(992801, 992806))]
+    assert sql("SELECT COUNT(*) FROM tb_user WHERE phone IN (%s);" %
+               ','.join("'%s'" % phone for phone in owned_phones)) == '0'
+    headers = []
+    for i, (actor, role) in enumerate(zip(actor_ids, ('USER', 'MERCHANT', 'ADMIN'))):
+        sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'%s','actor','ACTIVE');"
+            "INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (actor, owned_phones[i], actor, role))
+        token = 'synthetic-blog-reader-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(actor), 'nickName', 'session-not-author')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers.append({'authorization': token})
+    author, first, second, missing, fourth, excluded = (9007199254745993, 9007199254745997,
+                                                      9007199254745995, 9007199254745999,
+                                                      9007199254746001, 9007199254746003)
+    for index, user_id in enumerate((author, first, second, fourth, excluded)):
+        sql("INSERT INTO tb_user(id,phone,password,nick_name,icon,status) VALUES"
+            "(%d,'%s','synthetic-only','profile-%d','profile.svg','%s');" %
+            (user_id, owned_phones[3 + index], user_id, 'DISABLED' if user_id in (author, second) else 'ACTIVE'))
+    post, empty, orphan = 9007199254746101, 9007199254746103, 9007199254746105
+    sql("INSERT INTO tb_blog(id,user_id,title,images,content,liked,comments,withdrawn) VALUES"
+        "(%d,%d,'synthetic-reader','', 'body',2147483640,0,0),"
+        "(%d,%d,'synthetic-reader-empty','', 'body',0,0,0);" % (post, author, empty, author))
+    liked_key, feed_key = 'blog:liked:%d' % post, 'feed:%d' % actor_ids[0]
+    # Reverse numeric order, a missing user among the first five, and a sixth that must not refill it.
+    redis('ZADD', liked_key, '1', str(first), '2', str(second), '3', str(missing),
+          '4', str(author), '5', str(fourth), '6', str(excluded))
+    redis('ZADD', feed_key, '100', str(post), '99', str(empty))
+    redis('EXPIRE', liked_key, '600'); redis('EXPIRE', feed_key, '600')
+    users_sql = 'SELECT * FROM tb_user WHERE id IN (%s) ORDER BY id;' % ','.join(map(str, (author, first, second, fourth, excluded)))
+    posts_sql = 'SELECT * FROM tb_blog WHERE id IN (%d,%d) ORDER BY id;' % (post, empty)
+    users_before, posts_before = sql(users_sql), sql(posts_sql)
+    projection_before = {key: redis('ZRANGE', key, '0', '-1', 'WITHSCORES') for key in (liked_key, feed_key)}
+
+    def query(route, expected=200, auth=None):
+        body, _ = request(base, route, expected, headers=auth or headers[0])
+        return json.loads(body)
+
+    def assert_likers(auth):
+        result = query('/blog/likes/%d' % post, auth=auth)
+        assert result['success'] is True
+        assert [u['id'] for u in result['data']] == [first, second, author, fourth]
+        for user in result['data']:
+            assert set(user) == {'id', 'nickName', 'icon'} and type(user['id']) is int
+            assert user['nickName'] == 'profile-%d' % user['id']
+
+    for auth in headers:
+        item = query('/blog/%d?userId=%d' % (post, actor_ids[1]), auth=auth)['data']
+        assert item['id'] == post and item['userId'] == author and type(item['userId']) is int
+        assert item['name'] == 'profile-%d' % author and item['icon'] == 'profile.svg' and item['isLike'] is False
+        assert not ({'phone', 'password', 'status', 'nickName'} & set(item))
+        assert_likers(auth)
+    for route in ('/blog/%d' % post, '/blog/likes/%d' % post): request(base, route, 401)
+    hot_body, _ = request(base, '/blog/hot')
+    hot = json.loads(hot_body)['data'][0]
+    assert hot['id'] == post and hot['name'] == 'profile-%d' % author and hot['isLike'] is False
+    feed = query('/blog/of/follow?lastId=100&offset=0')['data']
+    assert [item['id'] for item in feed['list']] == [post, empty]
+    assert all(item['name'] == 'profile-%d' % author for item in feed['list'])
+    assert feed['minTime'] == 99 and feed['offset'] == 1
+    assert query('/blog/likes/%d' % empty)['data'] == []
+    check('content user reader: database author vs session display, three roles, anonymous hot, Feed enrichment, ordered top-five without refill, disabled and missing users, numeric DTO whitelist')
+
+    def failure(route):
+        result = query(route, 500)
+        assert result == {'success': False, 'errorMsg': '服务器异常', 'errorCode': 'INTERNAL_ERROR'}
+
+    sql('ALTER TABLE tb_user RENAME COLUMN phone TO phase7z_owned_phone_fault;')
+    try:
+        failure('/blog/%d' % post)
+        failure('/blog/likes/%d' % post)
+        failure('/blog/of/follow?lastId=100&offset=0')
+        assert query('/blog/likes/%d' % empty)['data'] == []
+    finally:
+        sql('ALTER TABLE tb_user RENAME COLUMN phase7z_owned_phone_fault TO phone;')
+    for malformed in ('synthetic-not-a-long',):
+        redis('ZADD', liked_key, '0', malformed)
+        try: failure('/blog/likes/%d' % post)
+        finally: redis('ZREM', liked_key, malformed)
+    sql("INSERT INTO tb_blog(id,user_id,title,images,content,liked,comments,withdrawn) VALUES"
+        "(%d,%d,'synthetic-orphan','', 'body',0,0,0);" % (orphan, missing))
+    try:
+        failure('/blog/%d' % orphan)  # Retain the old missing-author failure, not invented display data.
+    finally:
+        sql('DELETE FROM tb_blog WHERE id=%d;' % orphan)
+    assert_likers(headers[0])
+    assert query('/blog/%d' % post)['data']['name'] == 'profile-%d' % author
+    assert sql(users_sql) == users_before and sql(posts_sql) == posts_before
+    for key in projection_before:
+        assert redis('ZRANGE', key, '0', '-1', 'WITHSCORES') == projection_before[key]
+    check('content profile faults: SQL failures and malformed like members stay generic, empty likes skip user SELECT, missing author remains failure, recovery preserves facts and Redis projections')
+
+
 def verify_user_profile_module(base):
     """Keep session identity separate from the two legacy, authenticated profile lookups."""
     target, orphan, missing = 9007199254744993, 9007199254744995, 9007199254744997
@@ -2626,6 +2722,7 @@ def main():
         verify_follower_reader_publication(base)
         verify_voucher_query_module(base)
         verify_user_profile_module(base)
+        verify_blog_user_reader(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

@@ -7,7 +7,7 @@ import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.Blog;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
-import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.content.application.BlogUserReader;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +32,7 @@ class BlogFeedPaginationServiceTest {
     private StringRedisTemplate redis;
     private ZSetOperations<String, String> zset;
     private QueryChainWrapper<Blog> query;
-    private IUserService users;
+    private BlogUserReader blogUserReader;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -41,9 +41,9 @@ class BlogFeedPaginationServiceTest {
         redis = mock(StringRedisTemplate.class);
         zset = mock(ZSetOperations.class);
         query = mock(QueryChainWrapper.class);
-        users = mock(IUserService.class);
+        blogUserReader = mock(BlogUserReader.class);
         ReflectionTestUtils.setField(service, "stringRedisTemplate", redis);
-        ReflectionTestUtils.setField(service, "userService", users);
+        ReflectionTestUtils.setField(service, "blogUserReader", blogUserReader);
         doReturn(query).when(service).query();
         when(redis.opsForZSet()).thenReturn(zset);
         UserDTO identity = new UserDTO();
@@ -83,7 +83,7 @@ class BlogFeedPaginationServiceTest {
         assertTrue(page.getList().isEmpty());
         verify(query).in("id", Arrays.asList(105L, 104L));
         verify(query).last("ORDER BY FIELD(id,105,104)");
-        verifyNoInteractions(users);
+        verifyNoInteractions(blogUserReader);
         verify(zset).reverseRangeByScoreWithScores("feed:7", 0, 1000, 2, 2);
         verifyNoMoreInteractions(zset);
     }
@@ -140,7 +140,7 @@ class BlogFeedPaginationServiceTest {
             assertTrue(result.getSuccess());
             assertNull(result.getData());
         }
-        verifyNoInteractions(query, users);
+        verifyNoInteractions(query, blogUserReader);
     }
 
     @Test
@@ -159,7 +159,7 @@ class BlogFeedPaginationServiceTest {
                 () -> service.queryBlogOfFollow(1000L, Integer.MAX_VALUE));
         assertEquals(ErrorCode.OPERATION_FAILED, failure.getErrorCode());
         assertNull(failure.getCause());
-        verifyNoInteractions(query, users);
+        verifyNoInteractions(query, blogUserReader);
         verify(zset).reverseRangeByScoreWithScores("feed:7", 0, 1000, Integer.MAX_VALUE, 2);
         verifyNoMoreInteractions(zset);
     }

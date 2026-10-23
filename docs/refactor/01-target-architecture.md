@@ -53,6 +53,8 @@ Phase7X提取identity资料读取：UserProfileController处理会话me与两个
 
 ## 3 目标业务模型
 
+Phase7Z为遗留BlogServiceImpl增加content.application.BlogUserReader，作者按ID与点赞人按原FIELD顺序读取分别由MyBatisBlogUserReader承担，返回旧UserDTO、不暴露用户Entity或通用CRUD服务。BlogServiceImpl仍负责动态/点赞/Feed编排，content尚未整体迁移；IUserService在生产代码中只剩认证Controller/实现使用，仍未迁移登录或收窄其IService继承。范围见[7Z记录](48-phase-7z-blog-user-reader.md)。
+
 Phase7Y移除social的LegacyFollowUserReader，改由MyBatisFollowUserReader直接通过UserMapper.selectBatchIds读取共同关注资料。与旧IService.listByIds实际委托相同，保留DTO映射与数据库返回顺序，不新增排序或账号状态过滤；UserMapper/Entity暂留旧包，不建立跨模块写入口。以上7T旧用户桥接是历史描述；当前边界见[7Y记录](47-phase-7y-follow-user-reader.md)。
 
 ### 3.1 身份与权限

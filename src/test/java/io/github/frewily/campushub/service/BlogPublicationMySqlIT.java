@@ -11,12 +11,11 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.dto.request.BlogCreateRequest;
 import io.github.frewily.campushub.entity.Blog;
-import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.mapper.BlogMapper;
 import io.github.frewily.campushub.mapper.BlogFeedDeliveryMapper;
 import io.github.frewily.campushub.service.impl.BlogServiceImpl;
-import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.content.application.BlogUserReader;
 import io.github.frewily.campushub.social.application.FollowerReader;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.junit.jupiter.api.AfterAll;
@@ -62,7 +61,7 @@ class BlogPublicationMySqlIT {
     private static JdbcTemplate jdbc;
     private static BlogMapper mapper;
     private static BlogServiceImpl blogService;
-    private static IUserService userService;
+    private static BlogUserReader blogUserReader;
     private static FollowerReader followerReader;
     private static StringRedisTemplate redis;
     private static ZSetOperations<String, String> zset;
@@ -158,11 +157,11 @@ class BlogPublicationMySqlIT {
 
         blogService = new BlogServiceImpl();
         ReflectionTestUtils.setField(blogService, "baseMapper", mapper);
-        userService = mock(IUserService.class);
+        blogUserReader = mock(BlogUserReader.class);
         followerReader = mock(FollowerReader.class);
         redis = mock(StringRedisTemplate.class);
         zset = mock(ZSetOperations.class);
-        ReflectionTestUtils.setField(blogService, "userService", userService);
+        ReflectionTestUtils.setField(blogService, "blogUserReader", blogUserReader);
         ReflectionTestUtils.setField(blogService, "followerReader", followerReader);
         ReflectionTestUtils.setField(blogService, "stringRedisTemplate", redis);
         ReflectionTestUtils.setField(blogService, "blogFeedDeliveryService",
@@ -171,8 +170,11 @@ class BlogPublicationMySqlIT {
         when(redis.opsForZSet()).thenReturn(zset);
         when(zset.score(anyString(), anyString())).thenReturn(null);
 
-        User author = new User().setNickName("Synthetic author").setIcon("/synthetic-author.png");
-        when(userService.getById(AUTHOR_ID)).thenReturn(author);
+        UserDTO author = new UserDTO();
+        author.setId(AUTHOR_ID);
+        author.setNickName("Synthetic author");
+        author.setIcon("/synthetic-author.png");
+        when(blogUserReader.findAuthor(AUTHOR_ID)).thenReturn(author);
     }
 
     @BeforeEach

@@ -6,6 +6,7 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.dto.request.BlogCreateRequest;
 import io.github.frewily.campushub.dto.request.BlogEditRequest;
+import io.github.frewily.campushub.content.application.BlogUserReader;
 import io.github.frewily.campushub.entity.Blog;
 import io.github.frewily.campushub.entity.BlogFeedDelivery;
 import io.github.frewily.campushub.exception.BusinessException;
@@ -238,7 +239,7 @@ class BlogFeedDeliveryMySqlIT {
 
         @Bean Validator validator(ValidatorFactory factory) { return factory.getValidator(); }
 
-        @Bean IUserService userService() { return mock(IUserService.class); }
+        @Bean BlogUserReader blogUserReader() { return mock(BlogUserReader.class); }
 
         @Bean StringRedisTemplate stringRedisTemplate() { return mock(StringRedisTemplate.class); }
 

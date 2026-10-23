@@ -5,7 +5,7 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.ScrollResult;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.Blog;
-import io.github.frewily.campushub.entity.User;
+import io.github.frewily.campushub.content.application.BlogUserReader;
 import io.github.frewily.campushub.service.impl.BlogServiceImpl;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.junit.jupiter.api.AfterAll;
@@ -60,12 +60,12 @@ class BlogFeedRedisIT {
 
     private BlogServiceImpl service;
     private QueryChainWrapper<Blog> query;
-    private io.github.frewily.campushub.service.IUserService users;
+    private BlogUserReader blogUserReader;
     private final Map<Long, Blog> visibleFixtures = new LinkedHashMap<>();
     private final List<Long> queriedIds = new ArrayList<>();
     private final List<String> orderClauses = new ArrayList<>();
     private String feedKey;
-    private User profile;
+    private UserDTO profile;
     private long userId;
 
     @BeforeAll
@@ -149,9 +149,9 @@ class BlogFeedRedisIT {
 
         service = spy(new BlogServiceImpl());
         query = mock(QueryChainWrapper.class);
-        users = mock(io.github.frewily.campushub.service.IUserService.class);
+        blogUserReader = mock(BlogUserReader.class);
         ReflectionTestUtils.setField(service, "stringRedisTemplate", redis);
-        ReflectionTestUtils.setField(service, "userService", users);
+        ReflectionTestUtils.setField(service, "blogUserReader", blogUserReader);
         doReturn(query).when(service).query();
         doAnswer(invocation -> {
             queriedIds.clear();
@@ -171,11 +171,11 @@ class BlogFeedRedisIT {
             return rows;
         });
 
-        profile = new User();
+        profile = new UserDTO();
         profile.setId(userId);
         profile.setNickName("synthetic-profile");
         profile.setIcon("synthetic-icon");
-        when(users.getById(userId)).thenReturn(profile);
+        when(blogUserReader.findAuthor(userId)).thenReturn(profile);
         UserDTO identity = new UserDTO();
         identity.setId(userId);
         UserHolder.saveUser(identity);
@@ -312,15 +312,15 @@ class BlogFeedRedisIT {
         Result emptyKey = service.queryBlogOfFollow(1000L, 0);
         assertTrue(emptyKey.getSuccess());
         assertNull(emptyKey.getData());
-        verifyNoInteractions(query, users);
+        verifyNoInteractions(query, blogUserReader);
 
         add("601", 1000);
         add("602", 1000);
-        clearInvocations(query, users);
+        clearInvocations(query, blogUserReader);
         Result end = service.queryBlogOfFollow(1000L, 2);
         assertTrue(end.getSuccess());
         assertNull(end.getData());
-        verifyNoInteractions(query, users);
+        verifyNoInteractions(query, blogUserReader);
     }
 
     @Test
