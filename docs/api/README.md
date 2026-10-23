@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7X将 `/user/me`、`/user/info/{id}`、`/user/{id}`三个GET迁入identity.api.UserProfileController，URL/handler/认证与DTO响应保留。当前51条映射/17个Controller，旧UserController只留验证码/登录/登出三个POST；细节与本轮验证见[7X记录](../refactor/46-phase-7x-user-profile-module.md)。
+
 Phase7W仅将公开GET `/voucher/list/{shopId}`处理器迁入promotion.api.VoucherQueryController；URL/handler/权限/响应保留，机器清单仅改该controller归属。仍51条映射，拆为16个Controller；契约及实际验证见[7W记录](../refactor/45-phase-7w-voucher-query-module.md)。
 
 Phase7V仅调整发布内部依赖为social.FollowerReader，移除旧关注CRUD桥接；无新增路由/权限/响应变化，仍51条映射/15个Controller。当前内部链及验证见[7V记录](../refactor/44-phase-7v-follower-reader.md)，以下阶段描述保留历史范围。

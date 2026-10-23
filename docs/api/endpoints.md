@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自15个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。7T只把两个关注GET拆入FollowQueryController，原写入Controller保留PUT，URL/权限/响应不变。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自17个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。7X仅将三个用户GET迁入UserProfileController，原UserController保留三个POST；URL/权限/响应不变。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
 
 ## 通用约定
 
@@ -12,16 +12,18 @@
 
 ## 用户与会话
 
-Controller：[UserController.java](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)；Service：[IUserService.java](../../src/main/java/io/github/frewily/campushub/service/IUserService.java)、[UserServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/UserServiceImpl.java)、[UserInfoServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/UserInfoServiceImpl.java)；模型：[LoginFormDTO.java](../../src/main/java/io/github/frewily/campushub/dto/LoginFormDTO.java)、[UserDTO.java](../../src/main/java/io/github/frewily/campushub/dto/UserDTO.java)、[UserInfoResponse.java](../../src/main/java/io/github/frewily/campushub/dto/response/UserInfoResponse.java)、[Result.java](../../src/main/java/io/github/frewily/campushub/dto/Result.java)；访问控制：[SecurityConfig.java](../../src/main/java/io/github/frewily/campushub/config/SecurityConfig.java)、[ResourceAuthorizationService.java](../../src/main/java/io/github/frewily/campushub/security/ResourceAuthorizationService.java)。
+认证写入口：[UserController.java](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)→[IUserService.java](../../src/main/java/io/github/frewily/campushub/service/IUserService.java)/[UserServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/UserServiceImpl.java)。资料读入口：[UserProfileController](../../src/main/java/io/github/frewily/campushub/identity/api/UserProfileController.java)→[UserProfileQueryService](../../src/main/java/io/github/frewily/campushub/identity/application/UserProfileQueryService.java)→[UserProfileReader](../../src/main/java/io/github/frewily/campushub/identity/application/UserProfileReader.java)→[MyBatisUserProfileReader](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/MyBatisUserProfileReader.java)；me仍取会话，不调用读取服务。模型：[LoginFormDTO.java](../../src/main/java/io/github/frewily/campushub/dto/LoginFormDTO.java)、[UserDTO.java](../../src/main/java/io/github/frewily/campushub/dto/UserDTO.java)、[UserInfoResponse.java](../../src/main/java/io/github/frewily/campushub/dto/response/UserInfoResponse.java)、[Result.java](../../src/main/java/io/github/frewily/campushub/dto/Result.java)；访问控制：[SecurityConfig.java](../../src/main/java/io/github/frewily/campushub/config/SecurityConfig.java)、[ResourceAuthorizationService.java](../../src/main/java/io/github/frewily/campushub/security/ResourceAuthorizationService.java)。
 
 | Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
 |---|---|---|---|---|
-| POST | `/user/code` | [`sendCode`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L43)；公开 | Query `phone` 必填、非空且匹配手机号格式 | 字符串“发送验证码成功”；频率限制为 429 |
-| POST | `/user/login` | [`login`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L59)；公开 | JSON `LoginFormDTO`：`phone` 必填手机号，`code` 必填并匹配验证码格式；`password` 可省略，若提供须匹配密码格式。当前服务用验证码登录 | 登录 token 字符串；错误验证码/停用账户按认证错误，失败过多为 429 |
-| POST | `/user/logout` | [`logout`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L68)；需认证 | Header `authorization` 必须存在，传原始 token，不加 `Bearer` | `Result` 成功、无 data；删除会话 |
-| GET | `/user/me` | [`me`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L73)；需认证 | 无参数 | `UserDTO`：`id`、`nickName`、`icon` |
-| GET | `/user/info/{id}` | [`info`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L79)；需认证，无角色限制 | Path `id` 为正数 | 有资料时 `UserInfoResponse`；无记录时成功且 data 为 null，不是 404 |
-| GET | `/user/{id}` | [`queryUserById`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java#L87)；需认证，无角色限制 | Path `id` 为正数 | 有用户时复制为 `UserDTO`；无用户时成功且 data 为 null，不是 404 |
+| POST | `/user/code` | [`sendCode`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)；公开 | Query `phone` 必填、非空且匹配手机号格式 | 字符串“发送验证码成功”；频率限制为 429 |
+| POST | `/user/login` | [`login`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)；公开 | JSON `LoginFormDTO`：`phone` 必填手机号，`code` 必填并匹配验证码格式；`password` 可省略，若提供须匹配密码格式。当前服务用验证码登录 | 登录 token 字符串；错误验证码/停用账户按认证错误，失败过多为 429 |
+| POST | `/user/logout` | [`logout`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)；需认证 | Header `authorization` 必须存在，传原始 token，不加 `Bearer` | `Result` 成功、无 data；删除会话 |
+| GET | `/user/me` | [`UserProfileController.me`](../../src/main/java/io/github/frewily/campushub/identity/api/UserProfileController.java)；需认证 | 无参数，外部userId不改变身份 | 会话中的 `UserDTO`：数字id、nickName、icon；不额外刷新数据库资料 |
+| GET | `/user/info/{id}` | [`UserProfileController.info`](../../src/main/java/io/github/frewily/campushub/identity/api/UserProfileController.java)；需认证，无额外角色限制 | Path `id` 正Java Long | 原九字段UserInfoResponse；数字userId、LocalDate生日及Boolean性别/level；缺失成功且无data，不是404；不join目标用户 |
+| GET | `/user/{id}` | [`UserProfileController.queryUserById`](../../src/main/java/io/github/frewily/campushub/identity/api/UserProfileController.java)；需认证，无额外角色限制 | Path `id` 正Java Long | 数据库用户映射为三字段UserDTO；缺失成功无data，不是404；不新增目标状态过滤 |
+
+三个资料GET允许有效USER/MERCHANT/ADMIN，仍可跨用户读取、展示停用目标或独立资料行；缺失成功无data，SQL失败通用500，不增加目标归属/账号存在校验。认证和会话续期仍在原过滤器，读取不修改实体或资料事实。保留旧策略不等于已完成生产隐私治理，范围及证据见[7X记录](../refactor/46-phase-7x-user-profile-module.md)。
 
 ## 签到（engagement）
 

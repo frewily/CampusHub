@@ -49,6 +49,8 @@ Phase7V将Blog发布所需关注者读取改为social.application.FollowerReader
 
 Phase7W提取promotion公开优惠券目录：VoucherQueryController→VoucherQueryService→VoucherQueryRepository→MyBatisVoucherQueryRepository，继续使用旧VoucherMapper/XML和Voucher Entity。查询只保留原上架状态/LEFT JOIN规则，旧券写入与限量活动/订单服务不搬迁；不是全部promotion分包。见[7W记录](45-phase-7w-voucher-query-module.md)。
 
+Phase7X提取identity资料读取：UserProfileController处理会话me与两个查询协议，UserProfileQueryService→UserProfileReader→MyBatisUserProfileReader保留两次独立按ID读取和旧DTO映射。删除无调用方的IUserInfoService/Impl，User/Info实体、Mapper和响应类型暂留旧包；认证过滤器、UserHolder及登录IUserService未整体搬迁，不宣称完整identity重构。见[7X记录](46-phase-7x-user-profile-module.md)。
+
 ## 3 目标业务模型
 
 ### 3.1 身份与权限

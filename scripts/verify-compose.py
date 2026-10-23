@@ -166,6 +166,75 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_user_profile_module(base):
+    """Keep session identity separate from the two legacy, authenticated profile lookups."""
+    target, orphan, missing = 9007199254744993, 9007199254744995, 9007199254744997
+    headers = {}
+    for index, (actor, role, state) in enumerate(((999101, 'USER', 'ACTIVE'), (999102, 'MERCHANT', 'ACTIVE'),
+            (999103, 'ADMIN', 'ACTIVE'), (999104, 'USER', 'DISABLED'), (999105, None, 'ACTIVE'))):
+        sql("INSERT INTO tb_user(id,phone,nick_name,icon,status) VALUES(%d,'000000%05d','sql-name','sql.svg','%s');" %
+            (actor, 8100 + index, state))
+        if role: sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (actor, role))
+        token = 'synthetic-user-profile-' + uuid.uuid4().hex
+        redis('HSET', 'login:token:' + token, 'id', str(actor), 'nickName', 'session-name', 'icon', 'session.svg')
+        redis('EXPIRE', 'login:token:' + token, '600')
+        headers[actor] = {'authorization': token}
+    sql("INSERT INTO tb_user(id,phone,password,nick_name,icon,status) VALUES"
+        "(%d,'00000008110','synthetic-private-user-password','target-name','target.svg','DISABLED');" % target)
+    for user_id in (target, orphan):
+        sql("INSERT INTO tb_user_info(user_id,city,introduce,fans,followee,gender,birthday,credits,level) VALUES"
+            "(%d,'Xuancheng','Hello',3,2,0,'2001-02-03',10,1);" % user_id)
+    user_rows = 'SELECT * FROM tb_user WHERE id IN (999101,999102,999103,%d) ORDER BY id;' % target
+    info_rows = 'SELECT * FROM tb_user_info WHERE user_id IN (%d,%d) ORDER BY user_id;' % (target, orphan)
+    before_users, before_infos = sql(user_rows), sql(info_rows)
+
+    def query(actor, route, expected=200):
+        body, _ = request(base, route, expected, headers=headers[actor])
+        result = json.loads(body)
+        if expected == 200: assert result['success'] is True
+        return result
+
+    for actor in (999101, 999102, 999103):
+        assert query(actor, '/user/me?userId=%d' % target)['data'] == \
+            {'id': actor, 'nickName': 'session-name', 'icon': 'session.svg'}
+        item = query(actor, '/user/%d' % target)['data']
+        assert item == {'id': target, 'nickName': 'target-name', 'icon': 'target.svg'} and type(item['id']) is int
+        details = query(actor, '/user/info/%d' % target)['data']
+        assert details == {'userId': target, 'city': 'Xuancheng', 'introduce': 'Hello', 'fans': 3, 'followee': 2,
+                           'gender': False, 'birthday': '2001-02-03', 'credits': 10, 'level': True}
+        assert type(details['userId']) is int and type(details['gender']) is bool and type(details['level']) is bool
+    for prefix in ('/user/', '/user/info/'):
+        assert query(999101, prefix + str(missing)) == {'success': True}
+        for invalid in ('0', '-1', '9223372036854775808', 'bad'): query(999101, prefix + invalid, 400)
+    assert query(999101, '/user/%d' % orphan) == {'success': True}
+    assert query(999101, '/user/info/%d' % orphan)['data']['userId'] == orphan
+    for route in ('/user/me', '/user/%d' % target, '/user/info/%d' % target):
+        request(base, route, 401)
+        request(base, route, 401, headers={'authorization': 'synthetic-expired-profile-' + uuid.uuid4().hex})
+        for actor in (999104, 999105): assert query(actor, route, 401)['errorCode'] == 'AUTHENTICATION_FAILED'
+    assert sql(user_rows) == before_users and sql(info_rows) == before_infos
+    check('identity profile: three roles, session-only me vs SQL target, numeric IDs and exact DTO/LocalDate/boolean fields, disabled target/orphan compatibility, missing success, input and authentication boundaries')
+
+    # Auth reads only id/status plus roles; breaking the profile-only phone column leaves auth functional.
+    sql('ALTER TABLE tb_user RENAME COLUMN phone TO phase7x_owned_phone_fault;')
+    try:
+        failure = query(999101, '/user/%d' % target, 500)
+        assert failure['errorCode'] == 'INTERNAL_ERROR' and 'phone' not in failure.get('errorMsg', '')
+        assert query(999101, '/user/info/%d' % target)['data']['userId'] == target
+        sql('RENAME TABLE tb_user_info TO phase7x_owned_info_fault;')
+        try:
+            assert query(999101, '/user/info/%d' % target, 500)['errorCode'] == 'INTERNAL_ERROR'
+            assert query(999101, '/user/me')['data']['nickName'] == 'session-name'
+        finally:
+            sql('RENAME TABLE phase7x_owned_info_fault TO tb_user_info;')
+    finally:
+        sql('ALTER TABLE tb_user RENAME COLUMN phase7x_owned_phone_fault TO phone;')
+    assert sql(user_rows) == before_users and sql(info_rows) == before_infos
+    assert query(999101, '/user/%d' % target)['data']['id'] == target
+    assert query(999101, '/user/info/%d' % target)['data']['userId'] == target
+    check('identity profile: independent SQL fault propagation and restored schemas, session me needs neither profile query, no writes or hidden join added')
+
+
 def verify_voucher_query_module(base):
     """Preserve the legacy XML catalog over synthetic rows, including its LEFT JOIN boundaries."""
     shop, ordinary = 9007199254743993, 9007199254744001
@@ -2536,6 +2605,7 @@ def main():
         # Existing campus-post scenarios assert the fresh database starts with zero posts.
         verify_follower_reader_publication(base)
         verify_voucher_query_module(base)
+        verify_user_profile_module(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

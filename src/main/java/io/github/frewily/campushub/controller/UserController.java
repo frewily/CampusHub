@@ -1,16 +1,9 @@
 package io.github.frewily.campushub.controller;
 
 
-import cn.hutool.core.bean.BeanUtil;
 import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
-import io.github.frewily.campushub.dto.ApiModelMapper;
-import io.github.frewily.campushub.dto.UserDTO;
-import io.github.frewily.campushub.entity.User;
-import io.github.frewily.campushub.entity.UserInfo;
-import io.github.frewily.campushub.service.IUserInfoService;
 import io.github.frewily.campushub.service.IUserService;
-import io.github.frewily.campushub.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -19,7 +12,6 @@ import javax.annotation.Resource;
 import javax.validation.Valid;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.Pattern;
-import javax.validation.constraints.Positive;
 
 import static io.github.frewily.campushub.utils.RegexPatterns.PHONE_REGEX;
 
@@ -31,9 +23,6 @@ public class UserController {
 
     @Resource
     private IUserService userService;
-
-    @Resource
-    private IUserInfoService userInfoService;
 
     /**
      * 发送手机验证码
@@ -66,30 +55,6 @@ public class UserController {
     @PostMapping("/logout")
     public Result logout(@RequestHeader("authorization") String token) {
         return userService.logout(token);
-    }
-
-    @GetMapping("/me")
-    public Result me(){
-        UserDTO user = UserHolder.getUser();
-        return Result.ok(user);
-    }
-
-    @GetMapping("/info/{id}")
-    public Result info(@Positive(message = "用户ID必须为正数") @PathVariable("id") Long userId){
-        UserInfo info = userInfoService.getById(userId);
-        if (info == null) {
-            return Result.ok();
-        }
-        return Result.ok(ApiModelMapper.toUserInfoResponse(info));
-    }
-    @GetMapping("/{id}")
-    public Result queryUserById(@Positive(message = "用户ID必须为正数") @PathVariable("id") Long userId){
-        User user = userService.getById(userId);
-        if (user == null) {
-            return Result.ok();
-        }
-        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
-        return Result.ok(userDTO);
     }
 
 }

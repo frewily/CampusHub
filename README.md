@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase7X继续业务分包：[用户资料读取切片](docs/refactor/46-phase-7x-user-profile-module.md)将三个用户GET迁入identity，区分会话简档与数据库查询，移除无调用方的旧UserInfo服务。51条映射/17个Controller、V001–V014不变；认证、数字ID、DTO白名单和缺失成功保留，不改验证码/登录/登出，也不新增目标状态或归属限制。[学习笔记](docs/learning/user-profile-module.md)说明会话、读取与隐私规则的边界，个人掌握仍需独立确认。
+
 Phase7W继续业务分包：[公开优惠券目录查询](docs/refactor/45-phase-7w-voucher-query-module.md)迁入promotion，保留原GET、Entity响应、上架状态和LEFT JOIN活动信息；不改券创建、限量活动或订单链。当前51条映射/16个Controller、V001–V014不变，不新增时间/库存/门店存在性过滤、缓存、排序或分页。[学习笔记](docs/learning/voucher-query-module.md)说明目录展示与参加活动规则的边界，个人掌握仍需独立确认。
 
 Phase7V继续业务分包：[发布关注者读取端口](docs/refactor/44-phase-7v-follower-reader.md)替换Blog发布对旧关注CRUD服务的依赖，移除无调用方的IFollowService/FollowServiceImpl。仍按MySQL关系读取收件人，不新增用户状态过滤、Redis回源、排序或补偿；发布事务与Feed规则保留，51条映射/15个Controller、V001–V014不变。[学习笔记](docs/learning/follower-reader.md)说明跨模块读取边界，个人掌握仍需独立确认。

@@ -121,7 +121,7 @@ class ApiInventoryContractTest {
     @Test
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
-        assertEquals(16, controllerTypes.size());
+        assertEquals(17, controllerTypes.size());
         assertEquals(51, actual.size());
         assertVoucherQueryRoute();
         assertBlogEditRoute();
@@ -201,6 +201,27 @@ class ApiInventoryContractTest {
             }
         }
         assertEquals(6, documentedAdminCommentRouteCount);
+    }
+
+    @Test
+    void profileGetsMoveToTheDedicatedControllerWithoutChangingTheirHandlersOrGuards() {
+        assertTrue(controllerTypes.contains(io.github.frewily.campushub.identity.api.UserProfileController.class));
+        for (String[] mapping : new String[][]{
+                {"/user/me", "me"},
+                {"/user/info/{id}", "info"},
+                {"/user/{id}", "queryUserById"}
+        }) {
+            ObjectNode expected = JSON.createObjectNode();
+            expected.put("method", "GET");
+            expected.put("path", mapping[0]);
+            expected.put("controller", "UserProfileController");
+            expected.put("handler", mapping[1]);
+            expected.put("preAuthorize", "");
+            assertTrue(actual.contains(canonical(expected)), "profile handler or guard changed for " + mapping[0]);
+            assertTrue(rows(documented).contains(canonical(expected)), "profile route missing from inventory " + mapping[0]);
+        }
+        assertEquals(3L, actual.stream().filter(row -> row.contains("\"UserProfileController\"")).count());
+        assertEquals(3L, actual.stream().filter(row -> row.contains("\"UserController\"")).count());
     }
 
     @Test

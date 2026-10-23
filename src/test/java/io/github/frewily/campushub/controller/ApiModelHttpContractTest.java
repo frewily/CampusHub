@@ -1,9 +1,18 @@
 package io.github.frewily.campushub.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.frewily.campushub.config.GlobalExceptionHandler;
 import io.github.frewily.campushub.dto.Result;
+import io.github.frewily.campushub.dto.UserDTO;
+import io.github.frewily.campushub.dto.response.UserInfoResponse;
+import io.github.frewily.campushub.identity.api.UserProfileController;
+import io.github.frewily.campushub.identity.application.UserProfileQueryService;
 import io.github.frewily.campushub.entity.*;
-import io.github.frewily.campushub.service.*;
+import io.github.frewily.campushub.service.IBlogService;
+import io.github.frewily.campushub.service.IShopService;
+import io.github.frewily.campushub.service.IUserService;
+import io.github.frewily.campushub.service.IVoucherService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,6 +29,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -41,7 +52,7 @@ class ApiModelHttpContractTest {
     @Mock private IBlogService blogService;
     @Mock private IVoucherService voucherService;
     @Mock private IUserService userService;
-    @Mock private IUserInfoService userInfoService;
+    @Mock private UserProfileQueryService userProfileQueryService;
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -50,12 +61,17 @@ class ApiModelHttpContractTest {
         BlogController blog = new BlogController();
         VoucherController voucher = new VoucherController();
         UserController user = new UserController();
+        UserProfileController profile = new UserProfileController(userProfileQueryService);
         ReflectionTestUtils.setField(shop, "shopService", shopService);
         ReflectionTestUtils.setField(blog, "blogService", blogService);
         ReflectionTestUtils.setField(voucher, "voucherService", voucherService);
         ReflectionTestUtils.setField(user, "userService", userService);
-        ReflectionTestUtils.setField(user, "userInfoService", userInfoService);
-        mockMvc = standaloneSetup(shop, blog, voucher, user)
+        mockMvc = standaloneSetup(shop, blog, voucher, user, profile)
+                // Match Boot's ISO Java-time output; standalone MockMvc otherwise uses date arrays.
+                .setMessageConverters(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter(
+                        org.springframework.http.converter.json.Jackson2ObjectMapperBuilder.json()
+                                .featuresToDisable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                                .build()))
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
     }
 
@@ -178,27 +194,58 @@ class ApiModelHttpContractTest {
     }
 
     @Test
-    void profileResponsePreservesLegacyFieldsWithoutMutatingEntity() throws Exception {
-        LocalDateTime created = LocalDateTime.of(2020, 1, 1, 0, 0);
-        UserInfo info = new UserInfo().setUserId(7L).setCity("Xuancheng").setIntroduce("Hello")
-                .setFans(3).setFollowee(2).setCredits(10).setLevel(false)
-                .setCreateTime(created).setUpdateTime(created);
-        when(userInfoService.getById(7L)).thenReturn(info);
-        mockMvc.perform(get("/user/info/7"))
+    void profileResponsePreservesTheExactLegacyDtoFieldWhitelist() throws Exception {
+        UserInfoResponse response = new UserInfoResponse();
+        response.setUserId(7L);
+        response.setCity("Xuancheng");
+        response.setIntroduce("Hello");
+        response.setFans(3);
+        response.setFollowee(2);
+        response.setGender(true);
+        response.setBirthday(java.time.LocalDate.of(2000, 1, 2));
+        response.setCredits(10);
+        response.setLevel(false);
+        when(userProfileQueryService.info(7L)).thenReturn(response);
+        String responseJson = mockMvc.perform(get("/user/info/7"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.userId").value(7))
                 .andExpect(jsonPath("$.data.city").value("Xuancheng"))
                 .andExpect(jsonPath("$.data.credits").value(10))
+                .andExpect(jsonPath("$.data.gender").value(true))
+                .andExpect(jsonPath("$.data.birthday").value("2000-01-02"))
+                .andExpect(jsonPath("$.data.level").value(false))
                 .andExpect(jsonPath("$.data.createTime").doesNotExist())
-                .andExpect(jsonPath("$.data.updateTime").doesNotExist());
-        assertEquals(created, info.getCreateTime());
-        assertEquals(created, info.getUpdateTime());
+                .andExpect(jsonPath("$.data.updateTime").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+        assertEquals(new HashSet<>(java.util.Arrays.asList("userId", "city", "introduce", "fans",
+                "followee", "gender", "birthday", "credits", "level")), dataFieldNames(responseJson));
+        verify(userProfileQueryService).info(7L);
+    }
+
+    @Test
+    void userLookupSerializesOnlyTheThreeUserDtoFields() throws Exception {
+        UserDTO user = new UserDTO();
+        user.setId(9007199254740993L);
+        user.setNickName("synthetic");
+        user.setIcon("/avatar.png");
+        when(userProfileQueryService.queryUserById(9007199254740993L)).thenReturn(user);
+
+        String responseJson = mockMvc.perform(get("/user/9007199254740993"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(9007199254740993L))
+                .andExpect(jsonPath("$.data.id").isNumber())
+                .andReturn().getResponse().getContentAsString();
+        assertEquals(new HashSet<>(java.util.Arrays.asList("id", "nickName", "icon")),
+                dataFieldNames(responseJson));
+        verify(userProfileQueryService).queryUserById(9007199254740993L);
     }
 
     @Test
     void missingProfileKeepsEmptySuccessResponse() throws Exception {
+        when(userProfileQueryService.info(8L)).thenReturn(null);
         mockMvc.perform(get("/user/info/8"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").doesNotExist());
+        verify(userProfileQueryService).info(8L);
     }
 
     @ParameterizedTest
@@ -240,5 +287,12 @@ class ApiModelHttpContractTest {
                 Arguments.of("POST", "/voucher/seckill", "{" + VOUCHER + "," + TIMES.replace("11:00:00", "09:00:00") + "}"),
                 Arguments.of("POST", "/voucher/seckill", "{" + VOUCHER + "," + TIMES.replace("11:00:00", "10:00:00") + "}")
         );
+    }
+
+    private static Set<String> dataFieldNames(String json) throws Exception {
+        JsonNode data = new ObjectMapper().readTree(json).path("data");
+        Set<String> names = new HashSet<>();
+        data.fieldNames().forEachRemaining(names::add);
+        return names;
     }
 }
