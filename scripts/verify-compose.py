@@ -166,6 +166,92 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_login_account_repository(base):
+    """Legacy login transaction and Redis behavior over owned synthetic accounts only."""
+    first_id = 9007199254747993
+    fixtures = ((first_id, '13800992801', 'USER', 'ACTIVE'),
+                (first_id + 2, '13800992802', 'MERCHANT', 'ACTIVE'),
+                (first_id + 4, '13800992803', 'ADMIN', 'ACTIVE'),
+                (first_id + 6, '13800992804', 'USER', 'DISABLED'),
+                (first_id + 8, '13800992805', None, 'ACTIVE'))
+    new_phone = '13800992806'
+    phones = [row[1] for row in fixtures] + [new_phone]
+    assert sql("SELECT COUNT(*) FROM tb_user WHERE phone IN (%s);" %
+               ','.join("'%s'" % phone for phone in phones)) == '0'
+    for user_id, phone, role, status in fixtures:
+        sql("INSERT INTO tb_user(id,phone,password,nick_name,icon,status) VALUES"
+            "(%d,'%s','synthetic-only','sql-login-profile','profile.svg','%s');" % (user_id, phone, status))
+        if role: sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (user_id, role))
+    rows_sql = 'SELECT * FROM tb_user WHERE id BETWEEN %d AND %d ORDER BY id;' % (first_id, first_id + 8)
+    before = sql(rows_sql)
+
+    def seed_and_login(phone, expected=200):
+        # A fixed, private, synthetic code—not a personal phone/account or real SMS.
+        code = '135790'
+        redis('SET', 'login:code:' + phone, code, 'EX', '120')
+        body, _ = request(base, '/user/login', expected, 'POST',
+                          json.dumps({'phone': phone, 'code': code}).encode(), {'Content-Type': 'application/json'})
+        assert redis('EXISTS', 'login:code:' + phone) == '0', 'original code consumption precedes account SQL/status'
+        return json.loads(body)
+
+    for user_id, phone, _, _ in fixtures[:3]:
+        result = seed_and_login(phone)
+        assert result['success'] is True and isinstance(result['data'], str) and result['data']
+        token = result['data']
+        raw = redis('HGETALL', 'login:token:' + token).splitlines()
+        values = dict(zip(raw[::2], raw[1::2]))
+        assert values == {'id': str(user_id), 'nickName': 'sql-login-profile', 'icon': 'profile.svg'}
+        assert int(redis('TTL', 'login:token:' + token)) > 36000 * 60 - 60
+        body, _ = request(base, '/user/me', headers={'authorization': token})
+        assert json.loads(body)['data']['id'] == user_id
+        assert sql("SELECT COUNT(*) FROM tb_user WHERE phone='%s';" % phone) == '1'
+    disabled = seed_and_login(fixtures[3][1], 401)
+    assert disabled['errorCode'] == 'AUTHENTICATION_FAILED' and disabled['errorMsg'] == '账号不可用'
+    # Login still checks ACTIVE only; roleless-account denial belongs to the subsequent auth filter.
+    roleless = seed_and_login(fixtures[4][1])
+    assert roleless['success'] is True
+    token = roleless['data']
+    request(base, '/user/me', 401, headers={'authorization': token})
+    assert redis('EXISTS', 'login:token:' + token) == '0'
+    assert sql(rows_sql) == before
+    check('identity login accounts: original phone lookup and session whitelist, large IDs/three roles, disabled code consumption, roleless login versus later auth rejection, no changes to existing account rows')
+
+    sql('ALTER TABLE tb_user RENAME COLUMN phone TO phase7ac_owned_phone_fault;')
+    try:
+        failure = seed_and_login(fixtures[0][1], 500)
+        assert failure == {'success': False, 'errorCode': 'INTERNAL_ERROR', 'errorMsg': '服务器异常'}
+    finally:
+        sql('ALTER TABLE tb_user RENAME COLUMN phase7ac_owned_phone_fault TO phone;')
+    assert sql(rows_sql) == before
+    assert seed_and_login(fixtures[0][1])['success'] is True
+    check('identity login account SQL fault: code consumed before failed lookup, generic 500, schema restored and original existing account can log in again without mutation')
+
+    roles_sql = 'SELECT user_id,role FROM tb_user_role ORDER BY user_id,role;'
+    roles_before = sql(roles_sql)
+    sql("DELIMITER $$\nCREATE TRIGGER phase7ac_owned_role_failure BEFORE INSERT ON tb_user_role FOR EACH ROW BEGIN "
+        "IF EXISTS (SELECT 1 FROM tb_user WHERE id=NEW.user_id AND phone='%s') THEN "
+        "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic role insert fault'; "
+        "END IF; END$$\nDELIMITER ;\n" % new_phone)
+    try:
+        failure = seed_and_login(new_phone, 500)
+        assert failure == {'success': False, 'errorCode': 'INTERNAL_ERROR', 'errorMsg': '服务器异常'}
+        assert sql("SELECT COUNT(*) FROM tb_user WHERE phone='%s';" % new_phone) == '0'
+        assert sql(roles_sql) == roles_before
+    finally:
+        sql('DROP TRIGGER IF EXISTS phase7ac_owned_role_failure;')
+    result = seed_and_login(new_phone)
+    assert result['success'] is True
+    token = result['data']
+    actor = int(redis('HGET', 'login:token:' + token, 'id'))
+    assert sql("SELECT status FROM tb_user WHERE id=%d AND phone='%s';" % (actor, new_phone)) == 'ACTIVE'
+    assert sql('SELECT role FROM tb_user_role WHERE user_id=%d;' % actor) == 'USER'
+    assert re.fullmatch(r'user_[A-Za-z0-9]{10}', sql('SELECT nick_name FROM tb_user WHERE id=%d;' % actor))
+    assert sql(rows_sql) == before
+    body, _ = request(base, '/user/me', headers={'authorization': token})
+    assert json.loads(body)['data']['id'] == actor
+    check('identity account registration: real role INSERT failure rolls back user and role in original login transaction, Redis code remains consumed, restored retry creates one ACTIVE account with default USER role')
+
+
 def verify_login_code_module(base):
     """Only the owned test Redis receives codes; no SMS provider or personal account is used."""
     phones = ('13800992701', '13800992702', '13800992703')
@@ -2863,6 +2949,7 @@ def main():
         verify_blog_user_reader(base)
         verify_session_logout_module(base)
         verify_login_code_module(base)
+        verify_login_account_repository(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

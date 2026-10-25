@@ -3,15 +3,13 @@ package io.github.frewily.campushub.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
-import cn.hutool.core.util.RandomUtil;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
-import io.github.frewily.campushub.entity.User;
+import io.github.frewily.campushub.identity.application.LoginAccount;
+import io.github.frewily.campushub.identity.application.LoginAccountRepository;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
-import io.github.frewily.campushub.mapper.UserMapper;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.RegexUtils;
 import org.springframework.core.io.ClassPathResource;
@@ -27,10 +25,9 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static io.github.frewily.campushub.utils.RedisConstants.*;
-import static io.github.frewily.campushub.utils.SystemConstants.USER_NICK_NAME_PREFIX;
 
 @Service
-public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IUserService {
+public class UserServiceImpl implements IUserService {
 
     private static final DefaultRedisScript<Long> LOGIN_CODE_CONSUME_SCRIPT;
     private static final DefaultRedisScript<Long> LOGIN_FAILURE_INCREMENT_SCRIPT;
@@ -47,6 +44,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private LoginAccountRepository accounts;
 
     @Override
     @Transactional
@@ -75,9 +75,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (consumed != 1L) {
             throw recordLoginFailure(failureKey);
         }
-        User user = query().eq("phone", phone).one();
+        LoginAccount user = accounts.findByPhone(phone);
         if (user == null) {
-            user = createUserWithPhone(phone);
+            user = accounts.createWithPhone(phone);
         }
         if (!"ACTIVE".equals(user.getStatus())) {
             throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED, "账号不可用");
@@ -108,16 +108,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      * }
      */
 
-
-    private User createUserWithPhone(String phone) {
-        User user = new User();
-        user.setPhone(phone);
-        user.setNickName(USER_NICK_NAME_PREFIX + RandomUtil.randomString(10));
-        user.setStatus("ACTIVE");
-        save(user);
-        getBaseMapper().insertDefaultUserRole(user.getId());
-        return user;
-    }
 
     private BusinessException recordLoginFailure(String failureKey) {
         Long failures = stringRedisTemplate.execute(

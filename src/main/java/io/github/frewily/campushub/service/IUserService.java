@@ -1,11 +1,9 @@
 package io.github.frewily.campushub.service;
 
-import com.baomidou.mybatisplus.extension.service.IService;
 import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
-import io.github.frewily.campushub.entity.User;
 
-public interface IUserService extends IService<User> {
+public interface IUserService {
 
     /**
      * 登录功能

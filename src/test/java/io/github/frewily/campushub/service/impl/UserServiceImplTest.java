@@ -2,10 +2,10 @@ package io.github.frewily.campushub.service.impl;
 
 import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
-import io.github.frewily.campushub.entity.User;
+import io.github.frewily.campushub.identity.application.LoginAccount;
+import io.github.frewily.campushub.identity.application.LoginAccountRepository;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
-import io.github.frewily.campushub.mapper.UserMapper;
 import io.github.frewily.campushub.utils.UserHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +47,7 @@ class UserServiceImplTest {
     private static final String PHONE = "13800138000";
 
     @Mock
-    private UserMapper userMapper;
+    private LoginAccountRepository accounts;
     @Mock
     private StringRedisTemplate stringRedisTemplate;
     @Mock
@@ -60,7 +60,7 @@ class UserServiceImplTest {
     @BeforeEach
     void setUp() {
         userService = new UserServiceImpl();
-        ReflectionTestUtils.setField(userService, "baseMapper", userMapper);
+        ReflectionTestUtils.setField(userService, "accounts", accounts);
         ReflectionTestUtils.setField(userService, "stringRedisTemplate", stringRedisTemplate);
     }
 
@@ -127,8 +127,7 @@ class UserServiceImplTest {
                 eq(Collections.singletonList(LOGIN_CODE_KEY + PHONE)),
                 eq("654321")
         )).thenReturn(1L);
-        User user = new User().setId(7L).setPhone(PHONE).setNickName("campus-user").setStatus("ACTIVE");
-        when(userMapper.selectOne(any())).thenReturn(user);
+        when(accounts.findByPhone(PHONE)).thenReturn(new LoginAccount(7L, "campus-user", "", "ACTIVE"));
         when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
 
         Result result = userService.login(loginForm("654321"));
@@ -153,8 +152,7 @@ class UserServiceImplTest {
                 eq(Collections.singletonList(LOGIN_CODE_KEY + PHONE)),
                 eq("654321")
         )).thenReturn(1L);
-        User user = new User().setId(7L).setPhone(PHONE).setNickName("disabled").setStatus("DISABLED");
-        when(userMapper.selectOne(any())).thenReturn(user);
+        when(accounts.findByPhone(PHONE)).thenReturn(new LoginAccount(7L, "disabled", "", "DISABLED"));
 
         BusinessException exception = assertThrows(
                 BusinessException.class,
@@ -166,7 +164,7 @@ class UserServiceImplTest {
     }
 
     @Test
-    void shouldAssignUserRoleWhenRegisteringNewAccount() {
+    void shouldCreateAccountWhenNoAccountExists() {
         when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get(LOGIN_FAILURE_KEY + PHONE)).thenReturn(null);
         when(stringRedisTemplate.execute(
@@ -174,18 +172,14 @@ class UserServiceImplTest {
                 eq(Collections.singletonList(LOGIN_CODE_KEY + PHONE)),
                 eq("654321")
         )).thenReturn(1L);
-        when(userMapper.selectOne(any())).thenReturn(null);
-        when(userMapper.insert(any(User.class))).thenAnswer(invocation -> {
-            User user = invocation.getArgument(0);
-            user.setId(9L);
-            return 1;
-        });
+        when(accounts.findByPhone(PHONE)).thenReturn(null);
+        when(accounts.createWithPhone(PHONE)).thenReturn(new LoginAccount(9L, "USER-new-user", "", "ACTIVE"));
         when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
 
         Result result = userService.login(loginForm("654321"));
 
         assertTrue(result.getSuccess());
-        verify(userMapper).insertDefaultUserRole(9L);
+        verify(accounts).createWithPhone(PHONE);
     }
 
     private LoginFormDTO loginForm(String code) {
