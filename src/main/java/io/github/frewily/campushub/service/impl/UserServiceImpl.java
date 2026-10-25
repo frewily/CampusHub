@@ -14,7 +14,6 @@ import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.mapper.UserMapper;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.RegexUtils;
-import io.github.frewily.campushub.utils.UserHolder;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -127,16 +126,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         stringRedisTemplate.expire(tokenKey, LOGIN_USER_TTL, TimeUnit.MINUTES);
         stringRedisTemplate.delete(failureKey);
         return Result.ok(token);
-    }
-
-    @Override
-    public Result logout(String token) {
-        if (token == null || token.trim().isEmpty()) {
-            throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED, "认证信息缺失");
-        }
-        stringRedisTemplate.delete(LOGIN_USER_KEY + token.trim());
-        UserHolder.removeUser();
-        return Result.ok();
     }
 
     /**

@@ -7,7 +7,7 @@
     {"method":"GET","path":"/admin/blog-comments/replies/{replyId}/hide-audit","controller":"AdminBlogCommentsController","handler":"queryReplyHideAudit","preAuthorize":"hasRole('ADMIN')"},
     {"method":"POST","path":"/user/code","controller":"UserController","handler":"sendCode","preAuthorize":""},
     {"method":"POST","path":"/user/login","controller":"UserController","handler":"login","preAuthorize":""},
-    {"method":"POST","path":"/user/logout","controller":"UserController","handler":"logout","preAuthorize":""},
+    {"method":"POST","path":"/user/logout","controller":"LogoutController","handler":"logout","preAuthorize":""},
     {"method":"GET","path":"/user/me","controller":"UserProfileController","handler":"me","preAuthorize":""},
     {"method":"GET","path":"/user/info/{id}","controller":"UserProfileController","handler":"info","preAuthorize":""},
     {"method":"GET","path":"/user/{id}","controller":"UserProfileController","handler":"queryUserById","preAuthorize":""},

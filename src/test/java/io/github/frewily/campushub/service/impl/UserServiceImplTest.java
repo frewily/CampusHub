@@ -2,7 +2,6 @@ package io.github.frewily.campushub.service.impl;
 
 import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
-import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.entity.User;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
@@ -70,9 +69,7 @@ class UserServiceImplTest {
     }
 
     @AfterEach
-    void tearDown() {
-        UserHolder.removeUser();
-    }
+    void tearDown() { UserHolder.removeUser(); }
 
     @Test
     void shouldRateLimitRepeatedVerificationCodeRequests() {
@@ -238,17 +235,6 @@ class UserServiceImplTest {
 
         assertTrue(result.getSuccess());
         verify(userMapper).insertDefaultUserRole(9L);
-    }
-
-    @Test
-    void shouldRevokeTokenAndClearCurrentUserOnLogout() {
-        UserHolder.saveUser(new UserDTO());
-
-        Result result = userService.logout(" token-value ");
-
-        assertTrue(result.getSuccess());
-        verify(stringRedisTemplate).delete(LOGIN_USER_KEY + "token-value");
-        assertNull(UserHolder.getUser());
     }
 
     private LoginFormDTO loginForm(String code) {

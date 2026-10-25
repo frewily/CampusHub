@@ -166,6 +166,72 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_session_logout_module(base):
+    """Revoke only this authenticated synthetic session, not every session of the account."""
+    actors = ((991701, 'USER', 'ACTIVE'), (991702, 'MERCHANT', 'ACTIVE'), (991703, 'ADMIN', 'ACTIVE'),
+              (991704, 'USER', 'DISABLED'), (991705, None, 'ACTIVE'))
+    phones = ['%011d' % actor for actor, _, _ in actors]
+    assert sql("SELECT COUNT(*) FROM tb_user WHERE phone IN (%s);" %
+               ','.join("'%s'" % phone for phone in phones)) == '0'
+    sessions = {}
+    for actor, role, status in actors:
+        sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'%011d','logout-actor','%s');" %
+            (actor, actor, status))
+        if role: sql("INSERT INTO tb_user_role(user_id,role) VALUES(%d,'%s');" % (actor, role))
+        sessions[actor] = []
+        for _ in range(2):
+            token = 'synthetic-logout-' + uuid.uuid4().hex
+            redis('HSET', 'login:token:' + token, 'id', str(actor), 'nickName', 'session-logout')
+            redis('EXPIRE', 'login:token:' + token, '600')
+            sessions[actor].append(token)
+    facts_sql = 'SELECT * FROM tb_user WHERE id BETWEEN 991701 AND 991705 ORDER BY id;'
+    roles_sql = 'SELECT * FROM tb_user_role WHERE user_id BETWEEN 991701 AND 991705 ORDER BY user_id,role;'
+    facts_before, roles_before = sql(facts_sql), sql(roles_sql)
+    for actor, _, _ in actors[:3]:
+        current, other = sessions[actor]
+        other_map = redis('HGETALL', 'login:token:' + other)
+        other_ttl = int(redis('TTL', 'login:token:' + other))
+        body, _ = request(base, '/user/logout?userId=991705&token=' + other, 200, 'POST',
+                          headers={'authorization': '  ' + current + '  '})
+        assert json.loads(body) == {'success': True}
+        assert redis('EXISTS', 'login:token:' + current) == '0'
+        request(base, '/user/logout', 401, 'POST', headers={'authorization': current})
+        request(base, '/user/me', 401, headers={'authorization': current})
+        assert redis('HGETALL', 'login:token:' + other) == other_map
+        assert other_ttl - 60 <= int(redis('TTL', 'login:token:' + other)) <= other_ttl
+        body, _ = request(base, '/user/me', headers={'authorization': other})
+        assert json.loads(body)['data']['id'] == actor
+    for headers in ({}, {'authorization': '   '}, {'authorization': 'synthetic-expired-' + uuid.uuid4().hex}):
+        request(base, '/user/logout', 401, 'POST', headers=headers)
+    for actor, _, _ in actors[3:]:
+        rejected, untouched = sessions[actor]
+        request(base, '/user/logout', 401, 'POST', headers={'authorization': rejected})
+        assert redis('EXISTS', 'login:token:' + rejected) == '0', 'retain existing authentication invalidation'
+        assert redis('EXISTS', 'login:token:' + untouched) == '1', 'not an account-wide revoke'
+    assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
+    check('identity logout: three roles, trimmed header, exact success body, current-session-only deletion, revoked replay 401, other-session preservation and existing authentication denial')
+
+    # Reject DEL without breaking authentication's HGETALL/EXPIRE, then restore only this owned ACL.
+    current = sessions[991701][1]
+    key = 'login:token:' + current
+    before = redis('HGETALL', key)
+    redis('ACL', 'SETUSER', 'default', '-del')
+    try:
+        body, _ = request(base, '/user/logout', 500, 'POST', headers={'authorization': current})
+        assert json.loads(body) == {'success': False, 'errorCode': 'INTERNAL_ERROR', 'errorMsg': '服务器异常'}
+        assert redis('HGETALL', key) == before
+        request(base, '/user/me', 401)  # No request identity leaks after the failed request.
+    finally:
+        redis('ACL', 'SETUSER', 'default', '+del')
+    body, _ = request(base, '/user/me', headers={'authorization': current})
+    assert json.loads(body)['data']['id'] == 991701
+    body, _ = request(base, '/user/logout', 200, 'POST', headers={'authorization': current})
+    assert json.loads(body) == {'success': True} and redis('EXISTS', key) == '0'
+    request(base, '/user/me', 401, headers={'authorization': current})
+    assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
+    check('identity logout failure: Redis DEL denied after authentication stays generic 500 with session retained, ACL restored, retry revokes and next request is unauthenticated')
+
+
 def verify_blog_user_reader(base):
     """Own post/profile fixtures; preserve enrichment and the existing Redis top-five selection."""
     actor_ids = (992701, 992702, 992703)
@@ -2723,6 +2789,7 @@ def main():
         verify_voucher_query_module(base)
         verify_user_profile_module(base)
         verify_blog_user_reader(base)
+        verify_session_logout_module(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

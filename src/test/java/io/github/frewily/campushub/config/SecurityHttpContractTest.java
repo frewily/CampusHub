@@ -2,6 +2,9 @@ package io.github.frewily.campushub.config;
 
 import io.github.frewily.campushub.controller.UserController;
 import io.github.frewily.campushub.identity.api.UserProfileController;
+import io.github.frewily.campushub.identity.api.LogoutController;
+import io.github.frewily.campushub.identity.application.SessionLogoutService;
+import io.github.frewily.campushub.identity.infrastructure.RedisSessionTerminator;
 import io.github.frewily.campushub.identity.application.UserProfileQueryService;
 import io.github.frewily.campushub.engagement.api.CheckInController;
 import io.github.frewily.campushub.engagement.application.CheckInService;
@@ -96,6 +99,9 @@ class SecurityHttpContractTest {
     @Import({
             UserController.class,
             UserProfileController.class,
+            LogoutController.class,
+            RedisSessionTerminator.class,
+            SessionLogoutService.class,
             CheckInController.class,
             ShopController.class,
             VoucherController.class,

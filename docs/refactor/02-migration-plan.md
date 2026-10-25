@@ -260,6 +260,8 @@
 
 ## 5 原始目标的剩余范围
 
+Phase7AA（2026-10-25，基线 `c251846c44065d130893445f05d27e951ad75352`）：仅迁移POST登出到identity，移除旧IUserService/Impl和UserController的logout。保留首尾trim、单token删除、删除false/null仍清理身份并成功、Redis异常传播且本层不提前清身份、HTTP受认证保护及旧token重试401。验证码/登录、认证过滤器/权限和V001–V014不改，51映射/18Controllers。旧临时副本不完整，本轮从远端另建独立副本并重新验证，不继承旧运行证据；见[7AA记录](49-phase-7aa-session-logout-module.md)，验证后提交、新Luna独立审查、普通推送读回后停止。
+
 Phase7Z（2026-10-23，基线 `67dcc44f982789efdf49e1878adcd47464628198`）：仅把Blog作者/点赞人用户读取替换为content专用BlogUserReader端口。原作者缺失仍异常，停用目标不新过滤；原前五Redis成员、Long解析、FIELD排序、缺失省略不补位、UserDTO三字段不变。无路由/迁移、隐私规则或缓存变化，登录/点赞写入/Feed规则不改。范围和本轮证据见[7Z记录](48-phase-7z-blog-user-reader.md)，验证、提交、新Luna独立审查、普通推送读回后停止。
 
 Phase7Y（2026-10-23，基线 `bffdbe796ac1ca647d42ed37da86adc9beefc8c6`）：仅替换共同关注用户资料读取适配器，移除social对IUserService的依赖。保留批量SELECT、缺失省略、停用目标可读、DTO白名单和异常传播，应用服务/Controller/Redis逻辑不变；无新路由、迁移、排序、隐私策略或缓存。范围及本轮验证见[7Y记录](47-phase-7y-follow-user-reader.md)，按验证、提交、新Luna独立审查、普通推送读回后停止。

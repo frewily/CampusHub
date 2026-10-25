@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自17个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。7X仅将三个用户GET迁入UserProfileController，原UserController保留三个POST；URL/权限/响应不变。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自18个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。7AA把登出迁入LogoutController，UserController保留验证码/登录两个POST；URL/权限/响应不变。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
 
 ## 通用约定
 
@@ -18,12 +18,14 @@
 |---|---|---|---|---|
 | POST | `/user/code` | [`sendCode`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)；公开 | Query `phone` 必填、非空且匹配手机号格式 | 字符串“发送验证码成功”；频率限制为 429 |
 | POST | `/user/login` | [`login`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)；公开 | JSON `LoginFormDTO`：`phone` 必填手机号，`code` 必填并匹配验证码格式；`password` 可省略，若提供须匹配密码格式。当前服务用验证码登录 | 登录 token 字符串；错误验证码/停用账户按认证错误，失败过多为 429 |
-| POST | `/user/logout` | [`logout`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)；需认证 | Header `authorization` 必须存在，传原始 token，不加 `Bearer` | `Result` 成功、无 data；删除会话 |
+| POST | `/user/logout` | [`LogoutController.logout`](../../src/main/java/io/github/frewily/campushub/identity/api/LogoutController.java)；需认证，无额外角色限制 | Header `authorization` 必须存在，传原始 token，不加 `Bearer`，服务端trim首尾 | `Result` 成功、无 data；只删除当前token会话，不注销该账号的其他会话；旧token再次HTTP调用为401 |
 | GET | `/user/me` | [`UserProfileController.me`](../../src/main/java/io/github/frewily/campushub/identity/api/UserProfileController.java)；需认证 | 无参数，外部userId不改变身份 | 会话中的 `UserDTO`：数字id、nickName、icon；不额外刷新数据库资料 |
 | GET | `/user/info/{id}` | [`UserProfileController.info`](../../src/main/java/io/github/frewily/campushub/identity/api/UserProfileController.java)；需认证，无额外角色限制 | Path `id` 正Java Long | 原九字段UserInfoResponse；数字userId、LocalDate生日及Boolean性别/level；缺失成功且无data，不是404；不join目标用户 |
 | GET | `/user/{id}` | [`UserProfileController.queryUserById`](../../src/main/java/io/github/frewily/campushub/identity/api/UserProfileController.java)；需认证，无额外角色限制 | Path `id` 正Java Long | 数据库用户映射为三字段UserDTO；缺失成功无data，不是404；不新增目标状态过滤 |
 
 三个资料GET允许有效USER/MERCHANT/ADMIN，仍可跨用户读取、展示停用目标或独立资料行；缺失成功无data，SQL失败通用500，不增加目标归属/账号存在校验。认证和会话续期仍在原过滤器，读取不修改实体或资料事实。保留旧策略不等于已完成生产隐私治理，范围及证据见[7X记录](../refactor/46-phase-7x-user-profile-module.md)。
+
+登出链：[LogoutController](../../src/main/java/io/github/frewily/campushub/identity/api/LogoutController.java)→[SessionLogoutService](../../src/main/java/io/github/frewily/campushub/identity/application/SessionLogoutService.java)→[SessionTerminator](../../src/main/java/io/github/frewily/campushub/identity/application/SessionTerminator.java)→[RedisSessionTerminator](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/RedisSessionTerminator.java)。原顺序为Redis DEL后清理UserHolder，false/null删除结果不报失败，Redis抛错则通用500、不伪装成功，原认证filter的finally仍收尾线程身份/SecurityContext。有效三角色均可登出，匿名/空白/过期/停用/无有效角色仍401；这是会话撤销，不是全端登出或封禁，也不能终止已通过认证的并发请求。详见[7AA记录](../refactor/49-phase-7aa-session-logout-module.md)。
 
 ## 签到（engagement）
 

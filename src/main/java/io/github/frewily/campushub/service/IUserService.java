@@ -20,10 +20,4 @@ public interface IUserService extends IService<User> {
      */
     Result login(LoginFormDTO loginForm);
 
-    /**
-     * 注销当前 Redis Token。
-     * @param token 当前请求携带的认证 Token
-     */
-    Result logout(String token);
-
 }

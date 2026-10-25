@@ -48,13 +48,4 @@ public class UserController {
         return userService.login(loginForm);
     }
 
-    /**
-     * 登出功能
-     * @return 无
-     */
-    @PostMapping("/logout")
-    public Result logout(@RequestHeader("authorization") String token) {
-        return userService.logout(token);
-    }
-
 }

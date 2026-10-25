@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase7AA继续identity切片：[登出模块](docs/refactor/49-phase-7aa-session-logout-module.md)接管原POST `/user/logout`，通过SessionLogoutService/SessionTerminator撤销当前token会话后清理当前线程身份。51条映射/18个Controller、V001–V014不变；验证码/登录、认证过滤器、trim与失败规则保留，不新增全端登出或账号封禁。[学习笔记](docs/learning/session-logout-module.md)说明登出与认证失效的边界。
+
 Phase7Z继续收窄动态模块依赖：[作者与点赞人资料读取端口](docs/refactor/48-phase-7z-blog-user-reader.md)替代Blog对旧IUserService的依赖，保留数据库作者展示、Redis前五成员及FIELD顺序、缺失/停用资料和异常行为。51映射/17个Controller、V001–V014不变，不改点赞写入、Feed规则或登录；[学习笔记](docs/learning/blog-user-reader.md)说明内容读取与认证服务的边界，不代表完整content迁移。
 
 Phase7Y继续收窄依赖：[共同关注资料适配器](docs/refactor/47-phase-7y-follow-user-reader.md)直接使用UserMapper批量读取，移除social对旧IUserService的桥接；原交集、缺失省略、停用资料可读和三字段UserDTO保持。51条映射/17个Controller、V001–V014不变，不新增隐私规则、排序、缓存或产品功能；不是完整identity/social迁移。

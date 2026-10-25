@@ -4,6 +4,7 @@ import io.github.frewily.campushub.controller.UserController;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.dto.response.UserInfoResponse;
 import io.github.frewily.campushub.identity.api.UserProfileController;
+import io.github.frewily.campushub.identity.api.LogoutController;
 import io.github.frewily.campushub.identity.application.UserProfileQueryService;
 import io.github.frewily.campushub.identity.application.UserProfileReader;
 import org.junit.jupiter.api.Test;
@@ -31,14 +32,20 @@ class UserProfileModuleBoundaryTest {
                 UserProfileController.class.getDeclaredConstructors()[0].getParameterTypes());
         assertEquals(3L, Arrays.stream(UserProfileController.class.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(GetMapping.class)).count());
-        assertEquals(3L, Arrays.stream(UserController.class.getDeclaredMethods())
+        assertEquals(2L, Arrays.stream(UserController.class.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(PostMapping.class)).count());
         Set<String> legacyWrites = new HashSet<>();
         Arrays.stream(UserController.class.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(PostMapping.class))
                 .forEach(method -> legacyWrites.add(method.getName() + " "
                         + method.getAnnotation(PostMapping.class).value()[0]));
-        assertEquals(new HashSet<>(Arrays.asList("sendCode code", "login /login", "logout /logout")), legacyWrites);
+        assertEquals(new HashSet<>(Arrays.asList("sendCode code", "login /login")), legacyWrites);
+        assertEquals("/user", LogoutController.class.getAnnotation(RequestMapping.class).value()[0]);
+        assertEquals(1L, Arrays.stream(LogoutController.class.getDeclaredMethods())
+                .filter(method -> method.isAnnotationPresent(PostMapping.class)).count());
+        assertArrayEquals(new String[]{"/logout"}, Arrays.stream(LogoutController.class.getDeclaredMethods())
+                .filter(method -> method.isAnnotationPresent(PostMapping.class))
+                .findFirst().get().getAnnotation(PostMapping.class).value());
         assertEquals(0L, Arrays.stream(UserController.class.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(GetMapping.class)).count());
         assertFalse(Arrays.stream(UserController.class.getDeclaredFields())

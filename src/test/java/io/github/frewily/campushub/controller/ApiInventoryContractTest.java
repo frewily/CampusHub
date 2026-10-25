@@ -121,7 +121,7 @@ class ApiInventoryContractTest {
     @Test
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
-        assertEquals(17, controllerTypes.size());
+        assertEquals(18, controllerTypes.size());
         assertEquals(51, actual.size());
         assertVoucherQueryRoute();
         assertBlogEditRoute();
@@ -221,7 +221,13 @@ class ApiInventoryContractTest {
             assertTrue(rows(documented).contains(canonical(expected)), "profile route missing from inventory " + mapping[0]);
         }
         assertEquals(3L, actual.stream().filter(row -> row.contains("\"UserProfileController\"")).count());
-        assertEquals(3L, actual.stream().filter(row -> row.contains("\"UserController\"")).count());
+        assertEquals(2L, actual.stream().filter(row -> row.contains("\"UserController\"")).count());
+        ObjectNode logout = JSON.createObjectNode();
+        logout.put("method", "POST"); logout.put("path", "/user/logout");
+        logout.put("controller", "LogoutController"); logout.put("handler", "logout");
+        logout.put("preAuthorize", "");
+        assertTrue(actual.contains(canonical(logout)), "logout route must belong to the identity API");
+        assertTrue(rows(documented).contains(canonical(logout)), "logout route missing from API inventory");
     }
 
     @Test

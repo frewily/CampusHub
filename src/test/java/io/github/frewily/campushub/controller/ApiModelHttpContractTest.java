@@ -7,6 +7,8 @@ import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.dto.response.UserInfoResponse;
 import io.github.frewily.campushub.identity.api.UserProfileController;
+import io.github.frewily.campushub.identity.api.LogoutController;
+import io.github.frewily.campushub.identity.application.SessionLogoutService;
 import io.github.frewily.campushub.identity.application.UserProfileQueryService;
 import io.github.frewily.campushub.entity.*;
 import io.github.frewily.campushub.service.IBlogService;
@@ -53,6 +55,7 @@ class ApiModelHttpContractTest {
     @Mock private IVoucherService voucherService;
     @Mock private IUserService userService;
     @Mock private UserProfileQueryService userProfileQueryService;
+    @Mock private SessionLogoutService sessionLogoutService;
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -62,11 +65,12 @@ class ApiModelHttpContractTest {
         VoucherController voucher = new VoucherController();
         UserController user = new UserController();
         UserProfileController profile = new UserProfileController(userProfileQueryService);
+        LogoutController logout = new LogoutController(sessionLogoutService);
         ReflectionTestUtils.setField(shop, "shopService", shopService);
         ReflectionTestUtils.setField(blog, "blogService", blogService);
         ReflectionTestUtils.setField(voucher, "voucherService", voucherService);
         ReflectionTestUtils.setField(user, "userService", userService);
-        mockMvc = standaloneSetup(shop, blog, voucher, user, profile)
+        mockMvc = standaloneSetup(shop, blog, voucher, user, profile, logout)
                 // Match Boot's ISO Java-time output; standalone MockMvc otherwise uses date arrays.
                 .setMessageConverters(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter(
                         org.springframework.http.converter.json.Jackson2ObjectMapperBuilder.json()
