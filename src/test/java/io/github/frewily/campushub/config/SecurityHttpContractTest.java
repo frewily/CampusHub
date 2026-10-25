@@ -3,9 +3,11 @@ package io.github.frewily.campushub.config;
 import io.github.frewily.campushub.controller.UserController;
 import io.github.frewily.campushub.identity.api.UserProfileController;
 import io.github.frewily.campushub.identity.api.LogoutController;
+import io.github.frewily.campushub.identity.api.LoginCodeController;
 import io.github.frewily.campushub.identity.application.SessionLogoutService;
 import io.github.frewily.campushub.identity.infrastructure.RedisSessionTerminator;
 import io.github.frewily.campushub.identity.application.UserProfileQueryService;
+import io.github.frewily.campushub.identity.application.LoginCodeService;
 import io.github.frewily.campushub.engagement.api.CheckInController;
 import io.github.frewily.campushub.engagement.application.CheckInService;
 import io.github.frewily.campushub.promotion.api.VoucherQueryController;
@@ -76,6 +78,8 @@ class SecurityHttpContractTest {
     @MockBean
     private UserProfileQueryService userProfileQueryService;
     @MockBean
+    private LoginCodeService loginCodeService;
+    @MockBean
     private IShopService shopService;
     @MockBean
     private IVoucherService voucherService;
@@ -98,6 +102,7 @@ class SecurityHttpContractTest {
     @EnableAutoConfiguration
     @Import({
             UserController.class,
+            LoginCodeController.class,
             UserProfileController.class,
             LogoutController.class,
             RedisSessionTerminator.class,

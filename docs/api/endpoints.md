@@ -1,6 +1,6 @@
 # API endpoints（源码现状）
 
-本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自18个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。7AA把登出迁入LogoutController，UserController保留验证码/登录两个POST；URL/权限/响应不变。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
+本目录按 `src/main/java` 中显式声明的业务 Controller 映射整理：共51条，来自19个Controller；不计框架隐式HEAD/OPTIONS、`/error`或Actuator管理端。7AB把验证码迁入LoginCodeController，UserController只留登录；URL/权限/响应不变。评论相关为6条评论/回复/撤回和6条ADMIN隐藏/审计路由；阶段证据与兼容边界见各自记录，历史数量不当作当前数量。
 
 ## 通用约定
 
@@ -12,11 +12,13 @@
 
 ## 用户与会话
 
+验证码链：[LoginCodeController](../../src/main/java/io/github/frewily/campushub/identity/api/LoginCodeController.java)→[LoginCodeService](../../src/main/java/io/github/frewily/campushub/identity/application/LoginCodeService.java)→[LoginCodeStore](../../src/main/java/io/github/frewily/campushub/identity/application/LoginCodeStore.java)/[LoginCodeGenerator](../../src/main/java/io/github/frewily/campushub/identity/application/LoginCodeGenerator.java)，由[Redis存储](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/RedisLoginCodeStore.java)和[原Hutool生成器](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/HutoolLoginCodeGenerator.java)适配。保留原key/TTL和错误规则：生成失败不释放冷却，保存失败尝试删除冷却，清理若再失败则该异常覆盖原保存异常；不新增回退、事务、短信服务或手机号规则。登录Lua消费链不改，见[7AB记录](../refactor/50-phase-7ab-login-code-module.md)。
+
 认证写入口：[UserController.java](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)→[IUserService.java](../../src/main/java/io/github/frewily/campushub/service/IUserService.java)/[UserServiceImpl.java](../../src/main/java/io/github/frewily/campushub/service/impl/UserServiceImpl.java)。资料读入口：[UserProfileController](../../src/main/java/io/github/frewily/campushub/identity/api/UserProfileController.java)→[UserProfileQueryService](../../src/main/java/io/github/frewily/campushub/identity/application/UserProfileQueryService.java)→[UserProfileReader](../../src/main/java/io/github/frewily/campushub/identity/application/UserProfileReader.java)→[MyBatisUserProfileReader](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/MyBatisUserProfileReader.java)；me仍取会话，不调用读取服务。模型：[LoginFormDTO.java](../../src/main/java/io/github/frewily/campushub/dto/LoginFormDTO.java)、[UserDTO.java](../../src/main/java/io/github/frewily/campushub/dto/UserDTO.java)、[UserInfoResponse.java](../../src/main/java/io/github/frewily/campushub/dto/response/UserInfoResponse.java)、[Result.java](../../src/main/java/io/github/frewily/campushub/dto/Result.java)；访问控制：[SecurityConfig.java](../../src/main/java/io/github/frewily/campushub/config/SecurityConfig.java)、[ResourceAuthorizationService.java](../../src/main/java/io/github/frewily/campushub/security/ResourceAuthorizationService.java)。
 
 | Method | Path | Handler；认证与资源限制 | 请求与约束 | 成功响应 `data` / 缺失资源语义 |
 |---|---|---|---|---|
-| POST | `/user/code` | [`sendCode`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)；公开 | Query `phone` 必填、非空且匹配手机号格式 | 字符串“发送验证码成功”；频率限制为 429 |
+| POST | `/user/code` | [`LoginCodeController.sendCode`](../../src/main/java/io/github/frewily/campushub/identity/api/LoginCodeController.java)；公开 | Query `phone` 必填、非空且匹配原手机号正则，不trim | 字符串“发送验证码成功”，不返回验证码；60秒冷却，频率限制429；目前只生成/缓存，不代表短信送达 |
 | POST | `/user/login` | [`login`](../../src/main/java/io/github/frewily/campushub/controller/UserController.java)；公开 | JSON `LoginFormDTO`：`phone` 必填手机号，`code` 必填并匹配验证码格式；`password` 可省略，若提供须匹配密码格式。当前服务用验证码登录 | 登录 token 字符串；错误验证码/停用账户按认证错误，失败过多为 429 |
 | POST | `/user/logout` | [`LogoutController.logout`](../../src/main/java/io/github/frewily/campushub/identity/api/LogoutController.java)；需认证，无额外角色限制 | Header `authorization` 必须存在，传原始 token，不加 `Bearer`，服务端trim首尾 | `Result` 成功、无 data；只删除当前token会话，不注销该账号的其他会话；旧token再次HTTP调用为401 |
 | GET | `/user/me` | [`UserProfileController.me`](../../src/main/java/io/github/frewily/campushub/identity/api/UserProfileController.java)；需认证 | 无参数，外部userId不改变身份 | 会话中的 `UserDTO`：数字id、nickName、icon；不额外刷新数据库资料 |

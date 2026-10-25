@@ -166,6 +166,78 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_login_code_module(base):
+    """Only the owned test Redis receives codes; no SMS provider or personal account is used."""
+    phones = ('13800992701', '13800992702', '13800992703')
+    assert sql("SELECT COUNT(*) FROM tb_user WHERE phone IN (%s);" %
+               ','.join("'%s'" % phone for phone in phones)) == '0'
+    for phone in phones:
+        assert redis('EXISTS', 'login:code:' + phone, 'login:code:cooldown:' + phone) == '0'
+
+    def send(phone, expected=200, headers=None):
+        body, _ = request(base, '/user/code?' + urllib.parse.urlencode({'phone': phone}),
+                          expected, 'POST', headers=headers)
+        return json.loads(body)
+
+    expected_success = {'success': True, 'data': '发送验证码成功'}
+    assert send(phones[0]) == expected_success
+    code = redis('GET', 'login:code:' + phones[0])
+    assert re.fullmatch(r'[0-9]{6}', code)
+    code_ttl = int(redis('TTL', 'login:code:' + phones[0]))
+    cooldown_ttl = int(redis('TTL', 'login:code:cooldown:' + phones[0]))
+    assert 100 <= code_ttl <= 120 and 40 <= cooldown_ttl <= 60
+    assert redis('GET', 'login:code:cooldown:' + phones[0]) == '1'
+    assert send(phones[0], 429) == {'success': False, 'errorCode': 'RATE_LIMITED',
+                                  'errorMsg': '验证码发送过于频繁，请稍后再试'}
+    assert redis('GET', 'login:code:' + phones[0]) == code
+    assert code_ttl - 30 <= int(redis('TTL', 'login:code:' + phones[0])) <= code_ttl
+    assert cooldown_ttl - 30 <= int(redis('TTL', 'login:code:cooldown:' + phones[0])) <= cooldown_ttl
+    # A missing/invalid authentication token does not close the existing public endpoint.
+    assert send(phones[1], headers={'authorization': 'synthetic-missing-code-session'}) == expected_success
+    second_code = redis('GET', 'login:code:' + phones[1])
+    assert re.fullmatch(r'[0-9]{6}', second_code)
+    for phone in ('', '   ', 'not-a-phone', ' ' + phones[0], phones[0] + ' '):
+        assert send(phone, 400)['errorCode'] == 'VALIDATION_FAILED'
+    body, _ = request(base, '/user/code', 400, 'POST')
+    assert json.loads(body)['errorCode'] == 'VALIDATION_FAILED'
+    assert sql("SELECT COUNT(*) FROM tb_user WHERE phone IN (%s);" %
+               ','.join("'%s'" % phone for phone in phones)) == '0'
+    check('identity login code: anonymous/invalid-session public access, exact response without code, six digits, unchanged 60s cooldown/120s code TTL, repeated 429 without refresh and independent phones')
+
+    # Redis 6 ACL permits the cooldown SET/DEL but rejects the distinct code key's SET.
+    redis('ACL', 'SETUSER', 'default', 'resetkeys', '~login:code:cooldown:*')
+    try:
+        failure = send(phones[2], 500)
+        assert failure == {'success': False, 'errorCode': 'INTERNAL_ERROR', 'errorMsg': '服务器异常'}
+        assert redis('EXISTS', 'login:code:cooldown:' + phones[2]) == '0'
+    finally:
+        redis('ACL', 'SETUSER', 'default', 'resetkeys', '~*')
+    assert redis('EXISTS', 'login:code:' + phones[2], 'login:code:cooldown:' + phones[2]) == '0'
+    assert redis('GET', 'login:code:' + phones[0]) == code
+    assert redis('GET', 'login:code:' + phones[1]) == second_code
+    assert send(phones[2]) == expected_success
+    assert re.fullmatch(r'[0-9]{6}', redis('GET', 'login:code:' + phones[2]))
+    check('identity login code save failure: real Redis key ACL rejects code SET after cooldown acquisition, cooldown DEL succeeds, ACL restored and retry stores a code without changing other phones')
+
+    # Consume the generated test-only code through the unchanged login and logout chains.
+    body, _ = request(base, '/user/login', 200, 'POST',
+                      json.dumps({'phone': phones[0], 'code': code}).encode(), {'Content-Type': 'application/json'})
+    result = json.loads(body)
+    assert result['success'] is True and isinstance(result['data'], str) and result['data']
+    token = result['data']
+    assert redis('EXISTS', 'login:code:' + phones[0]) == '0'
+    assert redis('EXISTS', 'login:code:cooldown:' + phones[0]) == '1'
+    body, _ = request(base, '/user/me', headers={'authorization': token})
+    actor = json.loads(body)['data']['id']
+    assert sql("SELECT status FROM tb_user WHERE id=%d AND phone='%s';" % (actor, phones[0])) == 'ACTIVE'
+    assert sql("SELECT role FROM tb_user_role WHERE user_id=%d;" % actor) == 'USER'
+    body, _ = request(base, '/user/logout', 200, 'POST', headers={'authorization': token})
+    assert json.loads(body) == {'success': True}
+    request(base, '/user/me', 401, headers={'authorization': token})
+    assert redis('GET', 'login:code:' + phones[1]) == second_code
+    check('identity generated code compatibility: original login consumes the same Redis code, creates the synthetic USER/session, preserves cooldown and original logout revokes that session')
+
+
 def verify_session_logout_module(base):
     """Revoke only this authenticated synthetic session, not every session of the account."""
     actors = ((991701, 'USER', 'ACTIVE'), (991702, 'MERCHANT', 'ACTIVE'), (991703, 'ADMIN', 'ACTIVE'),
@@ -2790,6 +2862,7 @@ def main():
         verify_user_profile_module(base)
         verify_blog_user_reader(base)
         verify_session_logout_module(base)
+        verify_login_code_module(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

@@ -24,10 +24,7 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_CODE_COOLDOWN_KEY;
-import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_CODE_COOLDOWN_TTL;
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_CODE_KEY;
-import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_CODE_TTL;
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_FAILURE_KEY;
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_FAILURE_TTL;
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_USER_KEY;
@@ -38,10 +35,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -70,51 +66,6 @@ class UserServiceImplTest {
 
     @AfterEach
     void tearDown() { UserHolder.removeUser(); }
-
-    @Test
-    void shouldRateLimitRepeatedVerificationCodeRequests() {
-        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.setIfAbsent(
-                LOGIN_CODE_COOLDOWN_KEY + PHONE,
-                "1",
-                LOGIN_CODE_COOLDOWN_TTL,
-                TimeUnit.SECONDS
-        )).thenReturn(false);
-
-        BusinessException exception = assertThrows(BusinessException.class, () -> userService.sendCode(PHONE));
-
-        assertEquals(ErrorCode.RATE_LIMITED, exception.getErrorCode());
-        verify(valueOperations, never()).set(
-                eq(LOGIN_CODE_KEY + PHONE),
-                anyString(),
-                eq(LOGIN_CODE_TTL),
-                eq(TimeUnit.MINUTES)
-        );
-    }
-
-    @Test
-    void shouldStoreCodeWithoutReturningItWhenCooldownIsAcquired() {
-        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.setIfAbsent(
-                LOGIN_CODE_COOLDOWN_KEY + PHONE,
-                "1",
-                LOGIN_CODE_COOLDOWN_TTL,
-                TimeUnit.SECONDS
-        )).thenReturn(true);
-        ArgumentCaptor<String> codeCaptor = ArgumentCaptor.forClass(String.class);
-
-        Result result = userService.sendCode(PHONE);
-
-        assertTrue(result.getSuccess());
-        assertEquals("发送验证码成功", result.getData());
-        verify(valueOperations).set(
-                eq(LOGIN_CODE_KEY + PHONE),
-                codeCaptor.capture(),
-                eq(LOGIN_CODE_TTL),
-                eq(TimeUnit.MINUTES)
-        );
-        assertTrue(codeCaptor.getValue().matches("\\d{6}"));
-    }
 
     @Test
     void shouldCountFailedLoginAttempts() {

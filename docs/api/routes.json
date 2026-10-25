@@ -5,7 +5,7 @@
   "routes": [
     {"method":"GET","path":"/admin/blog-comments/replies/hide-audits/of/blog/{blogId}","controller":"AdminBlogCommentsController","handler":"listReplyHideAudits","preAuthorize":"hasRole('ADMIN')"},
     {"method":"GET","path":"/admin/blog-comments/replies/{replyId}/hide-audit","controller":"AdminBlogCommentsController","handler":"queryReplyHideAudit","preAuthorize":"hasRole('ADMIN')"},
-    {"method":"POST","path":"/user/code","controller":"UserController","handler":"sendCode","preAuthorize":""},
+    {"method":"POST","path":"/user/code","controller":"LoginCodeController","handler":"sendCode","preAuthorize":""},
     {"method":"POST","path":"/user/login","controller":"UserController","handler":"login","preAuthorize":""},
     {"method":"POST","path":"/user/logout","controller":"LogoutController","handler":"logout","preAuthorize":""},
     {"method":"GET","path":"/user/me","controller":"UserProfileController","handler":"me","preAuthorize":""},

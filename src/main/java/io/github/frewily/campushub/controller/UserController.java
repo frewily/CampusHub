@@ -10,10 +10,6 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import javax.validation.Valid;
-import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.Pattern;
-
-import static io.github.frewily.campushub.utils.RegexPatterns.PHONE_REGEX;
 
 @Slf4j
 @RestController
@@ -23,17 +19,6 @@ public class UserController {
 
     @Resource
     private IUserService userService;
-
-    /**
-     * 发送手机验证码
-     */
-    @PostMapping("code")
-    public Result sendCode(
-            @NotBlank(message = "手机号不能为空")
-            @Pattern(regexp = PHONE_REGEX, message = "手机号格式错误")
-            @RequestParam("phone") String phone) {
-        return userService.sendCode(phone);
-    }
 
     /**
      * 登录功能

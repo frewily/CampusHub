@@ -49,36 +49,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private StringRedisTemplate stringRedisTemplate;
 
     @Override
-    public Result sendCode(String phone) {
-        if (RegexUtils.isPhoneInvalid(phone)) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "手机号格式错误");
-        }
-        String cooldownKey = LOGIN_CODE_COOLDOWN_KEY + phone;
-        Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(
-                cooldownKey,
-                "1",
-                LOGIN_CODE_COOLDOWN_TTL,
-                TimeUnit.SECONDS
-        );
-        if (!Boolean.TRUE.equals(acquired)) {
-            throw new BusinessException(ErrorCode.RATE_LIMITED, "验证码发送过于频繁，请稍后再试");
-        }
-        String code = RandomUtil.randomNumbers(6);
-        try {
-            stringRedisTemplate.opsForValue().set(
-                    LOGIN_CODE_KEY + phone,
-                    code,
-                    LOGIN_CODE_TTL,
-                    TimeUnit.MINUTES
-            );
-        } catch (RuntimeException exception) {
-            stringRedisTemplate.delete(cooldownKey);
-            throw exception;
-        }
-        return Result.ok("发送验证码成功");
-    }
-
-    @Override
     @Transactional
     public Result login(LoginFormDTO loginForm) {
         String phone = loginForm.getPhone();

@@ -121,7 +121,7 @@ class ApiInventoryContractTest {
     @Test
     void commentControllerRegistersExactlyTheDocumentedRoutesAndGuards() {
         assertTrue(controllerTypes.contains(BlogCommentsController.class));
-        assertEquals(18, controllerTypes.size());
+        assertEquals(19, controllerTypes.size());
         assertEquals(51, actual.size());
         assertVoucherQueryRoute();
         assertBlogEditRoute();
@@ -221,7 +221,14 @@ class ApiInventoryContractTest {
             assertTrue(rows(documented).contains(canonical(expected)), "profile route missing from inventory " + mapping[0]);
         }
         assertEquals(3L, actual.stream().filter(row -> row.contains("\"UserProfileController\"")).count());
-        assertEquals(2L, actual.stream().filter(row -> row.contains("\"UserController\"")).count());
+        assertEquals(1L, actual.stream().filter(row -> row.contains("\"UserController\"")).count());
+        assertEquals(1L, actual.stream().filter(row -> row.contains("\"LoginCodeController\"")).count());
+        ObjectNode loginCode = JSON.createObjectNode();
+        loginCode.put("method", "POST"); loginCode.put("path", "/user/code");
+        loginCode.put("controller", "LoginCodeController"); loginCode.put("handler", "sendCode");
+        loginCode.put("preAuthorize", "");
+        assertTrue(actual.contains(canonical(loginCode)));
+        assertTrue(rows(documented).contains(canonical(loginCode)));
         ObjectNode logout = JSON.createObjectNode();
         logout.put("method", "POST"); logout.put("path", "/user/logout");
         logout.put("controller", "LogoutController"); logout.put("handler", "logout");
