@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase7AD继续identity切片：[登录会话签发端口](docs/refactor/52-phase-7ad-login-session-issuer.md)隔离原UUID、三字段字符串Hash与分钟TTL，登录事务和失败计数清理顺序保留。51映射/19个Controller、V001–V014不变；原Hash成功后EXPIRE失败的部分写入边界仍存在，不宣称原子会话或自动补偿。[学习笔记](docs/learning/login-session-issuer.md)说明签发、认证与过期的不同证据。
+
 Phase7AC继续identity切片：[登录账号存取边界](docs/refactor/51-phase-7ac-login-account-repository.md)把手机号查询/账号与默认角色创建放入专用仓储，登录服务不再继承通用用户CRUD。保持原登录事务、验证码消费、状态检查和会话白名单；51映射/19个Controller、V001–V014不变。[学习笔记](docs/learning/login-account-repository.md)区分外层数据库事务与Redis副作用，不宣称完整认证迁移或跨存储原子性。
 
 Phase7AB继续identity切片：[验证码缓存发放模块](docs/refactor/50-phase-7ab-login-code-module.md)迁移POST `/user/code`，通过LoginCodeService、生成器与存储端口保留原6位数字、60秒冷却/2分钟验证码、错误与清理顺序。仍51条映射/19个Controller、V001–V014不变，旧UserController只留登录；不接入真实短信或改变手机号规则。[学习笔记](docs/learning/login-code-module.md)区分缓存生成、短信送达及登录消费。

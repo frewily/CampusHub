@@ -63,10 +63,19 @@ class LoginAccountModuleBoundaryTest {
         String source = read("src/main/java/io/github/frewily/campushub/service/impl/UserServiceImpl.java");
         assertTrue(source.contains("accounts.findByPhone(phone)"));
         assertTrue(source.contains("accounts.createWithPhone(phone)"));
-        assertTrue(source.contains("BeanUtil.copyProperties(user, UserDTO.class)"));
+        assertTrue(source.contains("sessions.issue(user)"));
         assertTrue(source.contains("stringRedisTemplate"));
         assertFalse(source.contains("UserMapper"));
         assertFalse(source.contains("createUserWithPhone"));
+    }
+
+    @Test
+    void sessionMappingBelongsToIssuerAdapter() {
+        String source = read("src/main/java/io/github/frewily/campushub/identity/infrastructure/RedisLoginSessionIssuer.java");
+        assertTrue(source.contains("BeanUtil.copyProperties(account, UserDTO.class)"));
+        assertTrue(source.contains("BeanUtil.beanToMap(userDTO"));
+        assertTrue(source.contains("setIgnoreNullValue(true)"));
+        assertTrue(source.contains("fieldValue.toString()"));
     }
 
     private String read(String path) {

@@ -4,6 +4,7 @@ import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.identity.application.LoginAccount;
 import io.github.frewily.campushub.identity.application.LoginAccountRepository;
+import io.github.frewily.campushub.identity.application.LoginSessionIssuer;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.utils.UserHolder;
@@ -11,23 +12,19 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Collections;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_CODE_KEY;
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_FAILURE_KEY;
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_FAILURE_TTL;
-import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_USER_KEY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -53,7 +50,7 @@ class UserServiceImplTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
     @Mock
-    private HashOperations<String, Object, Object> hashOperations;
+    private LoginSessionIssuer sessions;
 
     private UserServiceImpl userService;
 
@@ -62,6 +59,7 @@ class UserServiceImplTest {
         userService = new UserServiceImpl();
         ReflectionTestUtils.setField(userService, "accounts", accounts);
         ReflectionTestUtils.setField(userService, "stringRedisTemplate", stringRedisTemplate);
+        ReflectionTestUtils.setField(userService, "sessions", sessions);
     }
 
     @AfterEach
@@ -128,18 +126,15 @@ class UserServiceImplTest {
                 eq("654321")
         )).thenReturn(1L);
         when(accounts.findByPhone(PHONE)).thenReturn(new LoginAccount(7L, "campus-user", "", "ACTIVE"));
-        when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(sessions.issue(any(LoginAccount.class))).thenReturn("session-token");
 
         Result result = userService.login(loginForm("654321"));
 
         assertTrue(result.getSuccess());
         assertNotNull(result.getData());
-        String token = result.getData().toString();
-        assertFalse(token.isEmpty());
-        ArgumentCaptor<Map<String, Object>> userMapCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(hashOperations).putAll(eq(LOGIN_USER_KEY + token), userMapCaptor.capture());
-        assertEquals("7", userMapCaptor.getValue().get("id"));
-        assertNull(userMapCaptor.getValue().get("phone"));
+        assertFalse(result.getData().toString().isEmpty());
+        assertEquals("session-token", result.getData());
+        verify(sessions).issue(any(LoginAccount.class));
         verify(stringRedisTemplate).delete(LOGIN_FAILURE_KEY + PHONE);
     }
 
@@ -160,7 +155,7 @@ class UserServiceImplTest {
         );
 
         assertEquals(ErrorCode.AUTHENTICATION_FAILED, exception.getErrorCode());
-        verify(stringRedisTemplate, never()).opsForHash();
+        org.mockito.Mockito.verifyNoInteractions(sessions);
     }
 
     @Test
@@ -174,12 +169,38 @@ class UserServiceImplTest {
         )).thenReturn(1L);
         when(accounts.findByPhone(PHONE)).thenReturn(null);
         when(accounts.createWithPhone(PHONE)).thenReturn(new LoginAccount(9L, "USER-new-user", "", "ACTIVE"));
-        when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(sessions.issue(any(LoginAccount.class))).thenReturn("session-token");
 
         Result result = userService.login(loginForm("654321"));
 
         assertTrue(result.getSuccess());
         verify(accounts).createWithPhone(PHONE);
+    }
+
+    @Test
+    void issuerFailureLeavesFailureCounterUntouched() {
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(LOGIN_FAILURE_KEY + PHONE)).thenReturn("2");
+        when(stringRedisTemplate.execute(any(DefaultRedisScript.class), eq(Collections.singletonList(LOGIN_CODE_KEY + PHONE)), eq("654321"))).thenReturn(1L);
+        when(accounts.findByPhone(PHONE)).thenReturn(new LoginAccount(7L, "campus-user", "", "ACTIVE"));
+        when(sessions.issue(any(LoginAccount.class))).thenThrow(new IllegalStateException("issuer failure"));
+
+        assertThrows(IllegalStateException.class, () -> userService.login(loginForm("654321")));
+        verify(stringRedisTemplate, never()).delete(LOGIN_FAILURE_KEY + PHONE);
+    }
+
+    @Test
+    void failureCounterCleanupErrorDoesNotRevokeIssuedSession() {
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(LOGIN_FAILURE_KEY + PHONE)).thenReturn("2");
+        when(stringRedisTemplate.execute(any(DefaultRedisScript.class), eq(Collections.singletonList(LOGIN_CODE_KEY + PHONE)), eq("654321"))).thenReturn(1L);
+        LoginAccount account = new LoginAccount(7L, "campus-user", "", "ACTIVE");
+        when(accounts.findByPhone(PHONE)).thenReturn(account);
+        when(sessions.issue(account)).thenReturn("session-token");
+        when(stringRedisTemplate.delete(LOGIN_FAILURE_KEY + PHONE)).thenThrow(new IllegalStateException("cleanup failure"));
+
+        assertThrows(IllegalStateException.class, () -> userService.login(loginForm("654321")));
+        verify(sessions).issue(account);
     }
 
     private LoginFormDTO loginForm(String code) {

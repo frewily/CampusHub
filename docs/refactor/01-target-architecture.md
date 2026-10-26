@@ -53,6 +53,8 @@ Phase7X提取identity资料读取：UserProfileController处理会话me与两个
 
 ## 3 目标业务模型
 
+Phase7AD将原登录中的会话签发改为identity.application.LoginSessionIssuer窄端口，由RedisLoginSessionIssuer承接Hutool UUID/DTO映射/字符串Hash/TTL。外层UserServiceImpl仍保留原登录事务及Redis验证码/失败计数编排，不宣称纯Java登录服务或完整identity迁移；无新事务/补偿/原子Redis协议，见[7AD记录](52-phase-7ad-login-session-issuer.md)。
+
 Phase7AC为仍处遗留包的登录服务提取identity.application.LoginAccountRepository和四字段LoginAccount；MyBatisLoginAccountRepository保留原phone查询、昵称生成、账号和默认USER角色插入。IUserService/Impl不再继承IService/ServiceImpl，登录外层@Transactional不移动，仓储无新事务；Mapper/Entity仍共享遗留类型，Redis登录编排未整体迁移。见[7AC记录](51-phase-7ac-login-account-repository.md)。
 
 Phase7AB提取identity验证码缓存发放：LoginCodeController→LoginCodeService→LoginCodeStore/LoginCodeGenerator，Redis与Hutool放基础设施。纯Java服务暂时复用旧RegexPatterns的纯常量，避免复制/修改手机号规则，不依赖RegexUtils/Hutool/Spring；验证码生成/保存及冷却错误顺序不改。旧UserController/IUserService/Impl仅留登录，不宣称完成整个认证/短信链，见[7AB记录](50-phase-7ab-login-code-module.md)。

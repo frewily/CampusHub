@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7AD仅调整登录内部会话签发为LoginSessionIssuer/RedisLoginSessionIssuer，原UUID、Hash白名单、TTL与异常规则保留；51映射/19个Controller和机器清单不变，见[7AD记录](../refactor/52-phase-7ad-login-session-issuer.md)。
+
 Phase7AC只收窄登录内部账号存取：UserServiceImpl依赖LoginAccountRepository，不再继承通用CRUD；API目录、51映射/19个Controller及机器JSON不变。兼容与本轮证据见[7AC记录](../refactor/51-phase-7ac-login-account-repository.md)。
 
 Phase7AB将既有POST `/user/code`迁入identity.api.LoginCodeController，当前51条应用映射/19个Controller，旧UserController只留登录；公开权限、handler、校验消息和响应不变。原验证码key/TTL及失败顺序见[7AB记录](../refactor/50-phase-7ab-login-code-module.md)，不把缓存生成描述为真实短信送达；以下阶段数量为历史状态。

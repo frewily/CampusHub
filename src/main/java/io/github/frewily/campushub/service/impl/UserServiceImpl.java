@@ -1,13 +1,10 @@
 package io.github.frewily.campushub.service.impl;
 
-import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.bean.copier.CopyOptions;
-import cn.hutool.core.lang.UUID;
 import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
-import io.github.frewily.campushub.dto.UserDTO;
 import io.github.frewily.campushub.identity.application.LoginAccount;
 import io.github.frewily.campushub.identity.application.LoginAccountRepository;
+import io.github.frewily.campushub.identity.application.LoginSessionIssuer;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.service.IUserService;
@@ -20,8 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static io.github.frewily.campushub.utils.RedisConstants.*;
@@ -47,6 +42,9 @@ public class UserServiceImpl implements IUserService {
 
     @Resource
     private LoginAccountRepository accounts;
+
+    @Resource
+    private LoginSessionIssuer sessions;
 
     @Override
     @Transactional
@@ -82,32 +80,10 @@ public class UserServiceImpl implements IUserService {
         if (!"ACTIVE".equals(user.getStatus())) {
             throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED, "账号不可用");
         }
-        String token = UUID.randomUUID().toString(true);
-        // 只将脱敏后的 UserDTO 写入会话缓存。
-        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
-        // Redis Hash 使用字符串 Map，避免直接序列化完整用户实体。
-        Map<String, Object> userMap = BeanUtil.beanToMap(userDTO, new HashMap<>(),
-                CopyOptions.create()
-                        .setIgnoreNullValue(true)
-                        .setFieldValueEditor((fieldName, fieldValue) -> fieldValue != null ? fieldValue.toString() : "")
-        );
-        String tokenKey = LOGIN_USER_KEY + token;
-        stringRedisTemplate.opsForHash().putAll(tokenKey, userMap);
-        stringRedisTemplate.expire(tokenKey, LOGIN_USER_TTL, TimeUnit.MINUTES);
+        String token = sessions.issue(user);
         stringRedisTemplate.delete(failureKey);
         return Result.ok(token);
     }
-
-    /**
-     * // UserDTO 有 3 个成员：id, nickName, icon
-     * // 转换后的 Map 内容为：
-     * {
-     *     "id": 123,
-     *     "nickName": "用户昵称",
-     *     "icon": "头像URL"
-     * }
-     */
-
 
     private BusinessException recordLoginFailure(String failureKey) {
         Long failures = stringRedisTemplate.execute(

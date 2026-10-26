@@ -166,6 +166,91 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_login_session_issuer(base):
+    """Preserve old issuance ordering, including partial Redis writes on later failures."""
+    actor = 9007199254748993
+    phone, new_phone = '13800992901', '13800992902'
+    assert sql("SELECT COUNT(*) FROM tb_user WHERE phone IN ('%s','%s');" % (phone, new_phone)) == '0'
+    sql("INSERT INTO tb_user(id,phone,password,nick_name,icon,status) VALUES"
+        "(%d,'%s','synthetic-only','issuer-profile',NULL,'ACTIVE');"
+        "INSERT INTO tb_user_role(user_id,role) VALUES(%d,'USER');" % (actor, phone, actor))
+    facts_sql = 'SELECT * FROM tb_user WHERE id=%d;' % actor
+    roles_sql = 'SELECT user_id,role FROM tb_user_role ORDER BY user_id,role;'
+    facts_before, roles_before = sql(facts_sql), sql(roles_sql)
+
+    def login(target, expected=200):
+        code = '246802'
+        redis('SET', 'login:code:' + target, code, 'EX', '120')
+        body, _ = request(base, '/user/login', expected, 'POST',
+                          json.dumps({'phone': target, 'code': code}).encode(), {'Content-Type': 'application/json'})
+        assert redis('EXISTS', 'login:code:' + target) == '0'
+        result = json.loads(body)
+        if expected == 200:
+            assert set(result) == {'success', 'data'} and result['success'] is True
+            assert re.fullmatch(r'[0-9a-f]{32}', result['data'])
+        else:
+            assert result == {'success': False, 'errorCode': 'INTERNAL_ERROR', 'errorMsg': '服务器异常'}
+        return result
+
+    def tokens():
+        return set(redis('--scan', '--pattern', 'login:token:*').splitlines())
+
+    first, second = login(phone)['data'], login(phone)['data']
+    assert first != second
+    expected_hash = {'id': str(actor), 'nickName': 'issuer-profile', 'icon': ''}
+    for token in (first, second):
+        key = 'login:token:' + token
+        values = redis('HGETALL', key).splitlines()
+        assert dict(zip(values[::2], values[1::2])) == expected_hash
+        assert 36000 * 60 - 60 <= int(redis('TTL', key)) <= 36000 * 60
+        body, _ = request(base, '/user/me', headers={'authorization': token})
+        assert json.loads(body)['data']['id'] == actor
+    assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
+    check('identity session issuer: original UUID token format, three string hash fields including empty icon, large numeric user ID, minute-based TTL and two independent sessions without account writes')
+
+    redis('SET', 'login:failure:' + phone, '2', 'EX', '600')
+    before = tokens()
+    redis('ACL', 'SETUSER', 'default', '-hset', '-hmset')
+    try:
+        login(phone, 500)
+        assert tokens() - before == set(), 'failed Hash write must not reach expiry or return a token'
+        assert redis('GET', 'login:failure:' + phone) == '2'
+    finally:
+        redis('ACL', 'SETUSER', 'default', '+hset', '+hmset')
+    assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
+    check('identity session Hash fault: real Redis write denial stays generic, consumed code is not restored, failure counter is not cleared and account facts remain unchanged')
+
+    orphan_keys = []
+    # RedisTemplate.expire first uses PEXPIRE, then falls back to EXPIRE on error.
+    redis('ACL', 'SETUSER', 'default', '-pexpire', '-expire')
+    try:
+        for target in (phone, new_phone):
+            redis('SET', 'login:failure:' + target, '2', 'EX', '600')
+            before = tokens()
+            login(target, 500)
+            created = tokens() - before
+            orphan_keys.extend(created)
+            assert len(created) == 1, 'old putAll-before-expire partial write remains observable'
+            orphan = next(iter(created))
+            assert redis('TTL', orphan) == '-1', 'retain—not repair—the old expiry-failure boundary'
+            assert redis('GET', 'login:failure:' + target) == '2'
+            assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
+            if target == new_phone:
+                assert sql("SELECT COUNT(*) FROM tb_user WHERE phone='%s';" % target) == '0'
+    finally:
+        redis('ACL', 'SETUSER', 'default', '+pexpire', '+expire')
+        # Only the exact synthetic hashes observed above; this is fixture cleanup, not production compensation.
+        for key in orphan_keys: redis('DEL', key)
+    for target in (phone, new_phone):
+        token = login(target)['data']
+        assert redis('EXISTS', 'login:failure:' + target) == '0'
+        assert 36000 * 60 - 60 <= int(redis('TTL', 'login:token:' + token)) <= 36000 * 60
+        body, _ = request(base, '/user/me', headers={'authorization': token})
+        assert json.loads(body)['success'] is True
+    assert sql(facts_sql) == facts_before
+    check('identity session expiry fault: existing and registering accounts retain the old no-TTL Hash partial write, new DB account/role rolls back, ACL/owned hashes restored and fresh-code retries issue usable sessions')
+
+
 def verify_login_account_repository(base):
     """Legacy login transaction and Redis behavior over owned synthetic accounts only."""
     first_id = 9007199254747993
@@ -2950,6 +3035,7 @@ def main():
         verify_session_logout_module(base)
         verify_login_code_module(base)
         verify_login_account_repository(base)
+        verify_login_session_issuer(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]
