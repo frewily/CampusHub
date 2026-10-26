@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7AE改变登录内部失败契约：TTL就绪后才发布新身份，脚本未完成则通用500、不回token；成功UUID/三字段/TTL和51映射/19Controllers不变。Lua错误不自动回滚，双故障可留无ID占位，历史数据不自动迁移。范围与本轮证据见[7AE记录](../refactor/53-phase-7ae-session-publication-safety.md)，以下7AD等为历史状态。
+
 Phase7AD仅调整登录内部会话签发为LoginSessionIssuer/RedisLoginSessionIssuer，原UUID、Hash白名单、TTL与异常规则保留；51映射/19个Controller和机器清单不变，见[7AD记录](../refactor/52-phase-7ad-login-session-issuer.md)。
 
 Phase7AC只收窄登录内部账号存取：UserServiceImpl依赖LoginAccountRepository，不再继承通用CRUD；API目录、51映射/19个Controller及机器JSON不变。兼容与本轮证据见[7AC记录](../refactor/51-phase-7ac-login-account-repository.md)。

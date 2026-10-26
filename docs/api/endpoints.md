@@ -12,7 +12,7 @@
 
 ## 用户与会话
 
-Phase7AD登录通过[LoginSessionIssuer](../../src/main/java/io/github/frewily/campushub/identity/application/LoginSessionIssuer.java)与[RedisLoginSessionIssuer](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/RedisLoginSessionIssuer.java)执行原UUID32位token、UserDTO三字段字符串Hash和LOGIN_USER_TTL分钟过期，随后才清失败计数。原putAll/expire是两个操作，false/null过期结果仍忽略；EXPIRE异常仍可留下无TTL Hash且使新建账号DB事务回滚，不新增补偿或跨存储原子性。接口、认证与响应不变，详见[7AD记录](../refactor/52-phase-7ad-login-session-issuer.md)。
+Phase7AE登录仍通过[LoginSessionIssuer](../../src/main/java/io/github/frewily/campushub/identity/application/LoginSessionIssuer.java)与[RedisLoginSessionIssuer](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/RedisLoginSessionIssuer.java)，但改用[单键Lua发布协议](../../src/main/resources/login-session-publish.lua)：先无ID占位、成功附着原TTL，再发布id/nickName/icon。成功UUID32位token、字符串Hash和LOGIN_USER_TTL分钟语义不变（脚本参数为等值毫秒），随后才清失败计数；仅脚本返回1可回token，其他结果/异常通用500。过期失败尽力清理，双故障残留占位无ID而不可认证；历史无TTL会话不自动扫描，认证filter不改，仍无DB/Redis事务或网络结果确定性保证。详见[7AE记录](../refactor/53-phase-7ae-session-publication-safety.md)，7AD记录保留当时旧边界。
 
 Phase7AC登录内部经[LoginAccountRepository](../../src/main/java/io/github/frewily/campushub/identity/application/LoginAccountRepository.java)与[MyBatisLoginAccountRepository](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/MyBatisLoginAccountRepository.java)执行原手机号SELECT/账号INSERT/默认USER角色INSERT IGNORE，返回内部[LoginAccount](../../src/main/java/io/github/frewily/campushub/identity/application/LoginAccount.java)，不是API响应。IUserService只暴露原login，不再继承CRUD。外层login事务与原Redis消费/会话规则保持：角色写失败回滚数据库账号，但已消费验证码不随数据库回滚；登录仍只检查ACTIVE，已有无角色账号可先得到token，后续认证filter仍拒绝并清理该会话。不是新授权策略或全identity迁移，见[7AC记录](../refactor/51-phase-7ac-login-account-repository.md)。
 

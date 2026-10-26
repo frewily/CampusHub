@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_USER_KEY;
@@ -82,40 +83,33 @@ class LoginSessionRedisIT {
         assertNull(redis.opsForHash().get(firstKey, "phone"));
     }
 
-    @Test void expiryWrapperFailureLeavesRealHashWithoutTtlThenCanBeCleanedUp() {
-        String marker = "session-it-orphan-" + UUID.randomUUID();
-        StringRedisTemplate failingExpiry = new StringRedisTemplate(factory) {
-            @Override public Boolean expire(String key, long timeout, TimeUnit unit) {
-                throw new IllegalStateException("test wrapper blocks expire");
-            }
-        };
-        failingExpiry.afterPropertiesSet();
-        assertThrows(IllegalStateException.class, () -> new RedisLoginSessionIssuer(failingExpiry)
-                .issue(new LoginAccount(2102L, marker, null, "ACTIVE")));
-        // This injects a client-wrapper failure, not a Redis ACL/command failure.
-        String ownedKey = redis.keys(LOGIN_USER_KEY + "*").stream()
-                .filter(key -> marker.equals(redis.opsForHash().get(key, "nickName"))).findFirst()
-                .orElseThrow(() -> new AssertionError("owned wrapper-failure hash missing"));
-        ownedKeys.add(ownedKey);
-        assertEquals(-1L, redis.getExpire(ownedKey, TimeUnit.SECONDS));
-        assertTrue(redis.expire(ownedKey, LOGIN_USER_TTL, TimeUnit.MINUTES));
-        assertTrue(redis.getExpire(ownedKey, TimeUnit.MINUTES) > LOGIN_USER_TTL - 2);
-        // StringRedisTemplate owns no pool; @AfterAll alone closes the shared owned factory/process.
+    @Test void expiryAndCleanupDenialLeavesOnlyAnIdentityFreePlaceholder() {
+        Set<String> before = new HashSet<>(redis.keys(LOGIN_USER_KEY + "*"));
+        try {
+            commands(false, "pexpire", "expire", "del");
+            assertThrows(IllegalStateException.class,
+                    () -> new RedisLoginSessionIssuer(redis).issue(new LoginAccount(2102L, "not-published", "", "ACTIVE")));
+            Set<String> created = new HashSet<>(redis.keys(LOGIN_USER_KEY + "*"));
+            created.removeAll(before);
+            ownedKeys.addAll(created);
+            assertEquals(1, created.size());
+            String key = created.iterator().next();
+            assertEquals(Collections.singletonMap("nickName", ""), redis.opsForHash().entries(key));
+            assertNull(redis.opsForHash().get(key, "id"));
+            assertEquals(-1L, redis.getExpire(key, TimeUnit.SECONDS));
+        } finally { commands(true, "pexpire", "expire", "del"); }
     }
 
-    @Test void actualPexpireAndExpireDenialLeavesHashWithoutTtlAndCanBeRestored() {
+    @Test void actualExpiryDenialDoesNotPublishAnySessionAndCanBeRestored() {
         Set<String> before = new HashSet<>(redis.keys(LOGIN_USER_KEY + "*"));
         try {
             expiryCommands(false);
-            assertThrows(org.springframework.dao.DataAccessException.class,
+            assertThrows(RuntimeException.class,
                     () -> new RedisLoginSessionIssuer(redis).issue(new LoginAccount(2103L, "acl-session", "", "ACTIVE")));
             Set<String> created = new HashSet<>(redis.keys(LOGIN_USER_KEY + "*"));
             created.removeAll(before);
             ownedKeys.addAll(created);
-            assertEquals(1, created.size(), "Hash was written before both expiry commands were rejected");
-            String key = created.iterator().next();
-            assertEquals("2103", redis.opsForHash().get(key, "id"));
-            assertEquals(-1L, redis.getExpire(key, TimeUnit.SECONDS));
+            assertTrue(created.isEmpty(), "expiry rejection must not leave a published session Hash");
         } finally { expiryCommands(true); }
         String recovered = LOGIN_USER_KEY + new RedisLoginSessionIssuer(redis)
                 .issue(new LoginAccount(2103L, "acl-session", "", "ACTIVE"));
@@ -124,11 +118,46 @@ class LoginSessionRedisIT {
     }
 
     private void expiryCommands(boolean allow) {
+        commands(allow, "pexpire", "expire");
+    }
+
+    private void commands(boolean allow, String... names) {
         java.nio.charset.Charset utf8 = java.nio.charset.StandardCharsets.UTF_8;
-        redis.execute((RedisCallback<Object>) connection -> connection.execute("ACL",
-                "SETUSER".getBytes(utf8), "default".getBytes(utf8),
-                (allow ? "+pexpire" : "-pexpire").getBytes(utf8),
-                (allow ? "+expire" : "-expire").getBytes(utf8)));
+        byte[][] args = new byte[names.length + 2][];
+        args[0] = "SETUSER".getBytes(utf8); args[1] = "default".getBytes(utf8);
+        for (int i = 0; i < names.length; i++) args[i + 2] = ((allow ? "+" : "-") + names[i]).getBytes(utf8);
+        redis.execute((RedisCallback<Object>) connection -> connection.execute("ACL", args));
+    }
+
+    @Test void collisionDoesNotOverwriteOrRefreshAnExistingSession() {
+        String key = LOGIN_USER_KEY + UUID.randomUUID().toString().replace("-", "");
+        ownedKeys.add(key);
+        redis.opsForHash().put(key, "id", "retained");
+        redis.expire(key, 60, TimeUnit.SECONDS);
+        long before = redis.getExpire(key, TimeUnit.MILLISECONDS);
+        assertEquals(0L, publish(key, "2160000000", "9007199254748993", "replacement", ""));
+        assertEquals(Collections.singletonMap("id", "retained"), redis.opsForHash().entries(key));
+        long after = redis.getExpire(key, TimeUnit.MILLISECONDS);
+        assertTrue(after <= before && before - after < 5000);
+    }
+
+    @Test void invalidPublicationArgumentsDoNotCreateAnyKey() {
+        String key = LOGIN_USER_KEY + UUID.randomUUID().toString().replace("-", "");
+        ownedKeys.add(key);
+        for (String ttl : new String[]{"0", "-1", "1.5", "not-a-number", "9007199254740992"}) {
+            assertEquals(-2L, publish(key, ttl, "2104", "nick", ""));
+            assertFalse(redis.hasKey(key));
+        }
+        assertEquals(-2L, publish(key, "2160000000", "2104", "missing-icon"));
+        assertFalse(redis.hasKey(key));
+    }
+
+    private Long publish(String key, Object... args) {
+        org.springframework.data.redis.core.script.DefaultRedisScript<Long> script =
+                new org.springframework.data.redis.core.script.DefaultRedisScript<>();
+        script.setLocation(new org.springframework.core.io.ClassPathResource("login-session-publish.lua"));
+        script.setResultType(Long.class);
+        return redis.execute(script, Collections.singletonList(key), args);
     }
 
     @org.junit.jupiter.api.AfterEach void removeOnlyCreatedSessionKeys() {

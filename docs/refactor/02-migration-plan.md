@@ -260,6 +260,8 @@
 
 ## 5 原始目标的剩余范围
 
+Phase7AE（2026-10-26，基线 `b27d24fc15b71e9e2b3d6c9202a8adabe0accf4e`）：选择修复已实证的新签发无TTL身份风险，而不是继续纯结构迁移。单键Lua先无ID占位和原TTL，再发布身份；不覆盖已有key，非1结果不回token，失败尽力清理。成功格式/API不改，残留占位不可认证但可能无TTL，历史无TTL身份不自动扫描，认证filter/DB事务不变。51映射/19Controllers、V001–V014保持，见[7AE记录](53-phase-7ae-session-publication-safety.md)，验证后提交、新Luna独立审查、普通push读回后停止。
+
 Phase7AD（2026-10-25，基线 `6ce37ee57cf14f310590bb60767f0a63a341ce3f`）：仅提取登录会话签发端口，保留UUID/三字段/字符串Hash/原分钟TTL/false-null与异常边界，原清理失败计数仍在签发后。原Hash与EXPIRE非原子，不在结构迁移中修复部分写入；51映射/19Controllers、V001–V014不变。范围与本轮证据见[7AD记录](52-phase-7ad-login-session-issuer.md)，验证后提交、新Luna独立审查、普通push读回后停止。
 
 Phase7AC（2026-10-25，基线 `747d4208c4529438a75010a33ab8e5e80b15f146`）：仅提取登录账号findByPhone/createWithPhone端口与内部四字段模型，并移除旧登录服务的通用CRUD继承。原SQL、昵称/ACTIVE/默认USER创建、忽略插入返回值、外层登录事务、验证码/会话顺序不变；无路由、迁移、隐私或授权变更。51映射/19Controllers和机器目录保留。范围与本轮验证见[7AC记录](51-phase-7ac-login-account-repository.md)，验证后提交、新Luna独立审查、普通推送读回后停止。

@@ -53,6 +53,8 @@ Phase7X提取identity资料读取：UserProfileController处理会话me与两个
 
 ## 3 目标业务模型
 
+Phase7AE在既有LoginSessionIssuer适配器内修复发布顺序，新增单key Redis6兼容Lua：EXISTS拒绝覆盖，先HSET无ID占位→PEXPIRE→HSET身份。只有TTL就绪才引入id，Lua异常不等于回滚，失败清理可留下无ID占位；不是跨存储原子性或历史数据清理。原API/成功格式/TTL与服务事务不改，见[7AE记录](53-phase-7ae-session-publication-safety.md)和[ADR0005](../adr/0005-session-publication-safety.md)。
+
 Phase7AD将原登录中的会话签发改为identity.application.LoginSessionIssuer窄端口，由RedisLoginSessionIssuer承接Hutool UUID/DTO映射/字符串Hash/TTL。外层UserServiceImpl仍保留原登录事务及Redis验证码/失败计数编排，不宣称纯Java登录服务或完整identity迁移；无新事务/补偿/原子Redis协议，见[7AD记录](52-phase-7ad-login-session-issuer.md)。
 
 Phase7AC为仍处遗留包的登录服务提取identity.application.LoginAccountRepository和四字段LoginAccount；MyBatisLoginAccountRepository保留原phone查询、昵称生成、账号和默认USER角色插入。IUserService/Impl不再继承IService/ServiceImpl，登录外层@Transactional不移动，仓储无新事务；Mapper/Entity仍共享遗留类型，Redis登录编排未整体迁移。见[7AC记录](51-phase-7ac-login-account-repository.md)。

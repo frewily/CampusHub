@@ -167,7 +167,7 @@ def check(label):
 
 
 def verify_login_session_issuer(base):
-    """Preserve old issuance ordering, including partial Redis writes on later failures."""
+    """Publish new identity fields only after TTL is attached; preserve normal login data."""
     actor = 9007199254748993
     phone, new_phone = '13800992901', '13800992902'
     assert sql("SELECT COUNT(*) FROM tb_user WHERE phone IN ('%s','%s');" % (phone, new_phone)) == '0'
@@ -200,8 +200,9 @@ def verify_login_session_issuer(base):
     expected_hash = {'id': str(actor), 'nickName': 'issuer-profile', 'icon': ''}
     for token in (first, second):
         key = 'login:token:' + token
-        values = redis('HGETALL', key).splitlines()
-        assert dict(zip(values[::2], values[1::2])) == expected_hash
+        fields = set(redis('HKEYS', key).splitlines())
+        assert fields == set(expected_hash)
+        assert {field: redis('HGET', key, field) for field in fields} == expected_hash
         assert 36000 * 60 - 60 <= int(redis('TTL', key)) <= 36000 * 60
         body, _ = request(base, '/user/me', headers={'authorization': token})
         assert json.loads(body)['data']['id'] == actor
@@ -220,8 +221,8 @@ def verify_login_session_issuer(base):
     assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
     check('identity session Hash fault: real Redis write denial stays generic, consumed code is not restored, failure counter is not cleared and account facts remain unchanged')
 
-    orphan_keys = []
-    # RedisTemplate.expire first uses PEXPIRE, then falls back to EXPIRE on error.
+    rejected_keys = []
+    # The single-key publication script must fail closed when it cannot attach TTL.
     redis('ACL', 'SETUSER', 'default', '-pexpire', '-expire')
     try:
         for target in (phone, new_phone):
@@ -229,18 +230,15 @@ def verify_login_session_issuer(base):
             before = tokens()
             login(target, 500)
             created = tokens() - before
-            orphan_keys.extend(created)
-            assert len(created) == 1, 'old putAll-before-expire partial write remains observable'
-            orphan = next(iter(created))
-            assert redis('TTL', orphan) == '-1', 'retain—not repair—the old expiry-failure boundary'
+            rejected_keys.extend(created)
+            assert created == set(), 'expiry failure must not leave a published session key when cleanup is allowed'
             assert redis('GET', 'login:failure:' + target) == '2'
             assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
             if target == new_phone:
                 assert sql("SELECT COUNT(*) FROM tb_user WHERE phone='%s';" % target) == '0'
     finally:
         redis('ACL', 'SETUSER', 'default', '+pexpire', '+expire')
-        # Only the exact synthetic hashes observed above; this is fixture cleanup, not production compensation.
-        for key in orphan_keys: redis('DEL', key)
+        for key in rejected_keys: redis('DEL', key)
     for target in (phone, new_phone):
         token = login(target)['data']
         assert redis('EXISTS', 'login:failure:' + target) == '0'
@@ -248,7 +246,27 @@ def verify_login_session_issuer(base):
         body, _ = request(base, '/user/me', headers={'authorization': token})
         assert json.loads(body)['success'] is True
     assert sql(facts_sql) == facts_before
-    check('identity session expiry fault: existing and registering accounts retain the old no-TTL Hash partial write, new DB account/role rolls back, ACL/owned hashes restored and fresh-code retries issue usable sessions')
+    check('identity session expiry fault: no published Hash after TTL failure, new DB account/role rolls back, ACL restored and fresh-code retries issue usable sessions')
+
+    # DEL is needed by login-code consumption, so test the double fault directly at
+    # the Redis publication boundary, then exercise the unchanged real HTTP filter.
+    placeholder = 'login:token:' + uuid.uuid4().hex
+    script = (ROOT / 'src/main/resources/login-session-publish.lua').read_text('utf-8')
+    redis('ACL', 'SETUSER', 'default', '-pexpire', '-expire', '-del')
+    try:
+        assert redis('EVAL', script, '1', placeholder, str(36000 * 60 * 1000), str(actor), 'must-not-publish', '') == '-1'
+        assert redis('TTL', placeholder) == '-1'
+        assert redis('HKEYS', placeholder) == 'nickName'
+        assert redis('HGET', placeholder, 'nickName') == ''
+        assert redis('HEXISTS', placeholder, 'id') == '0'
+    finally:
+        redis('ACL', 'SETUSER', 'default', '+pexpire', '+expire', '+del')
+        try:
+            request(base, '/user/me', 401, headers={'authorization': placeholder[len('login:token:'):]})
+            assert redis('EXISTS', placeholder) == '0'
+        finally:
+            redis('DEL', placeholder)
+    check('identity session double fault: direct script cannot publish identity when expiry and cleanup fail; residual placeholder has no id and the real HTTP authentication filter rejects/removes it after permissions recover')
 
 
 def verify_login_account_repository(base):
