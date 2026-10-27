@@ -4,41 +4,23 @@ import io.github.frewily.campushub.dto.LoginFormDTO;
 import io.github.frewily.campushub.dto.Result;
 import io.github.frewily.campushub.identity.application.LoginAccount;
 import io.github.frewily.campushub.identity.application.LoginAccountRepository;
+import io.github.frewily.campushub.identity.application.LoginAttemptStore;
 import io.github.frewily.campushub.identity.application.LoginSessionIssuer;
 import io.github.frewily.campushub.exception.BusinessException;
 import io.github.frewily.campushub.exception.ErrorCode;
 import io.github.frewily.campushub.service.IUserService;
 import io.github.frewily.campushub.utils.RegexUtils;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
-import java.util.Collections;
-import java.util.concurrent.TimeUnit;
-
-import static io.github.frewily.campushub.utils.RedisConstants.*;
+import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_FAILURE_LIMIT;
 
 @Service
 public class UserServiceImpl implements IUserService {
 
-    private static final DefaultRedisScript<Long> LOGIN_CODE_CONSUME_SCRIPT;
-    private static final DefaultRedisScript<Long> LOGIN_FAILURE_INCREMENT_SCRIPT;
-
-    static {
-        LOGIN_CODE_CONSUME_SCRIPT = new DefaultRedisScript<>();
-        LOGIN_CODE_CONSUME_SCRIPT.setLocation(new ClassPathResource("login-code-consume.lua"));
-        LOGIN_CODE_CONSUME_SCRIPT.setResultType(Long.class);
-
-        LOGIN_FAILURE_INCREMENT_SCRIPT = new DefaultRedisScript<>();
-        LOGIN_FAILURE_INCREMENT_SCRIPT.setLocation(new ClassPathResource("login-failure-increment.lua"));
-        LOGIN_FAILURE_INCREMENT_SCRIPT.setResultType(Long.class);
-    }
-
     @Resource
-    private StringRedisTemplate stringRedisTemplate;
+    private LoginAttemptStore attempts;
 
     @Resource
     private LoginAccountRepository accounts;
@@ -53,25 +35,20 @@ public class UserServiceImpl implements IUserService {
         if (phone == null || RegexUtils.isPhoneInvalid(phone)) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "手机号格式错误");
         }
-        String failureKey = LOGIN_FAILURE_KEY + phone;
-        String failureCount = stringRedisTemplate.opsForValue().get(failureKey);
+        String failureCount = attempts.findFailureCount(phone);
         if (failureCount != null && Long.parseLong(failureCount) >= LOGIN_FAILURE_LIMIT) {
             throw loginRateLimited();
         }
         String cacheCode = loginForm.getCode();
         if (cacheCode == null) {
-            throw recordLoginFailure(failureKey);
+            throw recordLoginFailure(phone);
         }
-        Long consumed = stringRedisTemplate.execute(
-                LOGIN_CODE_CONSUME_SCRIPT,
-                Collections.singletonList(LOGIN_CODE_KEY + phone),
-                cacheCode
-        );
+        Long consumed = attempts.consumeCode(phone, cacheCode);
         if (consumed == null) {
             throw new IllegalStateException("验证码校验未返回结果");
         }
         if (consumed != 1L) {
-            throw recordLoginFailure(failureKey);
+            throw recordLoginFailure(phone);
         }
         LoginAccount user = accounts.findByPhone(phone);
         if (user == null) {
@@ -81,16 +58,12 @@ public class UserServiceImpl implements IUserService {
             throw new BusinessException(ErrorCode.AUTHENTICATION_FAILED, "账号不可用");
         }
         String token = sessions.issue(user);
-        stringRedisTemplate.delete(failureKey);
+        attempts.clearFailureCount(phone);
         return Result.ok(token);
     }
 
-    private BusinessException recordLoginFailure(String failureKey) {
-        Long failures = stringRedisTemplate.execute(
-                LOGIN_FAILURE_INCREMENT_SCRIPT,
-                Collections.singletonList(failureKey),
-                String.valueOf(TimeUnit.MINUTES.toSeconds(LOGIN_FAILURE_TTL))
-        );
+    private BusinessException recordLoginFailure(String phone) {
+        Long failures = attempts.incrementFailureCount(phone);
         if (failures == null) {
             throw new IllegalStateException("登录失败计数未返回结果");
         }

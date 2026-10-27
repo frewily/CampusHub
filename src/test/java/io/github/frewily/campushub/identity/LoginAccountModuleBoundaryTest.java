@@ -64,7 +64,8 @@ class LoginAccountModuleBoundaryTest {
         assertTrue(source.contains("accounts.findByPhone(phone)"));
         assertTrue(source.contains("accounts.createWithPhone(phone)"));
         assertTrue(source.contains("sessions.issue(user)"));
-        assertTrue(source.contains("stringRedisTemplate"));
+        assertTrue(source.contains("attempts.consumeCode(phone, cacheCode)"));
+        assertFalse(source.contains("stringRedisTemplate"));
         assertFalse(source.contains("UserMapper"));
         assertFalse(source.contains("createUserWithPhone"));
     }

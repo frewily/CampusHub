@@ -1,5 +1,7 @@
 # CampusHub 当前 API 目录
 
+Phase7AG只调整登录内部验证码消费和失败计数依赖，URL、输入验证、5次失败阈值、错误码和响应保持；51映射/19Controllers不变。原计数EXPIRE失败后INCR部分写入边界也保留，见[7AG记录](../refactor/55-phase-7ag-login-attempt-store.md)。
+
 Phase7AF不新增路由，认证入口改为原账号/角色校验后执行单key身份/TTL条件续期，成功才建立请求身份。无TTL请求会话不再被自动续成有效身份，受保护入口401，公共入口仍可匿名；Redis执行异常不建立身份，当前ERROR安全分派也可返回401，不把它解释为已鉴定的token失效原因。51映射/19Controllers不变，范围见[7AF记录](../refactor/54-phase-7af-session-authentication-ttl.md)。
 
 Phase7AE改变登录内部失败契约：TTL就绪后才发布新身份，脚本未完成则通用500、不回token；成功UUID/三字段/TTL和51映射/19Controllers不变。Lua错误不自动回滚，双故障可留无ID占位，历史数据不自动迁移。范围与本轮证据见[7AE记录](../refactor/53-phase-7ae-session-publication-safety.md)，以下7AD等为历史状态。

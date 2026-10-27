@@ -166,6 +166,93 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_login_attempt_store(base):
+    """Keep original verification policy and dependency failure boundaries over owned fixtures."""
+    actor, phone, other = 9007199254750993, '13800994101', '13800994102'
+    assert sql("SELECT COUNT(*) FROM tb_user WHERE id=%d OR phone IN ('%s','%s');" % (actor, phone, other)) == '0'
+    sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'%s','login-attempt-actor','ACTIVE');"
+        "INSERT INTO tb_user_role(user_id,role) VALUES(%d,'USER');" % (actor, phone, actor))
+    code_key, failure_key = 'login:code:' + phone, 'login:failure:' + phone
+    other_key = 'login:failure:' + other
+    facts_sql = 'SELECT * FROM tb_user WHERE id=%d;' % actor
+    roles_sql = 'SELECT user_id,role FROM tb_user_role WHERE user_id=%d ORDER BY role;' % actor
+    facts_before, roles_before = sql(facts_sql), sql(roles_sql)
+
+    def login(code, expected):
+        body, _ = request(base, '/user/login', expected, 'POST',
+                          json.dumps({'phone': phone, 'code': code}).encode(), {'Content-Type': 'application/json'})
+        return json.loads(body)
+
+    def generic_failure(code):
+        result = login(code, 500)
+        assert result['success'] is False and not result.get('data')
+        assert all(value not in json.dumps(result) for value in ('NOPERM', 'WRONGTYPE', 'Redis', phone, code))
+
+    redis('SET', code_key, '654321', 'EX', '120')
+    redis('SET', other_key, '2', 'EX', '600')
+    assert login(None, 400)['errorCode'] == 'VALIDATION_FAILED'
+    assert redis('EXISTS', failure_key) == '0', 'HTTP bean validation precedes the service null-code branch'
+    assert login('000000', 401)['errorCode'] == 'AUTHENTICATION_FAILED'
+    assert redis('GET', failure_key) == '1' and 590 <= int(redis('TTL', failure_key)) <= 600
+    redis('EXPIRE', failure_key, '40')
+    ttl_before = int(redis('PTTL', failure_key))
+    for count in (2, 3, 4, 5):
+        result = login('000000', 429 if count == 5 else 401)
+        assert result['errorCode'] == ('RATE_LIMITED' if count == 5 else 'AUTHENTICATION_FAILED')
+        assert redis('GET', failure_key) == str(count)
+    assert 0 < int(redis('PTTL', failure_key)) <= ttl_before
+    assert login('654321', 429)['errorCode'] == 'RATE_LIMITED'
+    assert redis('GET', code_key) == '654321', 'a preexisting limit must reject before code consumption'
+    redis('SET', failure_key, '4', 'EX', '40')
+    token = login('654321', 200)['data']
+    assert re.fullmatch(r'[0-9a-f]{32}', token)
+    assert redis('EXISTS', code_key, failure_key) == '0' and redis('GET', other_key) == '2'
+    assert json.loads(request(base, '/user/me', headers={'authorization': token})[0])['data']['id'] == actor
+    check('login attempts: fifth failure and preexisting limit are 429, later counts retain TTL, HTTP validation does not count, success consumes code and clears only its own count')
+
+    redis('SET', code_key, '654321', 'EX', '120')
+    redis('HSET', failure_key, 'field', 'wrong-type')
+    generic_failure('654321')
+    assert redis('GET', code_key) == '654321' and redis('HGET', failure_key, 'field') == 'wrong-type'
+    redis('DEL', failure_key)
+    redis('SET', failure_key, '2', 'EX', '40')
+    redis('ACL', 'SETUSER', 'default', '-del')
+    try:
+        generic_failure('654321')
+        assert redis('GET', code_key) == '654321' and redis('GET', failure_key) == '2'
+    finally:
+        redis('ACL', 'SETUSER', 'default', '+del')
+    redis('DEL', failure_key)
+    redis('ACL', 'SETUSER', 'default', '-incr')
+    try:
+        generic_failure('000000')
+        assert redis('GET', code_key) == '654321' and redis('EXISTS', failure_key) == '0'
+    finally:
+        redis('ACL', 'SETUSER', 'default', '+incr')
+    assert login('654321', 200)['success'] is True
+    assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
+    check('login attempt dependencies: wrong-type count, denied code DEL and denied INCR remain generic 500 without code loss or account mutation; restored permissions allow login')
+
+    redis('SET', code_key, '654321', 'EX', '120')
+    redis('ACL', 'SETUSER', 'default', '-expire')
+    try:
+        generic_failure('000000')
+        assert redis('GET', failure_key) == '1' and redis('TTL', failure_key) == '-1'
+    finally:
+        redis('ACL', 'SETUSER', 'default', '+expire')
+    # Existing Lua does not roll INCR back if its first EXPIRE fails. This phase
+    # moves that script unchanged and must not silently claim compensation.
+    assert login('000000', 401)['errorCode'] == 'AUTHENTICATION_FAILED'
+    assert redis('GET', failure_key) == '2' and redis('TTL', failure_key) == '-1'
+    redis('DEL', failure_key)  # Explicit removal of this test-owned fault fixture only.
+    assert login('000000', 401)['errorCode'] == 'AUTHENTICATION_FAILED'
+    assert 590 <= int(redis('TTL', failure_key)) <= 600
+    assert login('654321', 200)['success'] is True
+    assert redis('EXISTS', code_key, failure_key) == '0' and redis('GET', other_key) == '2'
+    assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
+    check('login attempt expiry fault: original INCR partial write and persistent counter remain visible after EXPIRE denial; explicit fixture cleanup and retry recover without claiming automatic repair')
+
+
 def verify_session_authentication(base):
     """Validate presented sessions only; never scan or bulk-migrate historical keys."""
     actor, phone = 9007199254749993, '13800993101'
@@ -3149,6 +3236,7 @@ def main():
         verify_login_code_module(base)
         verify_login_account_repository(base)
         verify_login_session_issuer(base)
+        verify_login_attempt_store(base)
         verify_session_authentication(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)

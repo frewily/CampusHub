@@ -12,6 +12,8 @@
 
 ## 用户与会话
 
+Phase7AG将登录的验证码消费及失败计数Redis操作移到[LoginAttemptStore](../../src/main/java/io/github/frewily/campushub/identity/application/LoginAttemptStore.java)/[RedisLoginAttemptStore](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/RedisLoginAttemptStore.java)。原校验/限流/消费/账号/签发/清计数顺序不变；错误验证码401，第5次及已有计数达到阈值429，Redis或计数解析异常仍通用500。正常首次计数600秒、后续不刷新；原脚本首次EXPIRE失败可留下无TTL计数，不提供自动补偿。没有新增路由或修改7AF认证门禁，详见[阶段记录](../refactor/55-phase-7ag-login-attempt-store.md)。
+
 Phase7AF认证filter在原Hash读取、ACTIVE与角色校验后，执行[单key条件认证续期Lua](../../src/main/resources/session-authenticate.lua)：当前Hash必须仍是同一原始id、PTTL为正，PEXPIRE成功才允许建立SecurityContext/UserHolder。匹配本身份但无TTL/临界0则尽力删当前key、作为未认证处理；清理拒绝也不授予身份。已删除、变类型或换成另一id时不建立身份，Lua不删除/续期替换身份。正常续期仍为原分钟常量的等值毫秒；公共路由仍可匿名，受保护路由401。Redis执行异常在filter层抛出并finally清上下文，本轮本机隔离验收的受保护/error分派把续期故障呈现为401，而不是MVC的typed500；本阶段不新建依赖错误响应协议。只处理本次token，不扫描历史或全端登出；既有无效账号/无角色Java删除支路保持，不能宣称所有清理都是CAS或DB/Redis瞬时撤销。见[7AF记录](../refactor/54-phase-7af-session-authentication-ttl.md)。
 
 Phase7AE登录仍通过[LoginSessionIssuer](../../src/main/java/io/github/frewily/campushub/identity/application/LoginSessionIssuer.java)与[RedisLoginSessionIssuer](../../src/main/java/io/github/frewily/campushub/identity/infrastructure/RedisLoginSessionIssuer.java)，但改用[单键Lua发布协议](../../src/main/resources/login-session-publish.lua)：先无ID占位、成功附着原TTL，再发布id/nickName/icon。成功UUID32位token、字符串Hash和LOGIN_USER_TTL分钟语义不变（脚本参数为等值毫秒），随后才清失败计数；仅脚本返回1可回token，其他结果/异常通用500。过期失败尽力清理，双故障残留占位无ID而不可认证；历史无TTL会话不自动扫描，认证filter不改，仍无DB/Redis事务或网络结果确定性保证。详见[7AE记录](../refactor/53-phase-7ae-session-publication-safety.md)，7AD记录保留当时旧边界。

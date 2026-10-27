@@ -260,6 +260,8 @@
 
 ## 5 原始目标的剩余范围
 
+Phase7AG（2026-10-27，基线 `e20d8f0d1521e176c4d58c8641fd5fd65ae4fc11`）：仅提取LoginAttemptStore/RedisLoginAttemptStore，承接原验证码消费与失败计数读/增/删；保留5次阈值、脚本、key/TTL、Long/null和异常、原事务与顺序。原计数首次EXPIRE失败的无TTL部分写入未修复；没有API/schema/认证策略变化，仍51映射/19Controllers，见[7AG记录](55-phase-7ag-login-attempt-store.md)。验证、提交、新Luna独立只读审查、普通push与读回后停止。
+
 Phase7AF（2026-10-26，基线 `b21c34e1470d9b2f7ccb7e665e9eed93eb907fd2`）：新增请求级TTL认证门禁，不批量扫历史。原Hash/账号/角色读取后，只有同一raw-id、正PTTL和条件续期成功才建立身份；旧无TTL会话需重新登录，删除拒绝仍不认证。已删除/替换身份在该Lua支路不被续期/删除，DB角色检查及旧无效账号删除支路保持。API/51映射19Controllers、schema/key格式不变；见[7AF记录](54-phase-7af-session-authentication-ttl.md)，验证、提交、新Luna独立审查、普通推送读回后停止。
 
 Phase7AE（2026-10-26，基线 `b27d24fc15b71e9e2b3d6c9202a8adabe0accf4e`）：选择修复已实证的新签发无TTL身份风险，而不是继续纯结构迁移。单键Lua先无ID占位和原TTL，再发布身份；不覆盖已有key，非1结果不回token，失败尽力清理。成功格式/API不改，残留占位不可认证但可能无TTL，历史无TTL身份不自动扫描，认证filter/DB事务不变。51映射/19Controllers、V001–V014保持，见[7AE记录](53-phase-7ae-session-publication-safety.md)，验证后提交、新Luna独立审查、普通push读回后停止。
