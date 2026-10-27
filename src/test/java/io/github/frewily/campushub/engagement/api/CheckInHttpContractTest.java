@@ -22,6 +22,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -134,6 +135,7 @@ class CheckInHttpContractTest {
         session.put("id", id.toString()); session.put("nickName", "synthetic");
         when(redis.opsForHash()).thenReturn(hashes);
         when(hashes.entries(LOGIN_USER_KEY + token)).thenReturn(session);
+        if ("ACTIVE".equals(status) && roles.length > 0) when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + token)), eq(id.toString()), anyString())).thenReturn(1L);
         when(accounts.findAccountStatus(id)).thenReturn(status);
         when(accounts.findRoles(id)).thenReturn(Arrays.asList(roles));
     }

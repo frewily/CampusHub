@@ -387,6 +387,7 @@ class OrderLifecycleMySqlRedisIT {
                 .addFilter(new io.github.frewily.campushub.security.RedisTokenAuthenticationFilter(redis, accounts)).build();
         Map<String, String> login = new HashMap<>(); login.put("id", "7"); login.put("nickName", "Synthetic");
         redis.opsForHash().putAll(RedisConstants.LOGIN_USER_KEY + "isolated-http", login);
+        redis.expire(RedisConstants.LOGIN_USER_KEY + "isolated-http", 20, TimeUnit.MINUTES);
         String acceptedJson = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                 .post("/voucher-order/seckill/9").header("authorization", "isolated-http"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())

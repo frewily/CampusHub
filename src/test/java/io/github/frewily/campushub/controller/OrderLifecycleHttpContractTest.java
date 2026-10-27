@@ -125,6 +125,7 @@ class OrderLifecycleHttpContractTest {
         Map<Object, Object> fields = new HashMap<>(); fields.put("id", "7"); fields.put("nickName", "Synthetic");
         when(redis.opsForHash()).thenReturn(hashes);
         when(hashes.entries(LOGIN_USER_KEY + "phase3c-test")).thenReturn(fields);
+        if (roles.length > 0) when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + "phase3c-test")), eq("7"), anyString())).thenReturn(1L);
         when(accounts.findAccountStatus(7L)).thenReturn("ACTIVE");
         when(accounts.findRoles(7L)).thenReturn(Arrays.asList(roles));
     }

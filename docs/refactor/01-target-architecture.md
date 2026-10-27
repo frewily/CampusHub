@@ -53,6 +53,8 @@ Phase7X提取identity资料读取：UserProfileController处理会话me与两个
 
 ## 3 目标业务模型
 
+Phase7AF在RedisTokenAuthenticationFilter保留原账号/角色读取后增加单keyLua门禁，原始id匹配且TTL正数的当前Hash续期成功后才建立线程身份；不创建key、不复活缺TTL身份，也不改签发端口。未做全量历史清理/账号角色快照事务/瞬时撤销；旧失效账号删除支路不在本次条件化范围，见[7AF记录](54-phase-7af-session-authentication-ttl.md)与[ADR0006](../adr/0006-session-authentication-ttl.md)。
+
 Phase7AE在既有LoginSessionIssuer适配器内修复发布顺序，新增单key Redis6兼容Lua：EXISTS拒绝覆盖，先HSET无ID占位→PEXPIRE→HSET身份。只有TTL就绪才引入id，Lua异常不等于回滚，失败清理可留下无ID占位；不是跨存储原子性或历史数据清理。原API/成功格式/TTL与服务事务不改，见[7AE记录](53-phase-7ae-session-publication-safety.md)和[ADR0005](../adr/0005-session-publication-safety.md)。
 
 Phase7AD将原登录中的会话签发改为identity.application.LoginSessionIssuer窄端口，由RedisLoginSessionIssuer承接Hutool UUID/DTO映射/字符串Hash/TTL。外层UserServiceImpl仍保留原登录事务及Redis验证码/失败计数编排，不宣称纯Java登录服务或完整identity迁移；无新事务/补偿/原子Redis协议，见[7AD记录](52-phase-7ad-login-session-issuer.md)。

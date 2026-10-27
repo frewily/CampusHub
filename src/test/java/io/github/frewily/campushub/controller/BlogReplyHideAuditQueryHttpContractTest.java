@@ -41,6 +41,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -185,6 +188,7 @@ class BlogReplyHideAuditQueryHttpContractTest {
         session.put("id", Long.toString(userId));
         session.put("nickName", "moderator");
         when(hashOperations.entries(RedisConstants.LOGIN_USER_KEY + token)).thenReturn(session);
+        if ("ACTIVE".equals(accountStatus) && role != null) when(stringRedisTemplate.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(RedisConstants.LOGIN_USER_KEY + token)), eq(Long.toString(userId)), anyString())).thenReturn(1L);
         when(accountAccessMapper.findAccountStatus(userId)).thenReturn(accountStatus);
         when(accountAccessMapper.findRoles(userId)).thenReturn(role == null
                 ? Collections.<String>emptyList() : Collections.singletonList(role));

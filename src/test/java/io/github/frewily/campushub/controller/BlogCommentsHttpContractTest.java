@@ -30,6 +30,7 @@ import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -372,6 +373,7 @@ class BlogCommentsHttpContractTest {
         session.put("id", "21");
         session.put("nickName", "commenter");
         when(hashOperations.entries(LOGIN_USER_KEY + "token")).thenReturn(session);
+        when(stringRedisTemplate.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + "token")), eq(String.valueOf(session.get("id"))), anyString())).thenReturn(1L);
         when(accountAccessMapper.findAccountStatus(21L)).thenReturn("ACTIVE");
         when(accountAccessMapper.findRoles(21L)).thenReturn(Collections.singletonList("USER"));
     }

@@ -166,6 +166,101 @@ def check(label):
     print("PASS: " + label, flush=True)
 
 
+def verify_session_authentication(base):
+    """Validate presented sessions only; never scan or bulk-migrate historical keys."""
+    actor, phone = 9007199254749993, '13800993101'
+    assert sql("SELECT COUNT(*) FROM tb_user WHERE id=%d OR phone='%s';" % (actor, phone)) == '0'
+    sql("INSERT INTO tb_user(id,phone,nick_name,status) VALUES(%d,'%s','ttl-auth-actor','ACTIVE');"
+        "INSERT INTO tb_user_role(user_id,role) VALUES(%d,'USER');" % (actor, phone, actor))
+    facts_sql = 'SELECT * FROM tb_user WHERE id=%d;' % actor
+    roles_sql = 'SELECT user_id,role FROM tb_user_role WHERE user_id=%d ORDER BY role;' % actor
+    facts_before, roles_before = sql(facts_sql), sql(roles_sql)
+
+    def session(ttl=None):
+        token = 'synthetic-ttl-auth-' + uuid.uuid4().hex
+        key = 'login:token:' + token
+        redis('HSET', key, 'id', str(actor), 'nickName', 'cached-ttl-profile', 'icon', '')
+        if ttl is not None: redis('PEXPIRE', key, str(ttl))
+        return token, key
+
+    def me(token, expected=200):
+        body, _ = request(base, '/user/me', expected, headers={'authorization': '  ' + token + '  '})
+        return body
+
+    valid, valid_key = session(30000)
+    historical, historical_key = session()
+    public_history, public_key = session()
+    _, untouched_key = session()
+    denied, denied_key = session()
+    untouched = redis('HGETALL', untouched_key)
+    result = json.loads(me(valid))
+    assert result['data'] == {'id': actor, 'nickName': 'cached-ttl-profile', 'icon': ''}
+    assert 36000 * 60 - 60 <= int(redis('TTL', valid_key)) <= 36000 * 60
+    assert json.loads(me(historical, 401))['errorCode'] == 'AUTHENTICATION_FAILED'
+    assert redis('EXISTS', historical_key) == '0'
+    body, _ = request(base, '/blog/hot', headers={'authorization': public_history})
+    assert json.loads(body)['success'] is True and all(item['isLike'] is False for item in json.loads(body)['data'])
+    assert redis('EXISTS', public_key) == '0'
+    assert redis('TTL', untouched_key) == '-1' and redis('HGETALL', untouched_key) == untouched
+    check('session authentication: live Hash renews before identity, presented no-TTL history is rejected/removed, public access stays anonymous and unpresented history is untouched')
+
+    post = int(sql('SELECT id FROM tb_blog WHERE withdrawn=0 ORDER BY id DESC LIMIT 1;'))
+    liked_sql = 'SELECT liked FROM tb_blog WHERE id=%d;' % post
+    liked_before = sql(liked_sql)
+    score_before = redis('ZSCORE', 'blog:liked:%d' % post, str(actor))
+    redis('ACL', 'SETUSER', 'default', '-del')
+    try:
+        assert json.loads(me(denied, 401))['errorCode'] == 'AUTHENTICATION_FAILED'
+        request(base, '/blog/like/%d' % post, 401, 'PUT', headers={'authorization': denied})
+        assert redis('TTL', denied_key) == '-1' and redis('HGET', denied_key, 'id') == str(actor)
+        assert sql(liked_sql) == liked_before
+        assert redis('ZSCORE', 'blog:liked:%d' % post, str(actor)) == score_before
+    finally:
+        redis('ACL', 'SETUSER', 'default', '+del')
+    assert json.loads(me(denied, 401))['errorCode'] == 'AUTHENTICATION_FAILED'
+    assert redis('EXISTS', denied_key) == '0'
+    check('session cleanup failure: no-TTL identity stays unauthorized even when DEL is denied, protected write does not mutate SQL/Redis, recovery removes only the presented invalid key')
+
+    redis('PEXPIRE', valid_key, '45000')
+    ttl_before = int(redis('PTTL', valid_key))
+    hash_before = redis('HGETALL', valid_key)
+    redis('ACL', 'SETUSER', 'default', '-pexpire')
+    try:
+        # The original protected /error dispatch converts this filter exception
+        # into the existing authentication entry point's 401, not MVC's typed 500.
+        body = me(valid, 401)
+        assert json.loads(body)['errorCode'] == 'AUTHENTICATION_FAILED'
+        assert valid.encode() not in body
+        request(base, '/user/me', 401)
+        assert redis('HGETALL', valid_key) == hash_before
+        assert 0 < int(redis('PTTL', valid_key)) <= ttl_before
+    finally:
+        redis('ACL', 'SETUSER', 'default', '+pexpire')
+    assert json.loads(me(valid))['data']['id'] == actor
+    assert 36000 * 60 - 60 <= int(redis('TTL', valid_key)) <= 36000 * 60
+    check('session renewal fault: real PEXPIRE denial prevents authenticated response without deleting a live session or refreshing its TTL; permissions recover and the same session works')
+
+    # Direct target-version script check, not an invented full HTTP race. These
+    # adjacent large identifiers would alias if incorrectly converted to doubles.
+    replacement = 'login:token:' + uuid.uuid4().hex
+    script = (ROOT / 'src/main/resources/session-authenticate.lua').read_text('utf-8')
+    redis('HSET', replacement, 'id', str(actor - 1), 'nickName', 'replacement')
+    redis('PEXPIRE', replacement, '45000')
+    ttl_before = int(redis('PTTL', replacement))
+    try:
+        assert redis('EVAL', script, '1', replacement, str(actor), str(36000 * 60 * 1000)) == '0'
+        assert redis('HGET', replacement, 'id') == str(actor - 1)
+        assert 0 < int(redis('PTTL', replacement)) <= ttl_before
+        redis('PERSIST', replacement)
+        assert redis('EVAL', script, '1', replacement, str(actor), str(36000 * 60 * 1000)) == '0'
+        assert redis('TTL', replacement) == '-1' and redis('HGET', replacement, 'id') == str(actor - 1)
+    finally:
+        redis('DEL', replacement)
+    assert sql(facts_sql) == facts_before and sql(roles_sql) == roles_before
+    assert redis('TTL', untouched_key) == '-1' and redis('HGETALL', untouched_key) == untouched
+    check('session identity fence: target Redis script compares raw large IDs, does not renew/delete replacement identities even without TTL; account facts and unpresented history remain unchanged')
+
+
 def verify_login_session_issuer(base):
     """Publish new identity fields only after TTL is attached; preserve normal login data."""
     actor = 9007199254748993
@@ -3054,6 +3149,7 @@ def main():
         verify_login_code_module(base)
         verify_login_account_repository(base)
         verify_login_session_issuer(base)
+        verify_session_authentication(base)
         upload, headers = multipart(png())
         request(base, "/upload/blog", 401, "POST", upload, headers)
         headers["authorization"] = tokens[0]

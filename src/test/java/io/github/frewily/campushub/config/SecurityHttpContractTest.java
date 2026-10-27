@@ -57,6 +57,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.times;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -132,6 +134,19 @@ class SecurityHttpContractTest {
     }
 
     @Test
+    void errorDispatchRemainsUnauthorizedUnderExistingSecurityPolicy() throws Exception {
+        mockMvc.perform(get("/error").header("authorization", "synthetic-error-dispatch")
+                        .with(request -> {
+                            request.setDispatcherType(javax.servlet.DispatcherType.ERROR);
+                            request.setAttribute(javax.servlet.RequestDispatcher.ERROR_REQUEST_URI, "/user/me");
+                            return request;
+                        }))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+        verifyNoInteractions(stringRedisTemplate, accountAccessMapper);
+    }
+
+    @Test
     void profileReadsAllowAllThreeRolesAndKeepLargeIdentifiersAsJsonNumbers() throws Exception {
         long targetId = 9007199254740993L;
         prepareSession("profile-user", 71L, "USER");
@@ -196,6 +211,7 @@ class SecurityHttpContractTest {
         session.put("icon", "/session.png");
         when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
         when(hashOperations.entries(LOGIN_USER_KEY + "profile-me-token")).thenReturn(session);
+        when(stringRedisTemplate.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + "profile-me-token")), eq("81"), anyString())).thenReturn(1L);
         when(accountAccessMapper.findAccountStatus(81L)).thenReturn("ACTIVE");
         when(accountAccessMapper.findRoles(81L)).thenReturn(Collections.singletonList("USER"));
 
@@ -584,6 +600,7 @@ class SecurityHttpContractTest {
         session.put("nickName", "admin");
         when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
         when(hashOperations.entries(LOGIN_USER_KEY + token)).thenReturn(session);
+        when(stringRedisTemplate.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + token)), eq("1"), anyString())).thenReturn(1L);
         when(accountAccessMapper.findAccountStatus(1L)).thenReturn("ACTIVE");
         when(accountAccessMapper.findRoles(1L)).thenReturn(Arrays.asList("ADMIN", "USER"));
 
@@ -680,6 +697,7 @@ class SecurityHttpContractTest {
         session.put("nickName", "test-user");
         when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
         when(hashOperations.entries(LOGIN_USER_KEY + token)).thenReturn(session);
+        if (roles.length > 0) when(stringRedisTemplate.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + token)), eq(userId.toString()), anyString())).thenReturn(1L);
         when(accountAccessMapper.findAccountStatus(userId)).thenReturn("ACTIVE");
         when(accountAccessMapper.findRoles(userId)).thenReturn(Arrays.asList(roles));
     }

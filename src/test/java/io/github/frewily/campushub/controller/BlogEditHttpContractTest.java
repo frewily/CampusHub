@@ -203,6 +203,7 @@ class BlogEditHttpContractTest {
         session.put("id", Long.toString(userId));
         session.put("nickName", "editor");
         when(hashOperations.entries(RedisConstants.LOGIN_USER_KEY + token)).thenReturn(session);
+        if ("ACTIVE".equals(accountStatus) && role != null) when(stringRedisTemplate.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(RedisConstants.LOGIN_USER_KEY + token)), eq(Long.toString(userId)), anyString())).thenReturn(1L);
         when(accountAccessMapper.findAccountStatus(userId)).thenReturn(accountStatus);
         when(accountAccessMapper.findRoles(userId)).thenReturn(role == null
                 ? Collections.<String>emptyList() : Collections.singletonList(role));

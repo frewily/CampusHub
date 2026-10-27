@@ -153,6 +153,7 @@ class VoucherQueryHttpContractTest {
         identity.put("nickName", "synthetic");
         when(redis.opsForHash()).thenReturn(hashes);
         when(hashes.entries(LOGIN_USER_KEY + token)).thenReturn(identity);
+        if ("ACTIVE".equals(accountStatus) && roles.length > 0) when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + token)), eq(Long.toString(id)), anyString())).thenReturn(1L);
         when(accounts.findAccountStatus(id)).thenReturn(accountStatus);
         when(accounts.findRoles(id)).thenReturn(Arrays.asList(roles));
     }

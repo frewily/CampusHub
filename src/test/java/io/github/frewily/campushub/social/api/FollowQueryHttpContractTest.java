@@ -203,6 +203,7 @@ class FollowQueryHttpContractTest {
         identity.put("id", id.toString()); identity.put("nickName", "synthetic");
         when(redis.opsForHash()).thenReturn(hashes);
         when(hashes.entries(LOGIN_USER_KEY + token)).thenReturn(identity);
+        if ("ACTIVE".equals(status) && roles.length > 0) when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + token)), eq(id.toString()), anyString())).thenReturn(1L);
         when(accounts.findAccountStatus(id)).thenReturn(status);
         when(accounts.findRoles(id)).thenReturn(Arrays.asList(roles));
     }

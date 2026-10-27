@@ -28,12 +28,15 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
 import static io.github.frewily.campushub.utils.RedisConstants.LOGIN_USER_KEY;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -209,6 +212,7 @@ class DeploymentHttpContractTest {
         fields.put("nickName", "synthetic-user");
         when(redisTemplate.opsForHash()).thenReturn(hashOperations);
         when(hashOperations.entries(LOGIN_USER_KEY + TOKEN)).thenReturn(fields);
+        if (roles.length > 0) when(redisTemplate.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + TOKEN)), eq(userId.toString()), anyString())).thenReturn(1L);
         when(accountAccessMapper.findAccountStatus(userId)).thenReturn("ACTIVE");
         when(accountAccessMapper.findRoles(userId)).thenReturn(Arrays.asList(roles));
     }

@@ -1,5 +1,7 @@
 # CampusHub
 
+Phase7AF增加[请求级会话TTL认证门禁](docs/refactor/54-phase-7af-session-authentication-ttl.md)：只有当前token仍匹配已读取用户、TTL为正且条件续期成功，才建立请求身份；无TTL历史会话按请求拒绝并尽力删除，不批量扫描。正常格式/TTL、51映射19Controllers、V001–V014保持。[学习笔记](docs/learning/session-authentication-ttl.md)与[ADR0006](docs/adr/0006-session-authentication-ttl.md)说明竞态与边界；以下7AE等为历史范围，旧实例混跑不具备统一门禁保证。
+
 Phase7AE优先修复[新会话发布的TTL安全边界](docs/refactor/53-phase-7ae-session-publication-safety.md)：单键Lua先写无ID占位、附着原TTL，再发布三字段身份，失败不返回token、不覆盖已有key。正常UUID/Hash/有效期、51路由/19个Controller和V001–V014保持；双故障清理失败仍可能留不可认证的占位键，历史无TTL会话不自动扫描或修复。以下7AD描述保留当时旧行为。[学习笔记](docs/learning/session-publication-safety.md)与[决策](docs/adr/0005-session-publication-safety.md)说明保障及限制。
 
 Phase7AD继续identity切片：[登录会话签发端口](docs/refactor/52-phase-7ad-login-session-issuer.md)隔离原UUID、三字段字符串Hash与分钟TTL，登录事务和失败计数清理顺序保留。51映射/19个Controller、V001–V014不变；原Hash成功后EXPIRE失败的部分写入边界仍存在，不宣称原子会话或自动补偿。[学习笔记](docs/learning/login-session-issuer.md)说明签发、认证与过期的不同证据。

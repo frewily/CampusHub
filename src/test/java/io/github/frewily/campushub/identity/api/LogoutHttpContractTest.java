@@ -92,6 +92,7 @@ class LogoutHttpContractTest {
         Map<Object, Object> session = putSession(token, 801L);
         when(accounts.findAccountStatus(801L)).thenReturn("ACTIVE");
         when(accounts.findRoles(801L)).thenReturn(Collections.singletonList("USER"));
+        when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + token)), eq("801"), anyString())).thenReturn(1L);
         when(redis.delete(LOGIN_USER_KEY + token)).thenAnswer(invocation -> { session.clear(); return true; });
         mvc.perform(post("/user/logout").header("authorization", token)).andExpect(status().isOk());
         mvc.perform(post("/user/logout").header("authorization", token)).andExpect(status().isUnauthorized());
@@ -112,6 +113,7 @@ class LogoutHttpContractTest {
         putSession(token, id);
         when(accounts.findAccountStatus(id)).thenReturn("ACTIVE");
         when(accounts.findRoles(id)).thenReturn(Collections.singletonList(role));
+        when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(LOGIN_USER_KEY + token)), eq(Long.toString(id)), anyString())).thenReturn(1L);
     }
 
     private Map<Object, Object> putSession(String token, long id) {

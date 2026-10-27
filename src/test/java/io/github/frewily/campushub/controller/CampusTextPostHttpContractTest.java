@@ -251,6 +251,7 @@ class CampusTextPostHttpContractTest {
         session.put("id", Long.toString(userId));
         session.put("nickName", "campus-user");
         when(hashOperations.entries(RedisConstants.LOGIN_USER_KEY + token)).thenReturn(session);
+        if ("ACTIVE".equals(status) && role != null) when(stringRedisTemplate.execute(any(org.springframework.data.redis.core.script.RedisScript.class), eq(Collections.singletonList(RedisConstants.LOGIN_USER_KEY + token)), eq(Long.toString(userId)), anyString())).thenReturn(1L);
         when(accountAccessMapper.findAccountStatus(userId)).thenReturn(status);
         when(accountAccessMapper.findRoles(userId)).thenReturn(role == null
                 ? Collections.<String>emptyList() : Collections.singletonList(role));
